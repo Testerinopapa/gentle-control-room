@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import WhatsAppButton from "@/components/WhatsAppButton";
 
 /* ------------------------------------------------------------------ */
 /*  Animated notification toast that slides in from the right          */
@@ -650,7 +651,8 @@ const Index = () => {
             </div>
           </div>
         </div>
-      )}
+)}
+      <WhatsAppButton />
     </div>
   );
 };
