@@ -1,56 +1,69 @@
-# Phase 1 — Opt-in coding activity collector (Codex task)
+# Phase 1 — Codex-native activity collector (Codex implementation specification)
 
-## Objective
+## Corrected product objective
 
-Add a **local-only, opt-in Coding Intelligence foundation** to Gentle Control Room. Build an IDE extension for VS Code / Cursor, plus a small, transparent status integration with the existing Windows tray app. The purpose of this phase is to record **non-sensitive metadata** about coding workflows in explicitly selected workspaces. It is NOT a staff surveillance tool.
+Integrate directly with **OpenAI Codex** as the developer's local agentic coding environment. The project should learn high-level patterns in how an opted-in developer uses **Codex** to accomplish coding tasks: session frequency, task iteration, tool classes, test/build cycles, and repeated workflow sequences.
 
-**Do not add DeepSeek, Harness, remote analytics, Supabase event ingestion, manager-facing activity feeds, or job replication in Phase 1.** Never capture screenshots, keystrokes, clipboard data, terminal output, source-code content, diffs, file names/paths, Git messages, repository names, credentials, or private communication.
+**Codex is the activity source, not merely the coding assistant implementing the feature.** There is no VS Code/Cursor extension in Phase 1, and no assumption that the user is editing manually in a traditional IDE. Do not add an editor extension.
 
-## Repository context
+Use this spec to implement the local Phase 1 collector in Gentle Control Room. Work on `main`, run tests, and push verified commits directly to `main`. Do not open a PR unless blocked from pushing. Do not implement DeepSeek analysis yet.
 
-- React dashboard: `src/`, Vite + TypeScript + Tailwind.
-- Current Windows UI: `src/pages/Desktop.tsx` when injected `window.__desktopConfig` is present.
-- Windows host: `desktop/GentleControlRoom.Desktop/` (.NET WPF + WebView2), with host message handling in `MainWindow.xaml.cs`.
-- Default Windows host points to hosted React UI (`desktop/GentleControlRoom.Desktop/appsettings.json`), though packaged `wwwroot` also exists.
-- Supabase Edge Functions power the web dashboard, while a separate Express/Prisma prototype exists. Do not modify either backend or existing alert/auth flows.
-- **Security prerequisite:** `MainWindow.xaml.cs` currently logs raw WebView messages to `%LOCALAPPDATA%/GentleControlRoom/logs/desktop-host.log`, including possible token-bearing `desktop.auth.session` payloads. Replace raw logging with allowlisted, token-free event names before extending any bridge. Avoid logging local coding events or contents.
+## Integration approach
 
-## Deliverable A: IDE extension
+**Primary route:** Codex's officially supported **command hooks**. Hook events can provide session/turn lifecycle and local tool use without reading private transcripts. Review current documentation at https://learn.chatgpt.com/docs/hooks before implementing. Use actual documented event names and payload schemas, never guess names. Start with `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, and `SessionEnd` where supported and verified; degrade gracefully when specific events are not emitted by a particular Codex client/mode. Hook callbacks can receive highly sensitive payloads; treat the entire input as untrusted/private and **allowlist a very small set of safe derived fields only**.
 
-Create `integrations/vscode/` containing a proper TypeScript VS Code extension, its own manifest/build scripts, automated tests and installable VSIX packaging instructions.
+Codex CLI, desktop app, `codex exec` and IDE integrations may have differing hook coverage. **Do not claim coverage you haven't validated.** Verify locally in the active Codex client/version. Codex's `codex exec` mode may not emit every interactive hook; document observed coverage and test it separately. If a mode does not support the needed hooks, show `Unsupported / incomplete coverage` rather than silently reading transcripts or claiming the collection is complete.
 
-1. **Off by default:** On clean install, collect nothing. Ask the developer to consent for each selected workspace explicitly. Do not auto-enroll other folders, restore consent after it was revoked, or silently enable collection through Windows/app config.
-2. Display a persistent status bar indicator: `Off`, `Paused`, or `Recording`, with accessible commands: `Enable for this workspace`, `Pause`, `Resume`, `View local events`, `Delete local events`, `Show settings`. A separate pause control must stop collection immediately.
-3. Use documented VS Code extension APIs such as `workspace.onDidSaveTextDocument` and workspace lifecycle events. For approved local workspaces only, record **ISO timestamp, event type, VS Code language ID, random locally generated workspace pseudonym**, and a schema version. Record a coarse `session_started` / `session_ended` where meaningful. If the event is outside an enrolled local workspace, ignore it.
-4. Do not collect file names/paths, directory paths, code/diffs, content lengths from sensitive files, Git branch names, commit messages, process names, clipboard, keystrokes, or shell history. Skip untitled/virtual documents, generated files, and excluded directories; skip unknown ambiguous workspace relationships rather than over-collecting.
-5. Save JSONL only on the local Windows user account (e.g. `%LOCALAPPDATA%/GentleControlRoom/CodingActivity/`), with bounded storage, daily rotation, and 30-day default retention. Use atomic writes for consent/config and a strategy safe for multiple IDE windows. If the extension host runs on another machine (SSH/WSL/container) or on unsupported OS, display an explicit unsupported warning and capture nothing rather than writing to the wrong machine.
-6. Every record should be inspectable and deletable with the extension commands; deleting also clears outstanding write buffers. No telemetry or event network requests.
-7. Put explicit, minimal explanations in the UI: what is collected, what is never collected, where data lives, when collection is active, and how to stop/delete it.
+**Optional future path, not Phase 1:** Codex SDK or app-server (https://developers.openai.com/blog/codex-as-a-platform) for sessions that Gentle Control Room itself launches and manages. Do not claim that app-server attaches to an arbitrary existing Codex desktop process.
 
-## Deliverable B: minimal Windows app integration
+## Existing repository context
 
-1. In the current desktop user view (`src/pages/Desktop.tsx`), add a compact **Local Coding Activity** section displaying extension availability, Off/Paused/Recording status, approved workspace count, and events recorded today. If extension is absent, show `Not installed` / `Off`, never a fabricated value.
-2. Extend the native WPF <-> WebView2 bridge **minimally and defensively** for local, read-only status retrieval. Validate message types and message origin/source. Do not allow arbitrary filesystem paths, shell execution, network requests, or broad browser/native privileges. Do not expose coding observations to the admin dashboard.
-3. Include a pause command in the Windows desktop panel **only if** the bridge can safely update an already-consented local collector. It must not grant first-time consent or remotely activate collection. Otherwise keep the Windows panel read-only and make the IDE status bar the canonical pause control.
-4. Avoid changing existing emergency alert behavior and authentication/tray logic. Keep new UI simple and legible (>=16px for its main text).
-5. The locally bundled `desktop/GentleControlRoom.Desktop/wwwroot` is a separate UI; document its supported/fallback status and do not imply it automatically shares the React component.
+- React/Vite/TypeScript UI: `src/`. The user-facing Windows web view is `src/pages/Desktop.tsx`.
+- Windows host: `desktop/GentleControlRoom.Desktop/` (WPF / WebView2); native bridge in `MainWindow.xaml.cs`.
+- Current Windows host may load hosted React UI; packaged `wwwroot` is a separate, older path.
+- Web dashboard uses Supabase; an alternate Express/Prisma prototype also exists. **Do not add backend event ingestion** in Phase 1.
+- Fix existing native bridge secret leakage first: `MainWindow.xaml.cs` currently logs raw `WebMessageAsJson`, potentially persisting `desktop.auth.session` credentials. Log only safe event type names and no payloads, before extending the bridge.
+- Preserve emergency alert delivery, user sign-in, and existing notifications.
 
-## Security/quality acceptance tests
+## Deliverable A — Local Codex hook collector
 
-- Fresh install captures **zero** events until first explicit opt-in.
-- Enrolling workspace A never captures events from workspace B.
-- Pause or revoke immediately prevents new events; deleting clears all collected events and pending buffers.
-- No captured event contains code, file paths/names, credentials, keystrokes, screenshots, clipboard, repo names, Git messages, or private communication.
-- Events stay on-device; verify that no collection-related network requests occur.
-- A Windows user cannot access a different Windows account's activity store.
-- Log files cannot contain authentication credentials, tokens or event contents.
-- Previously existing alert creation, notification, acknowledgment, and desktop login flows continue to operate.
-- Test absence of extension, malformed JSONL, app restarts, multi-window use, storage errors, and retention cleanup.
-- Add meaningful automated unit tests covering consent, workspace scope, pause/resume, sanitization, retention and deletion.
-- Run and report relevant typecheck/lint/test/build commands, noting environment-dependent tasks that could not be run.
+Create `integrations/codex/` (not `integrations/vscode/`) with a minimal typed collector executable/script, hook configuration templates, setup/uninstall commands, a schema document, and automated tests.
 
-## Implementation process
+1. **Explicit local opt-in**. Clean install collects zero events. The developer chooses permitted local projects/workspaces, and an obvious global pause is enabled initially. A hook MUST check user consent and selected project scope **on every invocation**. Installing a hook does not itself grant consent. Unsupported or ambiguous project paths fail closed.
+2. **Never overwrite an existing Codex config.** Provide idempotent setup that backs up and safely merges only the approved hook entries in user-level `~/.codex/hooks.json` or supported `config.toml` paths. Project-specific hooks are acceptable only where the user explicitly trusts that project's configuration. Respect `CODEX_HOME` and Codex hook trust requirements. Document how to disable and uninstall hooks cleanly without deleting unrelated user settings.
+3. Prefer a **fast nonblocking/safe hook**: read hook JSON from stdin; never print original input. Keep hook outputs minimal/empty, without modifying Codex prompts or enforcing policy. Never block normal Codex work if the collector fails. Handle unsupported clients with honest diagnostics. Avoid expensive operations in the hook path; use locally queued writes when needed.
+4. The primary allowlisted event schema should include: `schemaVersion`, ISO `timestamp`, normalized `eventType` (session_started, prompt_submitted [count only], tool_used, turn_finished, session_ended), random `sessionPseudonym`, random `projectPseudonym`, and **coarse** `toolCategory` when applicable (e.g. file-edit, test/build, git, search/inspect, other). Normalize on trusted, documented tool identifiers, not on raw commands, arguments, file names, tool outputs, or prompt text. A session is identified only locally by a randomized mapping; do not persist raw Codex session IDs in event JSONL.
+5. Derive only high-level patterns: repeated test cycles, file-edit→test cycles, tool-category frequencies, started/completed sessions, and rough sequencing. **Do not claim to know human reasoning, actual quality, precise work time, or edits done outside Codex.**
+6. **Never store** user prompts, assistant responses, private transcripts or transcript paths, code, diffs, tool input/output, raw command lines, shell output, file names/paths, Git commit messages, repository names, access tokens, API keys, clipboard, screenshots, keystrokes, email, or contents of unrelated apps. The hook may use `cwd` transiently to check consent but must not write it into event logs. Keep mapping/approved workspace paths separate in per-user consent settings only. Do not read raw Codex transcript JSONL.
+7. **Local-only storage:** under the current Windows account's `%LOCALAPPDATA%/GentleControlRoom/CodexActivity/`, JSONL events plus local consent metadata. Rotation, bounded file size, default 30-day retention, deletion, explicit pause/revoke, atomic config updates, and multi-process-safe append strategy. No network telemetry or remote upload. For non-Windows or WSL/SSH/remote Codex execution, clearly report unsupported until a local-only architecture is explicitly designed/tested.
+8. Provide a minimal Windows console setup/status command with `install`, `status`, `enable-project`, `pause`, `resume`, `show-events`, `delete-events`, and `uninstall` or equivalent user-facing mechanisms. Consent must remain controlled by the local user, never by an admin/superadmin account. If no interactive shell is available, provide a simple visible local consent dialog.
+9. Events must not leak through diagnostics, stdout/stderr, Codex hook output, or PowerShell history. Test malformed/unexpected JSON inputs, path traversal, concurrent hooks, unsupported/unknown event types, hook timeouts, and absence of the local storage directory.
 
-Work directly on branch `main`. Implement Deliverable A first, then Deliverable B. Prefer minimal independently testable modules; avoid adding heavy runtime dependencies or coupling the VS Code extension to the entire Vite build. Document end-to-end Windows smoke tests and installation instructions (`npm install`, build, create VSIX, install in VS Code and Cursor where supported). Do not put access tokens or other secrets in docs.
+## Deliverable B — Existing Gentle Control Room Windows app
 
-**When finished:** commit and push tested changes directly to `main` (no feature branch or PR needed). Describe what was implemented, the exact local event schema, testing results, and limitations. If a safe native integration cannot be finished, provide the extension with working controls and document the Windows integration as follow-up rather than weakening consent/security.
+1. Add a compact **Codex Activity (Local)** section in `src/pages/Desktop.tsx` for **the local Windows user only** (not the management dashboard). Show whether the hooks are installed/trusted, On/Paused/Off/Unsupported, number of opted-in projects, sessions today, and tool-category counts. Never fabricate values if the collector is missing.
+2. WPF/WebView2 may read only a carefully bounded, local derived summary; verify message type/source and strict origin allowlist. Do not expose raw events to arbitrary remote pages or allow arbitrary file access. The host must not grant first-time consent or turn collection on. If robust origin/source checks are impractical, keep the Windows integration read-only with fewer features, or provide just the local CLI/status UI first.
+3. A desktop pause button is optional **only if** it can safely prevent further events immediately without granting new consent. Canonical opt-in must remain with the developer.
+4. Preserve alert/auth/tray flows. Reuse existing minimal UI visual language; use main text >=16px.
+
+## Local acceptance tests
+
+- **First install:** no events before explicit opt-in (including when hooks are registered but there is no consent).
+- **Workspace separation:** opted-in project A generates events; unapproved project B produces none even inside the same Codex account.
+- **Pause/revoke/delete:** pause stops new events immediately; revoke removes consent; deletion clears JSONL files and in-memory buffers. Multiple simultaneous hooks cannot resurrect deleted data.
+- **Sanitization:** feed fake prompts, API keys, sensitive paths, raw tool commands, transcripts and tool results to the hook; assert none are recorded or echoed.
+- **Hook compatibility:** verify documented event schema and compatibility with the actual Codex client/mode on Windows, noting modes that do not emit hooks (particularly noninteractive execution).
+- **Isolation:** different Windows users cannot read each other's local data.
+- **Logging:** native host logs contain no access/refresh tokens or raw WebView messages.
+- **No network traffic:** collection adds no network sender; DeepSeek and Supabase event ingestion are absent.
+- **Regression:** the existing desktop emergency notifications/login continue to work.
+
+## Documentation and delivery
+
+Add README explaining supported Codex clients/modes, hook installation and trust, permissions, event schema, what is not captured, opt-in, pause, deletion, uninstall, privacy limitations, and manual Windows smoke tests. Include commands for running unit tests/build and a truthful report of what could not be exercised.
+
+When implementing, inspect actual current hook docs and local Codex installation before choosing config shape; never replace user configuration wholesale. Ship Deliverable A before Deliverable B and keep Phase 1 entirely local. Work directly on `main`, commit and push verified changes. Do not alter the other application features.
+
+## Clear scope boundary
+
+This Phase 1 observes **Codex-assisted coding interactions only**. Monitoring code manually written in an IDE, reconstructing complete job performance, inferring private intentions, centralized staff monitoring, and using DeepSeek to analyze collected data are separate projects and are not part of this phase.
