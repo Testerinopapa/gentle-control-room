@@ -73,7 +73,8 @@ async function start(tabId) {
   await chrome.storage.session.set({
     [KEY(tabId)]: {
       id, page: new URL(tab.url).pathname,
-      visibleUser: null, visibleAssistant: null,
+      visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
+      codingMarked: false,
       detector: null, lastObservedAt: null, lastCountAt: null
     }
   });
@@ -125,7 +126,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         return { ok: true };
       }
       if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
-          !Number.isInteger(message.assistant) || message.assistant < 0 || message.assistant > 10000) {
+          !Number.isInteger(message.assistant) || message.assistant < 0 || message.assistant > 10000 ||
+          (message.codeBlocks !== undefined &&
+           (!Number.isInteger(message.codeBlocks) || message.codeBlocks < 0 || message.codeBlocks > 10000))) {
         return { ok: false };
       }
       // Only store visible marker counts for the previously approved tab.
@@ -136,7 +139,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         return { ok: false };
       }
       await nativeEvent("visible_counts", session.id, {
-        visibleUser: message.user, visibleAssistant: message.assistant
+        visibleUser: message.user, visibleAssistant: message.assistant,
+        ...(message.codeBlocks === undefined ? {} : { visibleCodeBlocks: message.codeBlocks })
       });
       // The sidebar displays safe counts for the tab that opted in.
       // Never resurrect a session after Stop or navigation.
@@ -145,7 +149,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         await chrome.storage.session.set({
           [KEY(tabId)]: {
             ...current, visibleUser: message.user,
-            visibleAssistant: message.assistant, lastCountAt: Date.now()
+            visibleAssistant: message.assistant,
+            visibleCodeBlocks: message.codeBlocks ?? null,
+            lastCountAt: Date.now()
           }
         });
       }
@@ -155,6 +161,27 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const tabId = message.tabId;
     if (!Number.isInteger(tabId)) throw new Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
+    if (message.type === "setCodingTag") {
+      if (typeof message.codingMarked !== "boolean") {
+        throw new Error("Invalid coding activity selection.");
+      }
+      const session = await getSession(tabId);
+      if (!session || !eligible(tab.url) ||
+          session.page !== new URL(tab.url).pathname) {
+        throw new Error("Start recording this ChatGPT conversation before marking coding activity.");
+      }
+      // Only the selected tab may be tagged; never collect text or infer edits.
+      await nativeEvent("coding_tag", session.id, {
+        codingMarked: message.codingMarked
+      });
+      const current = await getSession(tabId);
+      if (current?.id === session.id) {
+        await chrome.storage.session.set({
+          [KEY(tabId)]: { ...current, codingMarked: message.codingMarked }
+        });
+      }
+      return { ok: true };
+    }
     if (message.type === "getState") {
       const session = await getSession(tabId);
       const allowed = eligible(tab.url);
@@ -171,6 +198,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         ok: true, allowed, reason, active: Boolean(session && samePage),
         visibleUser: samePage ? session?.visibleUser ?? null : null,
         visibleAssistant: samePage ? session?.visibleAssistant ?? null : null,
+        visibleCodeBlocks: samePage ? session?.visibleCodeBlocks ?? null : null,
+        codingMarked: Boolean(samePage && session?.codingMarked),
         detector: samePage ? session?.detector ?? null : null,
         lastObservedAt: samePage ? session?.lastObservedAt ?? null : null,
         lastCountAt: samePage ? session?.lastCountAt ?? null : null
