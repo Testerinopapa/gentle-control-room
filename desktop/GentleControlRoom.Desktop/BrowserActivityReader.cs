@@ -10,7 +10,9 @@ namespace GentleControlRoom.Desktop;
 /// <summary>Summarizes opted-in browser metadata. Never reads conversation contents.</summary>
 internal readonly record struct BrowserActivitySnapshot(
   int SessionsToday, int VisibleUser, int VisibleAssistant, int EventsToday, string Latest,
-  int CodeBlocks, int CodingSessions, IReadOnlyList<string> Patterns);
+  int CodeBlocks, int CodingSessions, IReadOnlyList<string> Patterns,
+  bool StoreFound, int FilesRead, int StartedSessions, DateTimeOffset? LatestEventUtc,
+  bool IncompleteRead);
 
 internal static class BrowserActivityReader
 {
@@ -31,7 +33,12 @@ internal static class BrowserActivityReader
     try
     {
       if (!Directory.Exists(root)) return Empty();
+      // Count every session with an accepted local event, not just the sessions
+      // whose initial start event survived (e.g. older or partial event files).
       var sessions = new HashSet<string>(StringComparer.Ordinal);
+      var startedSessions = new HashSet<string>(StringComparer.Ordinal);
+      var filesRead = 0;
+      var incompleteRead = false;
       var counts = new Dictionary<string,
         (DateTimeOffset At, int User, int Assistant, int? CodeBlocks)>(StringComparer.Ordinal);
       var tags = new Dictionary<string, (DateTimeOffset At, bool Marked)>(StringComparer.Ordinal);
@@ -48,6 +55,7 @@ internal static class BrowserActivityReader
           var length = new FileInfo(file).Length;
           if (length > MaxBytesPerRefresh - scanned) break;
           scanned += length;
+          filesRead++;
           foreach (var line in File.ReadLines(file))
           {
             if (line.Length is 0 or > 4096) continue;
@@ -99,7 +107,8 @@ internal static class BrowserActivityReader
               }
 
               events++;
-              if (type == "session_started") sessions.Add(session);
+              sessions.Add(session);
+              if (type == "session_started") startedSessions.Add(session);
               if (latest is null || when >= latest)
               {
                 latest = when;
@@ -118,8 +127,8 @@ internal static class BrowserActivityReader
             }
           }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException) { incompleteRead = true; }
+        catch (UnauthorizedAccessException) { incompleteRead = true; }
       }
 
       var visibleUser = counts.Values.Sum(v => v.User);
@@ -141,7 +150,8 @@ internal static class BrowserActivityReader
       var recentText = latest is null ? latestLabel :
         $"{latestLabel} · {latest.Value.ToLocalTime():MMM d HH:mm:ss}";
       return new BrowserActivitySnapshot(sessions.Count, visibleUser, visibleAssistant,
-        events, recentText, codeBlocksTotal, codingSessions.Count, patterns);
+        events, recentText, codeBlocksTotal, codingSessions.Count, patterns,
+        true, filesRead, startedSessions.Count, latest, incompleteRead);
     }
     catch (Exception)
     {
@@ -165,5 +175,5 @@ internal static class BrowserActivityReader
 
   private static BrowserActivitySnapshot Empty() =>
     new(0, 0, 0, 0, "No opted-in browser activity recorded in this period.",
-      0, 0, Array.Empty<string>());
+      0, 0, Array.Empty<string>(), false, 0, 0, null, false);
 }
