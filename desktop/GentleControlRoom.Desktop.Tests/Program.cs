@@ -76,7 +76,7 @@ Check(nodes.Any(e => e.Name.LocalName == "Grid" &&
   (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "Workspace"),
   "constrained Grid controls layout width");
 Check(nodes.Any(e => e.Name.LocalName == "Expander" &&
-  (string?)e.Attribute("Header") == "Detailed statistics"),
+  (string?)e.Attribute("Header") == "Codex detailed statistics"),
   "secondary statistics are available without duplicating the summary");
 
 
