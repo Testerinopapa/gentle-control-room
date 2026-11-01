@@ -117,6 +117,35 @@ This upgrade changes the native event schema, so update **both** the browser ext
 
 Existing browser activity files remain readable, but historical message counts from older extension versions **cannot** be retrospectively classified as coding.
 
+## Windows app session count stays unchanged
+
+The browser's green badge confirms a currently approved session, but the **Windows app must be a current local desktop build** to display the newer reader. The installed Start-menu executable is not automatically updated by a `git pull`, and closing its window may leave the old application running in the system tray.
+
+The sidebar's **Start for this conversation** applies to **one conversation**. If you navigate to another ChatGPT conversation, the observer stops. **New chats are not automatically enrolled.** To record several new chats, click Start separately in each one. Previously unrecorded chats cannot be backfilled from message text.
+
+Run this safe, metadata-only diagnosis from the repository root:
+
+```powershell
+.\\scripts\\windows\\check-chatgpt-activity.ps1 -Period Today
+.\\scripts\\windows\\check-chatgpt-activity.ps1 -Period All
+```
+
+It reports how many valid session IDs and confirmed starts are present in local JSONL files, how many message-count updates and coding tags were saved, and the most recent activity time. It **never prints session identifiers, chat text, or file contents**.
+
+Interpretation:
+- **Recorded sessions / confirmed starts increase:** the Edge native host is saving sessions. Fully exit the existing Windows app from the system tray and launch the newly compiled native desktop host, then press **Refresh** in ChatGPT Browser Activity.
+- **The script remains at zero despite the green badge:** the native event files are not being written to the expected Windows account, or the event stream is failing. Reinstall the native messaging host and check the sidebar's Windows connection status.
+- **Recorded sessions increase but coding-related sessions remain at zero:** the sessions did not include detected code example containers or an explicit **Mark as coding work** tag. This is expected and distinct from the total count.
+- **Coding-related sessions increase but recurring patterns do not:** patterns require the same signal in at least three **distinct** approved sessions within the selected period. Use **Available history** in the app if the sessions occurred on earlier days.
+
+For a local desktop build, use:
+
+```powershell
+dotnet run --project .\\desktop\\GentleControlRoom.Desktop\\GentleControlRoom.Desktop.csproj -c Release
+```
+
+The updated Windows panel shows **recorded sessions**, **confirmed starts**, **local files read**, and **latest recorded event**, so it can distinguish missing files from an old desktop build or a three-session pattern threshold. Refresh manually or allow the regular 20-second update cycle.
+
 ## Verify
 
 Run the host's built-in validation before testing it in Edge:
