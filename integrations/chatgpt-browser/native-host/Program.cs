@@ -23,6 +23,11 @@ internal static class Program
         {
           return 1;
         }
+        var workflow = ParseEvent("""{"version":1,"event":"workflow_stage","sessionId":"123e4567-e89b-42d3-a456-426614174000","stage":"debugging","prompt":"PRIVATE CODE"}""");
+        if (workflow?.WorkflowStage != "debugging" ||
+            JsonSerializer.Serialize(workflow).Contains("PRIVATE CODE", StringComparison.Ordinal) ||
+            ParseEvent("""{"version":1,"event":"workflow_stage","sessionId":"123e4567-e89b-42d3-a456-426614174000","stage":"PRIVATE CODE"}""") is not null)
+          return 1;
         var coding = ParseEvent("""{"version":1,"event":"coding_tag","sessionId":"123e4567-e89b-42d3-a456-426614174000","codingMarked":true,"code":"PRIVATE"}""");
         var codeBlocks = ParseEvent("""{"version":1,"event":"visible_counts","sessionId":"123e4567-e89b-42d3-a456-426614174000","visibleUser":4,"visibleAssistant":3,"visibleCodeBlocks":2}""");
         if (coding?.CodingMarked != true || codeBlocks?.VisibleCodeBlocks != 2 ||
@@ -137,7 +142,7 @@ internal static class Program
 
   internal readonly record struct BrowserEvent(
     string EventType, string Session, int? VisibleUser, int? VisibleAssistant,
-    int? VisibleCodeBlocks, bool? CodingMarked);
+    int? VisibleCodeBlocks, bool? CodingMarked, string? WorkflowStage);
 
   internal static BrowserEvent? ParseEvent(string raw)
   {
@@ -151,7 +156,7 @@ internal static class Program
       if (!root.TryGetProperty("event", out var kind) || kind.ValueKind != JsonValueKind.String)
         return null;
       var name = kind.GetString();
-      if (name is not ("session_started" or "visible_counts" or "session_ended" or "coding_tag")) return null;
+      if (name is not ("session_started" or "visible_counts" or "session_ended" or "coding_tag" or "workflow_stage")) return null;
       if (!root.TryGetProperty("sessionId", out var token) ||
           token.ValueKind != JsonValueKind.String ||
           !Guid.TryParseExact(token.GetString(), "D", out var session))
@@ -161,6 +166,7 @@ internal static class Program
       int? assistant = null;
       int? codeBlocks = null;
       bool? codingMarked = null;
+      string? workflowStage = null;
       if (name == "visible_counts")
       {
         if (!root.TryGetProperty("visibleUser", out var userProp) ||
@@ -187,9 +193,19 @@ internal static class Program
           return null;
         codingMarked = tag.GetBoolean();
       }
-      // Reconstruct from allowed fields only: unknown fields are never saved.
+      if (name == "workflow_stage")
+      {
+        if (!root.TryGetProperty("stage", out var stage) ||
+            stage.ValueKind != JsonValueKind.String)
+          return null;
+        workflowStage = stage.GetString();
+        if (workflowStage is not ("investigation" or "implementation" or
+            "debugging" or "testing" or "version_control" or "deployment"))
+          return null;
+      }
+      // Reconstruct from allowlisted fields only. Raw page text is discarded.
       return new BrowserEvent(name!, session.ToString("D"), user, assistant,
-        codeBlocks, codingMarked);
+        codeBlocks, codingMarked, workflowStage);
     }
     catch (Exception)
     {
@@ -214,7 +230,8 @@ internal static class Program
       visibleUser = record.VisibleUser,
       visibleAssistant = record.VisibleAssistant,
       visibleCodeBlocks = record.VisibleCodeBlocks,
-      codingMarked = record.CodingMarked
+      codingMarked = record.CodingMarked,
+      workflowStage = record.WorkflowStage
     }) + "\n";
     var bytes = Encoding.UTF8.GetBytes(line);
     var index = 0;
