@@ -126,7 +126,9 @@
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <Grid Margin="0,0,0,8" HorizontalAlignment="Stretch">
-                    <TextBlock Text="{Binding}" Foreground="#334155" />
+                    <TextBlock Text="{Binding}" Foreground="#334155"
+                               TextWrapping="Wrap" TextTrimming="None"
+                               MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ItemsControl}}" />
                   </Grid>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
