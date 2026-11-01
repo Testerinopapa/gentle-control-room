@@ -59,6 +59,16 @@ var history = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
   (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "CodexHistory");
 Check(history.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
   "session history uses only the outer workspace scroller");
+var browserHistoryNode = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
+  (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "BrowserHistory");
+Check(browserHistoryNode.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
+  "ChatGPT session history shares the single scrolling dashboard");
+Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
+  (string?)e.Attribute("Name") == "CombinedSessionText"),
+  "combined session total has an explicit native text label");
+Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
+  (string?)e.Attribute("Text") == "Codex session history"),
+  "Codex-specific history is clearly distinguished from browser history");
 Check(!nodes.Any(e => e.Name.LocalName == "ScrollViewer" &&
   (string?)e.Attribute("MaxHeight") == "300"),
   "session history has no nested capped-height scrolling container");
@@ -108,6 +118,18 @@ try
     browser.StartedSessions == 2 && browser.SessionsToday == 2 &&
     browser.LatestEventUtc.HasValue,
     "dashboard reports local file availability and actual start events");
+  Check(browser.History.Count == 2 &&
+    browser.History.All(h => h.Title.StartsWith("ChatGPT", StringComparison.Ordinal)) &&
+    browser.History[0].LastSeen >= browser.History[1].LastSeen &&
+    browser.History[0].Summary.Contains("Last observed messages"),
+    "browser sessions appear newest first with safe display summaries");
+  Check(browser.History.Any(h => h.Boundaries.Contains("Duration unavailable")) &&
+    browser.History.Any(h => h.Boundaries.Contains("End event recorded") == false),
+    "browser history does not invent missing session boundaries");
+  Check(!JsonSerializer.Serialize(browser.History).Contains(first, StringComparison.Ordinal) &&
+    !JsonSerializer.Serialize(browser.History).Contains(second, StringComparison.Ordinal) &&
+    !JsonSerializer.Serialize(browser.History).Contains("NEVER-EXPOSE", StringComparison.Ordinal),
+    "session history never exposes pseudonyms or private input");
   Check(!BrowserActivityReader.ReadFrom(
     Path.Combine(browserRoot, "does-not-exist"), testNow).StoreFound,
     "missing activity folder is identified explicitly");
@@ -139,6 +161,11 @@ try
   Check(history.CodeBlocks == 6 && history.CodingSessions == 3 &&
     history.Patterns.Count == 2 && history.Patterns.All(p => p.Contains("3 separate")),
     "three separate coding sessions generate patterns without exposing code");
+  Check(history.History.Count == 5 &&
+    history.History.Count(h => h.Summary.Contains("Manually marked as coding work")) == 3 &&
+    history.History.All(h => !h.Title.Contains("123e4567", StringComparison.Ordinal)) &&
+    history.History.Any(h => h.Summary.Contains("Peak visible code examples: 3")),
+    "ChatGPT history reports coding evidence without revealing session IDs");
   Check(!JsonSerializer.Serialize(history).Contains("PRIVATE"),
     "coding history never returns conversation text or code");
   var recent = BrowserActivityReader.ReadFrom(browserRoot, testNow, CodexPeriod.LastSevenDays);
@@ -156,6 +183,9 @@ try
   Check(unmarked.Patterns.Count == 1 &&
     unmarked.Patterns[0].Contains("code examples") && unmarked.CodingSessions == 3,
     "removing a coding tag retracts only the manual-tag recurrence");
+  Check(unmarked.History.Count(h => h.Summary.Contains("Manually marked as coding work")) == 2 &&
+    unmarked.History.Any(h => h.Summary.Contains("Coding-work tag removed")),
+    "historical coding-tag removals appear correctly in session summaries");
 
   File.AppendAllText(browserFile, "\n" + BrowserEvent(
     "visible_counts", "123e4567-e89b-42d3-a456-426614174007",
