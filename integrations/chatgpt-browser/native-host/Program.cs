@@ -32,6 +32,13 @@ internal static class Program
         return 0;
       }
 
+      // Installer smoke check: confirm the published executable can read its own
+      // manifest and that the registered extension origin is allowlisted.
+      if (args.Length == 2 && args[0] == "--check-install")
+      {
+        return IsAllowedOrigin(args[1]) ? 0 : 1;
+      }
+
       // Edge only launches a native host for manifest-listed extension IDs.
       // Enforce the expected extension origin again within the executable.
       if (args.Length == 0 || !IsAllowedOrigin(args[0]))
