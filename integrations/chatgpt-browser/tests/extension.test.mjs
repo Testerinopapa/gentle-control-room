@@ -181,7 +181,8 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   const listeners = new Map();
   for (const id of ["state", "state-label", "note", "error", "start", "stop",
     "user-count", "assistant-count", "connection-state", "check-connection",
-    "observer-state", "code-count", "coding-toggle", "coding-hint"]) {
+    "observer-state", "code-count", "coding-toggle", "coding-hint",
+    "workflow-toggle", "workflow-state"]) {
     dom.set(id, {
       dataset: {}, textContent: "", disabled: false, hidden: true,
       addEventListener(kind, callback) { listeners.set(id + ":" + kind, callback); }
@@ -453,6 +454,81 @@ test("code block changes trigger a new count even if message totals stay fixed",
   assert.ok(!JSON.stringify(sent).includes("/c/approved"));
 });
 
+test("workflow classification requires separate explicit consent", async () => {
+  const h = harness();
+  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, false);
+  await h.send({ type: "start", tabId: 9 });
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowEnabled, false);
+  assert.equal((await h.send({ type: "workflowStage", stage: "debugging" },
+    { tab: { id: 9 } })).ok, false);
+  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowEnabled, true);
+  assert.equal((await h.send({
+    type: "workflowStage", stage: "debugging",
+    prompt: "PRIVATE-PROMPT", code: "PRIVATE-CODE", url: "PRIVATE-URL"
+  }, { tab: { id: 9 } })).ok, true);
+  assert.equal(h.native.at(-1).event, "workflow_stage");
+  assert.equal(h.native.at(-1).stage, "debugging");
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowStages, 1);
+  assert.ok(!JSON.stringify(h.native).includes("PRIVATE"), "never export message text");
+  assert.equal((await h.send({ type: "workflowStage", stage: "arbitrary" },
+    { tab: { id: 9 } })).ok, false);
+  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false })).ok, true);
+  assert.equal((await h.send({ type: "workflowStage", stage: "testing" },
+    { tab: { id: 9 } })).ok, false);
+  await h.send({ type: "stop", tabId: 9 });
+  assert.equal(h.stored.size, 0);
+});
+
+test("page never reads user messages unless workflow analysis is enabled", async () => {
+  let reads = 0;
+  const sent = [];
+  const messages = [
+    { get innerText() { reads++; return "Investigate the bug in the app"; } },
+    { get innerText() { reads++; return "Implement the fix"; } },
+    { get innerText() { reads++; return "Run tests"; } }
+  ];
+  const timeline = {
+    querySelectorAll(selector) {
+      if (selector.includes("data-user-message-bubble")) return messages;
+      if (selector.includes(":assistant")) return [{}];
+      return [];
+    }
+  };
+  let listener;
+  let tick;
+  const chromeMock = {
+    runtime: {
+      async sendMessage(message) { sent.push(message); return { ok: true }; },
+      onMessage: { addListener(fn) { listener = fn; }, removeListener() {} }
+    }
+  };
+  vm.runInNewContext(contentLogic, {
+    document: { documentElement: {}, querySelector() { return timeline; } },
+    location: { pathname: "/c/test" }, chrome: chromeMock,
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval(fn) { tick = fn; return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 0);
+  assert.equal(sent.some(m => m.type === "workflowStage"), false);
+  listener({ type: "gcrWorkflowMode", enabled: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent.filter(m => m.type === "workflowStage").map(m => m.stage),
+    ["debugging", "implementation", "testing"]);
+  assert.ok(!JSON.stringify(sent).includes("Investigate") &&
+            !JSON.stringify(sent).includes("Implement the fix"));
+  const readsWhenDisabled = reads;
+  listener({ type: "gcrWorkflowMode", enabled: false });
+  messages.push({ get innerText() { reads++; return "Deploy to production"; } });
+  tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, readsWhenDisabled,
+    "disabling analysis must immediately stop reading new messages");
+  assert.ok(!sent.some(m => m.stage === "deployment"));
+});
 test("native host health check does not start or save a conversation", async () => {
   const h = harness();
   const answer = await h.send({ type: "testConnection" });
