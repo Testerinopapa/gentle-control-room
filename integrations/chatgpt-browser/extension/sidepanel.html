@@ -95,6 +95,14 @@
       <p class="hint">Only a yes/no tag is saved. No code or conversation text is recorded.</p>
     </section>
 
+    <section aria-label="Local coding workflow analysis">
+      <h2 class="section-heading">Coding workflow analysis</h2>
+      <p class="hint">Optional: locally examine visible user requests to classify debugging, implementation, testing and other workflow stages. Only category labels and timestamps are saved.</p>
+      <p class="hint"><strong>No prompt text, code, message IDs or URLs leave this tab.</strong> This is separate from ordinary recording and starts off.</p>
+      <button id="workflow-toggle" type="button" disabled>Enable workflow analysis</button>
+      <p id="workflow-state" class="hint" role="status" aria-live="polite">Off · enable after starting this conversation.</p>
+    </section>
+
     <p class="notice">
       This panel follows the active Edge tab. Each conversation needs its own approval.
       Switching conversations stops collection for the previous one.
