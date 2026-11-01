@@ -12,7 +12,11 @@ internal readonly record struct BrowserActivitySnapshot(
   int SessionsToday, int VisibleUser, int VisibleAssistant, int EventsToday, string Latest,
   int CodeBlocks, int CodingSessions, IReadOnlyList<string> Patterns,
   bool StoreFound, int FilesRead, int StartedSessions, DateTimeOffset? LatestEventUtc,
-  bool IncompleteRead);
+  bool IncompleteRead, IReadOnlyList<BrowserSessionInsight> History);
+
+/// <summary>Safe per-session display model. No pseudonyms, URLs, titles or chat text.</summary>
+internal sealed record BrowserSessionInsight(
+  string Title, string Summary, string Boundaries, string Timeline, DateTimeOffset LastSeen);
 
 internal static class BrowserActivityReader
 {
@@ -37,6 +41,7 @@ internal static class BrowserActivityReader
       // whose initial start event survived (e.g. older or partial event files).
       var sessions = new HashSet<string>(StringComparer.Ordinal);
       var startedSessions = new HashSet<string>(StringComparer.Ordinal);
+      var sessionDetails = new Dictionary<string, BrowserSessionDetails>(StringComparer.Ordinal);
       var filesRead = 0;
       var incompleteRead = false;
       var counts = new Dictionary<string,
@@ -107,6 +112,12 @@ internal static class BrowserActivityReader
 
               events++;
               sessions.Add(session);
+              if (!sessionDetails.TryGetValue(session, out var detail))
+              {
+                detail = new BrowserSessionDetails(when);
+                sessionDetails.Add(session, detail);
+              }
+              detail.Observe(type!, when, user, assistant, codeBlocks, marked);
               if (type == "session_started") startedSessions.Add(session);
               if (latest is null || when >= latest)
               {
@@ -134,7 +145,9 @@ internal static class BrowserActivityReader
       var visibleUser = counts.Values.Sum(v => v.User);
       var visibleAssistant = counts.Values.Sum(v => v.Assistant);
       var codeBlocksTotal = counts.Values.Sum(v => v.CodeBlocks ?? 0);
-      var withCode = counts.Where(pair => pair.Value.CodeBlocks > 0)
+      // A rendered code example can disappear when ChatGPT virtualizes its
+      // timeline. Track whether code was observed at any point in the session.
+      var withCode = sessionDetails.Where(pair => pair.Value.PeakCodeBlocks > 0)
         .Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
       var markedSessions = tags.Where(pair => pair.Value.Marked)
         .Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
@@ -149,13 +162,121 @@ internal static class BrowserActivityReader
 
       var recentText = latest is null ? latestLabel :
         $"{latestLabel} · {latest.Value.ToLocalTime():MMM d HH:mm:ss}";
+      var history = sessionDetails.Values
+        .OrderByDescending(detail => detail.LastSeen)
+        .Take(25)
+        .Select(detail => detail.Describe())
+        .ToArray();
       return new BrowserActivitySnapshot(sessions.Count, visibleUser, visibleAssistant,
         events, recentText, codeBlocksTotal, codingSessions.Count, patterns,
-        true, filesRead, startedSessions.Count, latest, incompleteRead);
+        true, filesRead, startedSessions.Count, latest, incompleteRead, history);
     }
     catch (Exception)
     {
       return Empty();
+    }
+  }
+
+  // One mutable aggregate per random browser-session identifier. The identifier
+  // is used as a dictionary key only and never enters the UI display model.
+  private sealed class BrowserSessionDetails
+  {
+    internal DateTimeOffset FirstSeen { get; private set; }
+    internal DateTimeOffset LastSeen { get; private set; }
+    private DateTimeOffset? _start;
+    private DateTimeOffset? _end;
+    private DateTimeOffset? _latestCountAt;
+    private DateTimeOffset? _latestTagAt;
+    private int _starts;
+    private int _ends;
+    private int _countUpdates;
+    private int _tagUpdates;
+    private int _user;
+    private int _assistant;
+    private bool _hasCounts;
+    private bool? _marked;
+    internal int PeakCodeBlocks { get; private set; }
+    private bool _codeObserved;
+
+    internal BrowserSessionDetails(DateTimeOffset first)
+    {
+      FirstSeen = first;
+      LastSeen = first;
+    }
+
+    internal void Observe(string type, DateTimeOffset at, int user, int assistant,
+      int? codeBlocks, bool? marked)
+    {
+      if (at < FirstSeen) FirstSeen = at;
+      if (at > LastSeen) LastSeen = at;
+      if (type == "session_started")
+      {
+        _starts++;
+        if (_start is null || at < _start) _start = at;
+      }
+      if (type == "session_ended")
+      {
+        _ends++;
+        if (_end is null || at > _end) _end = at;
+      }
+      if (type == "visible_counts")
+      {
+        _countUpdates++;
+        if (_latestCountAt is null || at >= _latestCountAt)
+        {
+          _latestCountAt = at;
+          _user = user;
+          _assistant = assistant;
+          _hasCounts = true;
+        }
+        if (codeBlocks.HasValue)
+        {
+          _codeObserved = true;
+          PeakCodeBlocks = Math.Max(PeakCodeBlocks, codeBlocks.Value);
+        }
+      }
+      if (type == "coding_tag")
+      {
+        _tagUpdates++;
+        if (_latestTagAt is null || at >= _latestTagAt)
+        {
+          _latestTagAt = at;
+          _marked = marked;
+        }
+      }
+    }
+
+    internal BrowserSessionInsight Describe()
+    {
+      var first = FirstSeen.ToLocalTime();
+      var title = $"ChatGPT · {first:MMM d, yyyy HH:mm:ss}";
+      var parts = new List<string>();
+      if (_hasCounts)
+        parts.Add($"Last observed messages: {_user} yours, {_assistant} ChatGPT.");
+      else
+        parts.Add("No visible message counts were captured.");
+      if (_codeObserved)
+        parts.Add($"Peak visible code examples: {PeakCodeBlocks} (not verified file edits).");
+      if (_marked == true)
+        parts.Add("Manually marked as coding work.");
+      if (_marked == false && _tagUpdates > 0)
+        parts.Add("Coding-work tag removed.");
+      var boundaries = _starts == 1 && _start.HasValue
+        ? $"Start recorded: {_start.Value.ToLocalTime():MMM d HH:mm:ss}."
+        : _starts == 0 ? "Start event not captured." : "Multiple start events; start uncertain.";
+      boundaries += _ends == 1 && _end.HasValue
+        ? $" End recorded: {_end.Value.ToLocalTime():MMM d HH:mm:ss}."
+        : _ends == 0 ? " End event not captured." : " Multiple end events; end uncertain.";
+      if (_starts == 1 && _ends == 1 && _end > _start &&
+          FirstSeen >= _start && LastSeen <= _end)
+        boundaries += $" Recorded duration: {(_end.Value - _start.Value).TotalMinutes:0.##} minutes.";
+      else
+        boundaries += " Duration unavailable.";
+      var timeline = $"First local event: {FirstSeen.ToLocalTime():MMM d HH:mm:ss}. " +
+        $"Latest local event: {LastSeen.ToLocalTime():MMM d HH:mm:ss}. " +
+        $"Message-count updates: {_countUpdates}; coding-tag updates: {_tagUpdates}.";
+      return new BrowserSessionInsight(title, string.Join(" ", parts), boundaries,
+        timeline, LastSeen);
     }
   }
 
@@ -175,5 +296,6 @@ internal static class BrowserActivityReader
 
   private static BrowserActivitySnapshot Empty() =>
     new(0, 0, 0, 0, "No opted-in browser activity recorded in this period.",
-      0, 0, Array.Empty<string>(), false, 0, 0, null, false);
+      0, 0, Array.Empty<string>(), false, 0, 0, null, false,
+      Array.Empty<BrowserSessionInsight>());
 }
