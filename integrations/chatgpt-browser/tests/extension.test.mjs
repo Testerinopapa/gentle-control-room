@@ -202,9 +202,9 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
     runtime: {
       async sendMessage(message) {
         if (message.type === "getState") {
-          return { ok: true, allowed: tabId === 9, active,
-            visibleUser: active ? 2 : null,
-            visibleAssistant: active ? 3 : null };
+          return { ok: true, allowed: tabId === 9, active: active && tabId === 9,
+            visibleUser: active && tabId === 9 ? 2 : null,
+            visibleAssistant: active && tabId === 9 ? 3 : null };
         }
         if (message.type === "testConnection") {
           return { ok: true, connected: true };
