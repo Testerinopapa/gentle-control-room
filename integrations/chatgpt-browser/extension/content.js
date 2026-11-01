@@ -1,61 +1,151 @@
 "use strict";
-// Injected ONLY after a direct opt-in action in the toolbar popup.
-// Counts role markers; never reads innerText, textContent, values, or user inputs.
+// Injected only after the user explicitly enables this ChatGPT conversation.
+// Reads structural role markers only; never reads message text, IDs, URLs, or inputs.
 (() => {
-  if (globalThis.__gcrChatGPTObserver) {
-    globalThis.__gcrChatGPTObserver.stop();
-  }
-  const pathname = location.pathname;
-  let lastReported = "";
-  let stopped = false;
-  let nextSendAt = 0;
-  let pending = null;
+  if (globalThis.__gcrChatGPTObserver) globalThis.__gcrChatGPTObserver.stop();
 
+  const pathname = location.pathname;
+  const statusEveryMs = 12000;
+  const countIntervalMs = 3000;
+  let stopped = false;
+  let lastAcknowledged = null;
+  let lastDetector = null;
+  let lastStatusAt = 0;
+  let nextCountAt = 0;
+  let countInFlight = false;
+  let statusInFlight = false;
+
+  // ChatGPT changed its DOM in 2026. Current conversations place messages
+  // inside a visible timeline region, with user/assistant units as siblings.
+  // The timeline scope also excludes a hidden, duplicated navigation timeline.
   function readCounts() {
-    let user = 0;
-    let assistant = 0;
-    for (const element of document.querySelectorAll('[data-message-author-role]')) {
-      const role = element.getAttribute("data-message-author-role");
-      if (role === "user") user++;
-      if (role === "assistant") assistant++;
+    const region = document.querySelector(
+      '[data-app-action-timeline-scroll][role="region"]'
+    );
+    if (region) {
+      const bubbles = region.querySelectorAll('[data-user-message-bubble="true"]').length;
+      const userUnits = region.querySelectorAll('[data-content-search-unit-key$=":user"]').length;
+      const assistantUnits = region.querySelectorAll('[data-content-search-unit-key$=":assistant"]').length;
+      return {
+        user: Math.min(bubbles || userUnits, 10000),
+        assistant: Math.min(assistantUnits, 10000),
+        detector: (bubbles || userUnits || assistantUnits) ? "current" : "waiting"
+      };
     }
-    return { user: Math.min(user, 10000), assistant: Math.min(assistant, 10000) };
+
+    // Earlier ChatGPT UI: select exactly one matching family per role to avoid
+    // double-counting nested article and message wrappers. Never read content.
+    const firstCount = (selectors) => {
+      for (const selector of selectors) {
+        const count = document.querySelectorAll(selector).length;
+        if (count > 0) return Math.min(count, 10000);
+      }
+      return 0;
+    };
+    const user = firstCount([
+      '[data-message-author-role="user"]',
+      'article[data-turn="user"]',
+      '[data-role="user"]',
+      '[data-message-author="user"]'
+    ]);
+    const assistant = firstCount([
+      '[data-message-author-role="assistant"]',
+      'article[data-turn="assistant"]',
+      '[data-role="assistant"]',
+      '[data-message-author="assistant"]'
+    ]);
+    return {
+      user, assistant,
+      detector: user || assistant ? "legacy" : "unsupported"
+    };
   }
-  function sendIfChanged() {
+
+  async function reportStatus(detector) {
+    const now = Date.now();
+    if (statusInFlight || (detector === lastDetector && now - lastStatusAt < statusEveryMs)) return;
+    statusInFlight = true;
+    try {
+      const reply = await chrome.runtime.sendMessage({ type: "observerStatus", detector });
+      if (reply?.ok) {
+        lastDetector = detector;
+        lastStatusAt = Date.now();
+      }
+    } catch {
+      // The sidebar exposes missing observer updates; never log page information.
+    } finally {
+      statusInFlight = false;
+    }
+  }
+
+  async function reportCounts(counts) {
+    if (stopped || countInFlight) return;
+    const now = Date.now();
+    const signature = counts.detector + ":" + counts.user + ":" + counts.assistant;
+    if (signature === lastAcknowledged || now < nextCountAt) return;
+    countInFlight = true;
+    nextCountAt = now + countIntervalMs;
+    try {
+      const reply = await chrome.runtime.sendMessage({
+        type: "visibleCounts",
+        user: counts.user,
+        assistant: counts.assistant
+      });
+      // Do not mark an update as delivered until the native host confirms it.
+      // Transient native errors are retried on the next timer tick.
+      if (reply?.ok && !stopped) lastAcknowledged = signature;
+    } catch {
+      // Never output or transmit page content when the collector is unavailable.
+    } finally {
+      countInFlight = false;
+    }
+  }
+
+  function poll() {
     if (stopped) return;
     if (location.pathname !== pathname) {
-      chrome.runtime.sendMessage({ type: "conversationChanged" }).catch(() => {});
+      void chrome.runtime.sendMessage({ type: "conversationChanged" }).catch(() => {});
       stop();
       return;
     }
+
     const counts = readCounts();
-    const signature = counts.user + ":" + counts.assistant;
-    if (signature === lastReported) return;
-    const now = Date.now();
-    if (now < nextSendAt) {
-      clearTimeout(pending);
-      pending = setTimeout(sendIfChanged, nextSendAt - now);
-      return;
+    void reportStatus(counts.detector);
+    if (counts.detector === "current" || counts.detector === "legacy") {
+      void reportCounts(counts);
     }
-    lastReported = signature;
-    nextSendAt = now + 3000;
-    chrome.runtime.sendMessage({ type: "visibleCounts", ...counts }).catch(() => {});
   }
+
   function stop() {
+    if (stopped) return;
     stopped = true;
     observer.disconnect();
-    clearTimeout(pending);
-    clearInterval(checkNavigation);
-    chrome.runtime.onMessage.removeListener(handleCommand);
-    delete globalThis.__gcrChatGPTObserver;
+    clearInterval(ticker);
+    clearTimeout(debounce);
+    chrome.runtime.onMessage.removeListener(onCommand);
+    if (globalThis.__gcrChatGPTObserver?.stop === stop) {
+      delete globalThis.__gcrChatGPTObserver;
+    }
   }
-  function handleCommand(message) {
+  function onCommand(message) {
     if (message?.type === "gcrStop") stop();
   }
-  const observer = new MutationObserver(sendIfChanged);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  const checkNavigation = setInterval(sendIfChanged, 1500);
-  chrome.runtime.onMessage.addListener(handleCommand);
+
+  let debounce = null;
+  const observer = new MutationObserver(() => {
+    if (debounce !== null) clearTimeout(debounce);
+    debounce = setTimeout(poll, 250);
+  });
+  observer.observe(document.documentElement, {
+    childList: true, subtree: true,
+    attributes: true,
+    attributeFilter: [
+      "data-message-author-role", "data-turn",
+      "data-user-message-bubble", "data-content-search-unit-key",
+      "role", "data-app-action-timeline-scroll"
+    ]
+  });
+  const ticker = setInterval(poll, 1500);
+  chrome.runtime.onMessage.addListener(onCommand);
   globalThis.__gcrChatGPTObserver = { stop };
-  sendIfChanged();
+  poll();
 })();
