@@ -69,6 +69,44 @@ Check(nodes.Any(e => e.Name.LocalName == "Expander" &&
   (string?)e.Attribute("Header") == "Detailed statistics"),
   "secondary statistics are available without duplicating the summary");
 
+
+var browserRoot = Path.Combine(Path.GetTempPath(), "gcr-browser-reader-" + Guid.NewGuid());
+Directory.CreateDirectory(browserRoot);
+try
+{
+  var day = DateTime.UtcNow.Date;
+  var testNow = new DateTimeOffset(day.AddHours(20), TimeSpan.Zero);
+  var morning = new DateTimeOffset(day.AddHours(12), TimeSpan.Zero);
+  var first = "123e4567-e89b-42d3-a456-426614174000";
+  var second = "123e4567-e89b-42d3-a456-426614174001";
+  string BrowserEvent(string type, string session, DateTimeOffset when, int? user = null, int? assistant = null,
+    string source = "chatgpt_browser") => JsonSerializer.Serialize(new {
+      schemaVersion = 1, source, timestamp = when, eventType = type,
+      sessionPseudonym = session, visibleUser = user, visibleAssistant = assistant, secret = "NEVER-EXPOSE" });
+  var browserFile = Path.Combine(browserRoot, $"events-{day:yyyyMMdd}-000.jsonl");
+  File.WriteAllLines(browserFile, new[] {
+    BrowserEvent("session_started", first, morning),
+    BrowserEvent("visible_counts", first, morning.AddSeconds(1), 2, 3),
+    BrowserEvent("visible_counts", first, morning.AddSeconds(2), 3, 5),
+    BrowserEvent("session_started", second, morning.AddSeconds(3)),
+    BrowserEvent("visible_counts", second, morning.AddSeconds(4), 1, 1),
+    BrowserEvent("session_ended", first, morning.AddSeconds(5)),
+    BrowserEvent("visible_counts", second, morning.AddSeconds(6), 900, 900, "unknown_source"),
+    BrowserEvent("visible_counts", first, morning.AddDays(-1), 999, 999),
+    "{invalid json"
+  });
+  var browser = BrowserActivityReader.ReadFrom(browserRoot, testNow);
+  Check(browser.SessionsToday == 2 && browser.EventsToday == 6,
+    "browser reader counts only valid current-day events");
+  Check(browser.VisibleUser == 4 && browser.VisibleAssistant == 6,
+    "browser reader uses latest count per approved session");
+  Check(!JsonSerializer.Serialize(browser).Contains("NEVER-EXPOSE"),
+    "browser summary excludes payload text and secrets");
+  Check(browser.Latest.Contains("tracking stopped"),
+    "browser reader exposes only safe status labels");
+}
+finally { Directory.Delete(browserRoot, true); }
+
 InsightTests.Run();
 
 if (args.Contains("--local"))
