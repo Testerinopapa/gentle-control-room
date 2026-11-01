@@ -196,6 +196,55 @@ try
     "session count includes valid recorded activity even if a start was missed");
   Check(partialSession.EventsToday == history.EventsToday + 2,
     "local appended events are included on subsequent refreshes");
+  var workflowRoot = Path.Combine(browserRoot, "workflow-fixture");
+  Directory.CreateDirectory(workflowRoot);
+  var workflowSessions = Enumerable.Range(8, 3)
+    .Select(i => "123e4567-e89b-42d3-a456-4266141740" + i.ToString("D2")).ToArray();
+  // Ensure the session identifiers are complete, random-looking UUIDs.
+  workflowSessions = new[] {
+    "123e4567-e89b-42d3-a456-426614174008",
+    "123e4567-e89b-42d3-a456-426614174009",
+    "123e4567-e89b-42d3-a456-426614174010"
+  };
+  string WorkflowEvent(string sessionId, int offset, string? stage = null,
+    string kind = "workflow_stage") => JsonSerializer.Serialize(new {
+      schemaVersion = 1, source = "chatgpt_browser",
+      timestamp = olderAt.AddMinutes(offset),
+      eventType = kind, sessionPseudonym = sessionId,
+      workflowStage = stage, prompt = "PRIVATE-REQUEST-CONTENT"
+    });
+  File.WriteAllLines(Path.Combine(workflowRoot, $"events-{olderDay:yyyyMMdd}-000.jsonl"),
+    workflowSessions.SelectMany((sessionId, i) => new[] {
+      WorkflowEvent(sessionId, 20 * i, null, "session_started"),
+      WorkflowEvent(sessionId, 20 * i + 1, "debugging"),
+      WorkflowEvent(sessionId, 20 * i + 2, "implementation"),
+      WorkflowEvent(sessionId, 20 * i + 3, "testing")
+    }));
+  var analyzed = BrowserActivityReader.ReadFrom(workflowRoot, testNow, CodexPeriod.AvailableHistory);
+  Check(analyzed.ClassifiedRequests == 9 && analyzed.AnalyzedSessions == 3 &&
+    analyzed.WorkflowSummary.Contains("Debugging (3)") &&
+    analyzed.WorkflowSummary.Contains("Implementation (3)"),
+    "coding workflow requests are classified and summarized across sessions");
+  Check(analyzed.Patterns.Any(p => p.Contains("Debugging") &&
+    p.Contains("Implementation") && p.Contains("3 separate")),
+    "repeated debugging-to-implementation sequence generates a meaningful pattern");
+  Check(analyzed.Patterns.Any(p => p.Contains("Implementation") &&
+    p.Contains("Testing") && p.Contains("3 separate")),
+    "implementation-to-testing sequence appears after three distinct sessions");
+  Check(analyzed.History.All(h => h.Summary.Contains("categorized coding requests")) &&
+    !JsonSerializer.Serialize(analyzed).Contains("PRIVATE-REQUEST-CONTENT"),
+    "no prompt text is stored in coding workflow summaries");
+  File.WriteAllLines(Path.Combine(workflowRoot, $"events-{olderDay:yyyyMMdd}-000.jsonl"),
+    workflowSessions.Take(2).SelectMany((sessionId, i) => new[] {
+      WorkflowEvent(sessionId, 20 * i + 1, "debugging"),
+      WorkflowEvent(sessionId, 20 * i + 2, "implementation")
+    }));
+  var early = BrowserActivityReader.ReadFrom(workflowRoot, testNow, CodexPeriod.AvailableHistory);
+  Check(early.AnalyzedSessions == 2 && early.Patterns.Count == 0 &&
+    early.WorkflowSummary.Contains("4 categorized requests"),
+    "two sessions produce preliminary analysis without claiming recurrence");
+
+
 
 
 
