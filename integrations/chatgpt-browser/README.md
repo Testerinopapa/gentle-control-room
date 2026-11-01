@@ -7,6 +7,7 @@ Opt-in, **local-only** metadata collection for ChatGPT conversations in Edge. Th
 For each conversation you explicitly turn ON in Edge, the extension records:
 - start and stop of the approved browser session;
 - approximate **rendered** counts of user and assistant message elements, detected from modern ChatGPT timeline markers or legacy role markers;
+- rendered code-block count and an explicitly selected coding-work tag, when available;
 - event timestamp and a newly generated, random session identifier.
 
 **It does not read or store prompt text, assistant responses, code, message titles, conversation URLs, conversation IDs, browser cookies, credentials, tokens, clipboard, or other tabs.** No network endpoints, fetch clients or background requests are used. This is not ChatGPT account integration and cannot observe all chats automatically. DOM markers may be missing or virtualized, so counts are estimates, not authoritative conversation totals.
@@ -80,6 +81,41 @@ Under **Visible messages**, the sidebar now reports an observer status:
 - **Last count update is older than 20 seconds:** check the local Windows connection if the visible messages have changed.
 
 The counters are **not lifetime conversation totals**: ChatGPT may only mount some messages in a long or virtualized thread, and scrolling can change the displayed counts. A successful recording means local event metadata is being stored, not that every reply or conversation turn was captured.
+
+## Coding activity in recurring patterns (v0.3.0)
+
+The native **Recurring Patterns · Codex + ChatGPT** section now combines source-labeled signals from both local collectors. Each existing Codex sequence continues to use actual Codex hook events.
+
+For an explicitly enabled ChatGPT conversation, this extension can now:
+
+- Count rendered **code example containers** in the active ChatGPT conversation. This is structural metadata only: code contents, file paths, commands, prompts, and replies are not read or saved.
+- Let you click **Mark as coding work** in the Edge side panel. Use this when you ask ChatGPT to edit files via connected tools or discuss implementation without displaying code examples. You can remove the tag before ending recording.
+- Store only the number of rendered code examples and a yes/no coding tag alongside existing local session counts, via the same allowlisted Windows native messaging host.
+
+A pattern appears after **at least three separate opted-in browser sessions** show the same coding signal. Repeated events within one session do not artificially create recurrence. Select **Last 7 days** or **Available history** in Gentle Control Room to include earlier sessions. The ChatGPT panel displays how many coding-related sessions and visible code examples have been captured for the selected period.
+
+**Important attribution:** A code block appearing in ChatGPT or a user-marked coding session is evidence of coding-related discussion, **not proof that repository files changed or that ChatGPT performed an edit**. Verified coding tool patterns remain sourced from Codex hooks. Correlating GitHub commits would need a separate explicit integration and cannot be inferred from these browser counts.
+
+### Upgrade and test
+
+This upgrade changes the native event schema, so update **both** the browser extension and the native messaging host:
+
+1. From repository root: `git pull --ff-only origin main`.
+2. In Edge `edge://extensions`, click **Reload** for Gentle Control Room; verify version `0.3.0`.
+3. Rebuild and re-register the Windows host:
+   ```powershell
+   .\\integrations\\chatgpt-browser\\install-host.ps1 -ExtensionId "YOUR_32_CHARACTER_EDGE_EXTENSION_ID"
+   ```
+   If you are already inside `integrations\\chatgpt-browser`, use `.\\install-host.ps1 -ExtensionId "YOUR_32_CHARACTER_EDGE_EXTENSION_ID"` instead.
+4. Fully **Exit** the Gentle Control Room tray app and rebuild its native executable from the repository:
+   ```powershell
+   dotnet run --project .\\desktop\\GentleControlRoom.Desktop\\GentleControlRoom.Desktop.csproj -c Release
+   ```
+   Running the repo's executable does not automatically update a separately installed Start-menu copy.
+5. Reopen the ChatGPT conversation in Edge. Start recording, use **Mark as coding work** (or view a code block), and check that the sidebar shows the new metadata. In the Windows app, select **Available history** and press **Refresh**.
+6. To establish an actual recurring pattern, record **three distinct ChatGPT sessions** with that signal. The pattern should then appear in the combined list.
+
+Existing browser activity files remain readable, but historical message counts from older extension versions **cannot** be retrospectively classified as coding.
 
 ## Verify
 
