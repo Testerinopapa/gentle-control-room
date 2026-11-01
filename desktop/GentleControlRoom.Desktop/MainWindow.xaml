@@ -15,9 +15,40 @@
         Loaded="Window_Loaded"
         StateChanged="Window_StateChanged">
   <Grid>
-    <wv2:WebView2 x:Name="AppWebView" />
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
 
-    <Border x:Name="LoadingOverlay"
+    <wv2:WebView2 Grid.Row="0" x:Name="AppWebView" />
+
+    <!-- Native only: no Codex data is passed to the hosted web page. -->
+    <Border Grid.Row="1" Background="#F8FAFC" BorderBrush="#CBD5E1"
+            BorderThickness="0,1,0,0" Padding="16,12">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" LastChildFill="False">
+          <TextBlock Text="Codex Activity · Local" FontSize="16" FontWeight="SemiBold"
+                     Foreground="#0F172A" VerticalAlignment="Center" />
+          <TextBlock x:Name="CodexStatusText" Text="Checking..." FontSize="16"
+                     Foreground="#475569" Margin="12,0,0,0" VerticalAlignment="Center" />
+          <Button Content="Refresh" DockPanel.Dock="Right" Margin="14,0,0,0" Padding="8,2"
+                  FontSize="16" Click="CodexRefresh_Click" />
+        </DockPanel>
+        <TextBlock Grid.Row="1" x:Name="CodexSummaryText" Margin="0,6,0,0"
+                   FontSize="16" Foreground="#334155" TextWrapping="Wrap"
+                   Text="No local activity available." />
+        <TextBlock Grid.Row="2" x:Name="CodexLastEventText" Margin="0,4,0,0"
+                   FontSize="16" Foreground="#64748B" TextWrapping="Wrap"
+                   Text="Local data stays on this Windows account." />
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="0" x:Name="LoadingOverlay"
             Background="#F3F6FB"
             Padding="32">
       <StackPanel VerticalAlignment="Center"
