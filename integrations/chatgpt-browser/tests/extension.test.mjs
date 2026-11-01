@@ -8,7 +8,7 @@ const source = readFileSync(new URL("../extension/background.js", import.meta.ur
 const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 const panelMarkup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
 const panelLogic = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
-function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
+function harness(url = "https://chatgpt.com/c/synthetic-conversation", nativeResponse = { ok: true }) {
   let listener, updatedListener, removedListener;
   const stored = new Map();
   const native = [];
@@ -25,7 +25,11 @@ function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
     },
     runtime: {
       onMessage: { addListener(fn) { listener = fn; } },
-      async sendNativeMessage(_host, message) { native.push(message); return { ok: true }; }
+      async sendNativeMessage(_host, message) {
+        native.push(message);
+        if (nativeResponse instanceof Error) throw nativeResponse;
+        return nativeResponse;
+      }
     },
     tabs: {
       async get(id) { assert.equal(id, 9); return { id, url }; },
@@ -226,13 +230,15 @@ test("native host health check does not start or save a conversation", async () 
   assert.equal(h.stored.size, 0);
 });
 
-test("connection errors return actionable information without enabling recording", async () => {
-  const h = harness();
-  // Simulate an unavailable native bridge using a new test harness.
-  assert.equal(h.stored.size, 0);
-  const invalid = await h.send({ type: "start", tabId: 9 });
-  assert.equal(invalid.ok, true, "baseline native host works");
-  await h.send({ type: "stop", tabId: 9 });
+test("connection errors explain missing host and keep recording off", async () => {
+  const h = harness("https://chatgpt.com/c/demo",
+    new Error("Specified native messaging host not found."));
+  const ping = await h.send({ type: "testConnection" });
+  assert.equal(ping.ok, false);
+  assert.match(ping.error, /install-host\.ps1/);
+  const start = await h.send({ type: "start", tabId: 9 });
+  assert.equal(start.ok, false);
+  assert.match(start.error, /install-host\.ps1/);
   assert.equal(h.stored.size, 0);
 });
 
