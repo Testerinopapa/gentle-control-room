@@ -6,7 +6,7 @@ Opt-in, **local-only** metadata collection for ChatGPT conversations in Edge. Th
 
 For each conversation you explicitly turn ON in Edge, the extension records:
 - start and stop of the approved browser session;
-- approximate **visible** counts of user and assistant message elements (only when that page exposes standard role markers);
+- approximate **rendered** counts of user and assistant message elements, detected from modern ChatGPT timeline markers or legacy role markers;
 - event timestamp and a newly generated, random session identifier.
 
 **It does not read or store prompt text, assistant responses, code, message titles, conversation URLs, conversation IDs, browser cookies, credentials, tokens, clipboard, or other tabs.** No network endpoints, fetch clients or background requests are used. This is not ChatGPT account integration and cannot observe all chats automatically. DOM markers may be missing or virtualized, so counts are estimates, not authoritative conversation totals.
@@ -64,6 +64,22 @@ If **Start for this conversation** leaves the status at Off, the extension has n
 5. Try Start again. Expect **Recording**, an ON badge, and counts updating when ChatGPT renders new messages. Counts are approximate and may remain at zero when ChatGPT does not expose the expected role markers.
 
 If Edge reports that the native host cannot be found, repeat installation. If it reports that access is forbidden, check the extension ID. If it reports that the host exited, rebuild the host and rerun the installer. Never share private chat content or credentials while troubleshooting.
+
+## Recording is ON but message counts do not update
+
+ChatGPT changed its conversation markup in October 2026. The original collector only recognized `data-message-author-role` attributes, which may now match zero elements. The updated observer first checks the **visible** `[data-app-action-timeline-scroll][role="region"]` and its role-specific structural markers. Legacy selectors remain as fallbacks. It never reads message text or the values of message identifiers.
+
+**To apply the update:** run `git pull --ff-only origin main`, open `edge://extensions`, and press **Reload**. You do **not** need to rebuild/reinstall the native host or rerun the Codex hook setup for this JavaScript-only update. Reloading the extension ends in-progress observations, so return to the ChatGPT tab and click **Start for this conversation** again.
+
+Under **Visible messages**, the sidebar now reports an observer status:
+
+- **Page observer working:** the page exposes recognized markers and the Windows host acknowledged the latest count update.
+- **Waiting for the ChatGPT page observer:** the content script has not checked in; stop, reload the ChatGPT tab, and restart.
+- **Message layout is not recognized:** selectors are no longer supported; the collector will **not** send misleading zero counts.
+- **Waiting for message containers:** ChatGPT has not mounted the conversation's visible timeline yet.
+- **Last count update is older than 20 seconds:** check the local Windows connection if the visible messages have changed.
+
+The counters are **not lifetime conversation totals**: ChatGPT may only mount some messages in a long or virtualized thread, and scrolling can change the displayed counts. A successful recording means local event metadata is being stored, not that every reply or conversation turn was captured.
 
 ## Verify
 
