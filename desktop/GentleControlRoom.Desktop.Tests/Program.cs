@@ -104,6 +104,14 @@ try
     "browser summary excludes payload text and secrets");
   Check(browser.Latest.Contains("tracking stopped"),
     "browser reader exposes only safe status labels");
+  Check(browser.StoreFound && browser.FilesRead == 1 &&
+    browser.StartedSessions == 2 && browser.SessionsToday == 2 &&
+    browser.LatestEventUtc.HasValue,
+    "dashboard reports local file availability and actual start events");
+  Check(!BrowserActivityReader.ReadFrom(
+    Path.Combine(browserRoot, "does-not-exist"), testNow).StoreFound,
+    "missing activity folder is identified explicitly");
+
 
   var olderDay = day.AddDays(-3);
   var olderAt = new DateTimeOffset(olderDay.AddHours(12), TimeSpan.Zero);
@@ -148,6 +156,17 @@ try
   Check(unmarked.Patterns.Count == 1 &&
     unmarked.Patterns[0].Contains("code examples") && unmarked.CodingSessions == 3,
     "removing a coding tag retracts only the manual-tag recurrence");
+
+  File.AppendAllText(browserFile, "\n" + BrowserEvent(
+    "visible_counts", "123e4567-e89b-42d3-a456-426614174007",
+    morning.AddMinutes(30), 1, 1));
+  var partialSession = BrowserActivityReader.ReadFrom(
+    browserRoot, testNow, CodexPeriod.AvailableHistory);
+  Check(partialSession.SessionsToday == 6 && partialSession.StartedSessions == 5,
+    "session count includes valid recorded activity even if a start was missed");
+  Check(partialSession.EventsToday == history.EventsToday + 2,
+    "local appended events are included on subsequent refreshes");
+
 
 
 }
