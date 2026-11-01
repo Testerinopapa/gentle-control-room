@@ -1,0 +1,85 @@
+<UserControl x:Class="GentleControlRoom.Desktop.CodingWorkPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" FontFamily="Segoe UI" FontSize="16" Loaded="Panel_Loaded">
+ <UserControl.Resources>
+  <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="0,3,0,6"/></Style>
+  <Style TargetType="Button"><Setter Property="Padding" Value="10,6"/><Setter Property="Margin" Value="0,4,8,4"/></Style>
+  <Style TargetType="TextBox"><Setter Property="Padding" Value="6"/><Setter Property="Margin" Value="0,3,0,8"/></Style>
+  <Style TargetType="Expander"><Setter Property="Margin" Value="0,8,0,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
+ </UserControl.Resources>
+ <StackPanel>
+  <TextBlock Text="Coding Work Analysis" FontSize="20" FontWeight="SemiBold"/>
+  <TextBlock x:Name="WorkSummary" Text="Your tasks, evidence and analysis stay on this Windows account."/>
+  <TextBlock x:Name="WorkStatus" Foreground="#475569" AutomationProperties.LiveSetting="Polite"/>
+  <WrapPanel>
+   <Button Content="Refresh evidence" Click="Refresh_Click"/>
+   <Button Content="Analyze task" Click="Analyze_Click"/>
+   <Button Content="Analyze available tasks" Click="AnalyzeAll_Click"/>
+  </WrapPanel>
+  <Expander Header="Analysis settings">
+   <StackPanel>
+    <CheckBox x:Name="LocalConsent" Content="Enable local coding-task analysis" Margin="0,8"/>
+    <CheckBox x:Name="ExternalConsent" Margin="0,8"><TextBlock Text="Allow external DeepSeek analysis after I review and approve each payload"/></CheckBox>
+    <TextBlock Text="DeepSeek API key · encrypted for this Windows account"/>
+    <PasswordBox x:Name="ApiKey" Padding="6" FontSize="16" AutomationProperties.Name="DeepSeek API key"/>
+    <TextBlock Text="Model"/>
+    <ComboBox x:Name="ModelChoice" SelectedIndex="0" AutomationProperties.Name="DeepSeek model"><ComboBoxItem Content="deepseek-flash"/><ComboBoxItem Content="deepseek-v4-pro"/></ComboBox>
+    <TextBlock Text="Maximum output tokens (256–8000)"/><TextBox x:Name="TokenLimit" Text="2500" AutomationProperties.Name="Maximum output tokens"/>
+    <TextBlock Text="Daily request limit, including retries (1–100)"/><TextBox x:Name="RequestLimit" Text="10" AutomationProperties.Name="Daily request limit"/>
+    <TextBlock Text="Daily token reservation budget (1000–1000000)"/><TextBox x:Name="BudgetLimit" Text="100000" AutomationProperties.Name="Daily token budget"/>
+    <TextBlock Text="Timeout seconds (5–120)"/><TextBox x:Name="TimeoutLimit" Text="45" AutomationProperties.Name="Request timeout"/>
+    <TextBlock Text="Retries for busy/server errors (0–2)"/><TextBox x:Name="RetryLimit" Text="1" AutomationProperties.Name="Retry limit"/>
+    <WrapPanel><Button Content="Save settings" Click="SaveSettings_Click"/><Button Content="Remove API key" Click="RemoveKey_Click"/></WrapPanel>
+    <TextBlock Text="No external request runs on the activity refresh timer. Request attempts reserve tokens conservatively; failed requests still count." Foreground="#64748B"/>
+   </StackPanel>
+  </Expander>
+  <TextBlock Text="Selected coding task" FontWeight="SemiBold"/>
+  <ComboBox x:Name="TaskChoice" DisplayMemberPath="Objective" SelectionChanged="Task_Changed" AutomationProperties.Name="Coding task"/>
+  <Expander Header="Create or update a task">
+   <StackPanel>
+    <TextBlock Text="Objective"/><TextBox x:Name="Objective" MaxLength="240" AutomationProperties.Name="Task objective"/>
+    <TextBlock Text="Project / repository display name (no local path)"/><TextBox x:Name="Repository" MaxLength="160" AutomationProperties.Name="Repository display name"/>
+    <ComboBox x:Name="TaskStatus" SelectedIndex="0" AutomationProperties.Name="Declared task status"><ComboBoxItem Content="Active"/><ComboBoxItem Content="Completed"/><ComboBoxItem Content="Unresolved"/><ComboBoxItem Content="Abandoned"/></ComboBox>
+    <WrapPanel><Button Content="Create task" Click="Create_Click"/><Button Content="Update selected task" Click="Update_Click"/></WrapPanel>
+    <TextBlock Text="Status is your declaration, not proof of completion. A task can span conversations, sessions and days." Foreground="#64748B"/>
+   </StackPanel>
+  </Expander>
+  <Expander Header="Add selected context or repository evidence">
+   <StackPanel>
+    <TextBlock Text="Add a short task summary, decision, blocker, or deliberately selected excerpt. Never paste credentials or an entire conversation."/>
+    <ComboBox x:Name="ContextCategory" SelectedIndex="0" AutomationProperties.Name="Context category">
+     <ComboBoxItem Content="Context"/><ComboBoxItem Content="Investigation"/><ComboBoxItem Content="Planning"/><ComboBoxItem Content="Implementation"/><ComboBoxItem Content="Debugging"/><ComboBoxItem Content="Testing"/><ComboBoxItem Content="Revision"/><ComboBoxItem Content="Verification"/><ComboBoxItem Content="Completion"/><ComboBoxItem Content="Blocker"/><ComboBoxItem Content="Decision"/>
+    </ComboBox>
+    <TextBox x:Name="ContextText" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxLength="4000" AutomationProperties.Name="Selected task context"/>
+    <Button Content="Add context locally" Click="AddContext_Click" HorizontalAlignment="Left"/>
+    <TextBlock Text="Manual context remains unverified. Importing Git history reads up to 50 local commits: hashes, dates and file counts only. Choose which commits belong to this task below." Foreground="#64748B"/>
+    <Button Content="Choose repository and import commit evidence" Click="ImportGit_Click" HorizontalAlignment="Left"/>
+   </StackPanel>
+  </Expander>
+  <Expander Header="Confirm or correct evidence associations">
+   <StackPanel>
+    <TextBlock Text="Select observations, then assign them to the selected task or detach them. Shared sessions/projects suggest candidates only; they do not prove a shared objective."/>
+    <ComboBox x:Name="EvidenceFilter" SelectedIndex="0" SelectionChanged="EvidenceFilter_Changed" AutomationProperties.Name="Evidence filter"><ComboBoxItem Content="Unassigned evidence"/><ComboBoxItem Content="Selected task evidence"/><ComboBoxItem Content="All evidence"/></ComboBox>
+    <WrapPanel><Button Content="Assign selected to task" Click="Assign_Click"/><Button Content="Detach selected" Click="Detach_Click"/><Button Content="Previous" Click="Previous_Click"/><Button Content="Next" Click="Next_Click"/></WrapPanel>
+    <TextBlock x:Name="EvidenceCount"/>
+    <ItemsControl x:Name="EvidenceList"><ItemsControl.ItemTemplate><DataTemplate>
+     <CheckBox IsChecked="{Binding Selected, Mode=TwoWay}" Margin="0,6" HorizontalContentAlignment="Stretch"><StackPanel><TextBlock Text="{Binding Display}"/><TextBlock Text="{Binding Association}" Foreground="#64748B"/></StackPanel></CheckBox>
+    </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   </StackPanel>
+  </Expander>
+  <StackPanel x:Name="PayloadArea" Visibility="Collapsed">
+   <TextBlock Text="Review DeepSeek payload" FontSize="20" FontWeight="SemiBold"/>
+   <TextBlock Text="The following JSON is the exact request body sent to api.deepseek.com. The encrypted API key is added separately. Cancel to keep everything local."/>
+   <Expander Header="Exact minimized request" IsExpanded="True"><TextBlock x:Name="PayloadText" FontSize="16"/></Expander>
+   <CheckBox x:Name="PayloadApproval"><TextBlock Text="I reviewed this payload and approve sending it to DeepSeek, including the configured bounded retries."/></CheckBox>
+   <WrapPanel><Button x:Name="SendButton" Content="Approve and analyze" Click="Send_Click"/><Button Content="Cancel" Click="Cancel_Click"/></WrapPanel>
+  </StackPanel>
+  <TextBlock Text="Tasks and history" FontWeight="SemiBold" Margin="0,16,0,8"/>
+  <ItemsControl x:Name="TaskHistory"><ItemsControl.ItemTemplate><DataTemplate>
+   <Expander HorizontalContentAlignment="Stretch"><Expander.Header><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/></Expander.Header>
+    <StackPanel><TextBlock Text="{Binding Summary}"/><TextBlock Text="{Binding Analysis}"/><Expander Header="Timeline and supporting evidence"><TextBlock Text="{Binding Timeline}"/></Expander></StackPanel>
+   </Expander>
+  </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+  <Expander Header="Recurring patterns and workflow improvements" IsExpanded="True"><ItemsControl x:Name="WorkPatterns"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Margin="0,8"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
+ </StackPanel>
+</UserControl>

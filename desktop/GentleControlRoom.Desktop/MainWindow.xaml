@@ -1,6 +1,7 @@
 <Window x:Class="GentleControlRoom.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:GentleControlRoom.Desktop"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Gentle Control Room" Width="740" Height="760" MinWidth="520" MinHeight="360"
         FontFamily="Segoe UI" FontSize="16" Foreground="#0F172A" Background="#F6F7F9"
@@ -25,10 +26,12 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <Border Grid.Row="1" x:Name="CodingWorkCard" Margin="12,4,12,12" Padding="20" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10"><local:CodingWorkPanel /></Border>
         <wv2:WebView2CompositionControl Grid.Row="0" x:Name="AppWebView" Height="600" />
         <!-- This native subtree is not serialized to the remotely hosted WebView. -->
-        <Border Grid.Row="1" x:Name="ActivityCard" Margin="12,4,12,12" Padding="20"
+        <Border Grid.Row="2" x:Name="ActivityCard" Margin="12,4,12,12" Padding="20"
                 Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10">
           <Grid>
             <Grid.RowDefinitions>
@@ -124,7 +127,7 @@
               </ItemsControl>
             </Grid>
 
-            <TextBlock Grid.Row="7" Text="Recurring Patterns · Codex + ChatGPT" Style="{StaticResource Heading}" />
+            <TextBlock Grid.Row="7" Text="Activity signals · metadata only" Style="{StaticResource Heading}" />
             <StackPanel Grid.Row="8" Margin="0,0,0,16">
               <TextBlock x:Name="WorkflowSummaryText"
                          Text="No local coding workflow analysis yet."
@@ -220,7 +223,7 @@
         </Border>
 
         <!-- Browser event summaries are native WPF only, never exposed to hosted WebView. -->
-        <Border Grid.Row="2" x:Name="BrowserActivityCard" Margin="12,0,12,12" Padding="20"
+        <Border Grid.Row="3" x:Name="BrowserActivityCard" Margin="12,0,12,12" Padding="20"
                 Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10">
           <Grid>
             <Grid.RowDefinitions>

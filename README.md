@@ -22,3 +22,7 @@ Windows desktop packaging:
 - Desktop host project: `desktop/GentleControlRoom.Desktop`
 - Installer script: `installer/GentleControlRoom.iss`
 - Build/package guide: `docs/windows-desktop-installer.md`
+
+Coding-work analysis (native Windows):
+- Task reconstruction, explicit DeepSeek payload approval, local persistence and verification walkthrough: [Phase 2 guide](docs/deepseek-coding-work.md).
+- This feature is separate from the legacy alert web dashboard and metadata statistics.

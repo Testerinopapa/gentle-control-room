@@ -18,6 +18,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -49,39 +50,45 @@ def codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser().resolve()
 
 
+_local_gate = threading.RLock()
+
+
 @contextmanager
 def locked(root: Path):
     """Mutual exclusion across independently launched Codex hook processes."""
     root.mkdir(parents=True, exist_ok=True)
     lock_path = root / ".lock"
-    with lock_path.open("a+b") as lock_file:
-        lock_file.seek(0, os.SEEK_END)
-        if lock_file.tell() == 0:
-            lock_file.write(b"0")
-            lock_file.flush()
-        lock_file.seek(0)
-        if os.name == "nt":
-            import msvcrt
-            for attempt in range(100):
+    # Serialize same-process threads before competing for the OS file lock.
+    # The file lock still enforces exclusion across independently launched hooks.
+    with _local_gate:
+        with lock_path.open("a+b") as lock_file:
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write(b"0")
+                lock_file.flush()
+            lock_file.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                for attempt in range(100):
+                    try:
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError:
+                        if attempt == 99:
+                            raise
+                        time.sleep(.02)
                 try:
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    if attempt == 99:
-                        raise
-                    time.sleep(.02)
-            try:
-                yield
-            finally:
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl  # test harness on Unix; hook is Windows-only
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    yield
+                finally:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl  # test harness on Unix; hook is Windows-only
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def atomic_json(path: Path, obj: dict) -> None:

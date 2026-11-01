@@ -249,6 +249,7 @@ try
 finally { Directory.Delete(browserRoot, true); }
 
 InsightTests.Run();
+await CodingWorkTests.Run();
 
 if (args.Contains("--local"))
 {

@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - 'integrations/chatgpt-browser/**'
+      - 'integrations/codex/**'
       - 'desktop/GentleControlRoom.Desktop/**'
       - 'desktop/GentleControlRoom.Desktop.Tests/**'
       - '.github/workflows/browser-activity.yml'
   pull_request:
     paths:
       - 'integrations/chatgpt-browser/**'
+      - 'integrations/codex/**'
       - 'desktop/GentleControlRoom.Desktop/**'
       - 'desktop/GentleControlRoom.Desktop.Tests/**'
 
@@ -24,6 +26,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Codex collector regressions
+        run: python -m unittest discover -s integrations/codex/tests -v
       - name: Validate Edge extension syntax
         shell: pwsh
         run: |

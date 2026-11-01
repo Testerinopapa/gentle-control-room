@@ -48,6 +48,7 @@ public partial class MainWindow : System.Windows.Window
       "desktop-host.log");
     _notifyIcon = CreateNotifyIcon();
     RegisterToastActivationHandler();
+    CodingWorkCard.SizeChanged += (_, _) => FitWorkspaceHeight();
     ActivityCard.SizeChanged += (_, _) => FitWorkspaceHeight();
     BrowserActivityCard.SizeChanged += (_, _) => FitWorkspaceHeight();
     _codexTimer.Tick += (_, _) => RefreshCodexActivity();
