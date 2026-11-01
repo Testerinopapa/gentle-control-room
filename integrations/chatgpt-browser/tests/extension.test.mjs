@@ -187,6 +187,9 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
             visibleUser: active ? 2 : null,
             visibleAssistant: active ? 3 : null };
         }
+        if (message.type === "testConnection") {
+          return { ok: true, connected: true };
+        }
         if (message.type === "start") { active = true; nativeStarts++; return { ok: true }; }
         if (message.type === "stop") { active = false; return { ok: true }; }
         throw new Error("Unexpected operation");
@@ -203,6 +206,10 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   assert.equal(nativeStarts, 0, "opening the panel must never start collection");
   assert.equal(dom.get("state-label").textContent, "Off");
   assert.equal(dom.get("start").disabled, false);
+  listeners.get("check-connection:click")();
+  await settle();
+  assert.equal(nativeStarts, 0, "diagnosing the host must not start tracking");
+  assert.match(dom.get("connection-state").textContent, /Connected/);
   listeners.get("start:click")();
   await settle();
   assert.equal(nativeStarts, 1);
