@@ -69,7 +69,7 @@ async function refresh() {
     } else if (result.detector === "waiting") {
       observerNode.textContent = "Observer connected. Waiting for message containers to render.";
     } else if (Number.isFinite(result.lastCountAt) && Date.now() - result.lastCountAt > 20000) {
-      observerNode.textContent = "Observer connected. The last count update is older than 20 seconds; check Windows connection if counts changed.";
+      observerNode.textContent = "Observer is connected, but the visible message count has not changed recently. Long conversations may keep only a fixed number of messages rendered.";
     } else if (Number.isFinite(result.lastCountAt)) {
       observerNode.textContent = "Page observer working. Counts will update as visible messages change.";
     } else {
