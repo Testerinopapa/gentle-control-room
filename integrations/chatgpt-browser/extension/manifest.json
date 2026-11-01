@@ -1,12 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.1.0",
-  "description": "Opt-in, local-only ChatGPT session counts. Does not read or save conversation text.",
-  "permissions": ["activeTab", "scripting", "storage", "nativeMessaging"],
+  "version": "0.2.0",
+  "description": "Opt-in, local-only ChatGPT activity in the Microsoft Edge sidebar.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "nativeMessaging",
+    "sidePanel"
+  ],
   "action": {
-    "default_title": "ChatGPT Activity — Off",
-    "default_popup": "popup.html"
+    "default_title": "Open ChatGPT Activity sidebar"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "background": {
     "service_worker": "background.js"
