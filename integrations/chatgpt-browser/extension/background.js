@@ -4,6 +4,10 @@ const KEY = (tabId) => "gcrChatGPTTab:" + tabId;
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const DETECTORS = new Set(["current", "legacy", "waiting", "unsupported"]);
+const WORKFLOW_STAGES = new Set([
+  "investigation", "implementation", "debugging", "testing",
+  "version_control", "deployment"
+]);
 
 // Clicking the extension toolbar icon opens the persistent Edge side panel.
 // This does not start tracking: collection still requires an explicit Start click.
@@ -74,7 +78,7 @@ async function start(tabId) {
     [KEY(tabId)]: {
       id, page: new URL(tab.url).pathname,
       visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
-      codingMarked: false,
+      codingMarked: false, workflowEnabled: false, workflowStages: 0,
       detector: null, lastObservedAt: null, lastCountAt: null
     }
   });
@@ -100,13 +104,33 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.type === "visibleCounts" ||
         message.type === "conversationChanged" ||
-        message.type === "observerStatus") {
+        message.type === "observerStatus" ||
+        message.type === "workflowStage") {
       const tabId = sender.tab?.id;
       if (!Number.isInteger(tabId)) return { ok: false };
       const session = await getSession(tabId);
       if (!session) return { ok: false };
       if (message.type === "conversationChanged") {
         await stop(tabId);
+        return { ok: true };
+      }
+      if (message.type === "workflowStage") {
+        // Explicit per-conversation consent, distinct from metadata recording.
+        if (!session.workflowEnabled || !WORKFLOW_STAGES.has(message.stage) ||
+            (session.workflowStages ?? 0) >= 120) return { ok: false };
+        const sourceTab = await chrome.tabs.get(tabId);
+        if (!eligible(sourceTab.url) ||
+            session.page !== new URL(sourceTab.url).pathname) {
+          await stop(tabId);
+          return { ok: false };
+        }
+        await nativeEvent("workflow_stage", session.id, { stage: message.stage });
+        const current = await getSession(tabId);
+        if (current?.id === session.id && current.workflowEnabled) {
+          await chrome.storage.session.set({
+            [KEY(tabId)]: { ...current, workflowStages: (current.workflowStages ?? 0) + 1 }
+          });
+        }
         return { ok: true };
       }
       if (message.type === "observerStatus") {
@@ -161,6 +185,41 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const tabId = message.tabId;
     if (!Number.isInteger(tabId)) throw new Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
+    if (message.type === "setWorkflowAnalysis") {
+      if (typeof message.enabled !== "boolean") throw new Error("Invalid analysis setting.");
+      const session = await getSession(tabId);
+      if (!session || !eligible(tab.url) ||
+          session.page !== new URL(tab.url).pathname)
+        throw new Error("Start recording this conversation before enabling workflow analysis.");
+      if (message.enabled === Boolean(session.workflowEnabled)) return { ok: true };
+      if (!message.enabled) {
+        // Revoke permission before sending the stop command to the page.
+        await chrome.storage.session.set({
+          [KEY(tabId)]: { ...session, workflowEnabled: false }
+        });
+        await chrome.tabs.sendMessage(tabId, {
+          type: "gcrWorkflowMode", enabled: false
+        }).catch(() => {});
+        return { ok: true };
+      }
+      // Never authorize text inspection if the page observer cannot be reached.
+      const updated = { ...session, workflowEnabled: true };
+      await chrome.storage.session.set({ [KEY(tabId)]: updated });
+      try {
+        await chrome.tabs.sendMessage(tabId, {
+          type: "gcrWorkflowMode", enabled: true
+        });
+      } catch {
+        const current = await getSession(tabId);
+        if (current?.id === session.id) {
+          await chrome.storage.session.set({
+            [KEY(tabId)]: { ...current, workflowEnabled: false }
+          });
+        }
+        throw new Error("The page observer is unavailable. Reload ChatGPT, start recording and try again.");
+      }
+      return { ok: true };
+    }
     if (message.type === "setCodingTag") {
       if (typeof message.codingMarked !== "boolean") {
         throw new Error("Invalid coding activity selection.");
@@ -200,6 +259,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         visibleAssistant: samePage ? session?.visibleAssistant ?? null : null,
         visibleCodeBlocks: samePage ? session?.visibleCodeBlocks ?? null : null,
         codingMarked: Boolean(samePage && session?.codingMarked),
+        workflowEnabled: Boolean(samePage && session?.workflowEnabled),
+        workflowStages: samePage ? session?.workflowStages ?? 0 : 0,
         detector: samePage ? session?.detector ?? null : null,
         lastObservedAt: samePage ? session?.lastObservedAt ?? null : null,
         lastCountAt: samePage ? session?.lastCountAt ?? null : null
