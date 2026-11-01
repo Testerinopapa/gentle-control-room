@@ -63,10 +63,6 @@ internal static class InsightTests
         result.History[0].Boundaries.Contains("End not recorded") && result.Summary.Contains("could not be linked"),
         "incomplete and ungrouped events remain honest");
       Check(result.Summary.Contains("Command-line tools accounted for 1 of those uses"), "majority summary uses actual category counts");
-      Check(result.Summary.Contains("No prompt events were captured") &&
-        result.Summary.Contains("incomplete hook coverage") &&
-        !result.History[0].Summary.Contains("0 prompt"),
-        "missing prompt hooks are described as incomplete coverage, not zero prompts given");
       Write(new[] { E("session_started", day.AddMinutes(-1), "cross"), E("session_ended", day.AddMinutes(1), "cross") });
       Check(Read().History[0].Boundaries.Contains("Duration unavailable") &&
         Read(CodexPeriod.AvailableHistory).History[0].Boundaries.Contains("2 minutes"), "filter-clipped session boundaries suppress duration");
@@ -92,6 +88,10 @@ internal static class InsightTests
       Write(new[] { E("tool_used", day, "unknown", "PRIVATE-CATEGORY") });
       Check(Read().History.Single().Summary.Contains("1 other") && !JsonSerializer.Serialize(Read()).Contains("PRIVATE"),
         "unknown categories never enter explanations");
+      Check(Read().Summary.Contains("No prompt events were captured") &&
+        Read().Summary.Contains("incomplete hook coverage") &&
+        !Read().History[0].Summary.Contains("0 prompt"),
+        "missing prompt hooks are described as incomplete coverage, not zero prompts given");
 
       Write(new[] { E("tool_used", day, "long-session", "shell") }
         .Concat(Enumerable.Range(1, 100).Select(i =>
