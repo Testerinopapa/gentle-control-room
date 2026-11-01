@@ -298,7 +298,7 @@ public partial class MainWindow : System.Windows.Window
         $"visible code examples: {browser.CodeBlocks}. " +
         $"Visible messages (approx.): {browser.VisibleUser} yours, " +
         $"{browser.VisibleAssistant} ChatGPT. Events: {browser.EventsToday}.";
-      CombinedSessionText.Text =
+      SessionBreakdownText.Text =
         $"Total recorded sessions: {snapshot.Sessions + browser.SessionsToday} " +
         $"({snapshot.Sessions} Codex + {browser.SessionsToday} ChatGPT).";
       BrowserHistory.ItemsSource = browser.History;
@@ -347,7 +347,7 @@ public partial class MainWindow : System.Windows.Window
       // Fail closed without logging local paths, consent values or event data.
       CodexStatusText.Text = "Unavailable";
       BrowserSummaryText.Text = "Browser activity could not be read.";
-      CombinedSessionText.Text = "Combined session count unavailable.";
+      SessionBreakdownText.Text = "Combined session count unavailable.";
       BrowserHistory.ItemsSource = null;
       BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Visible;
       BrowserStoreText.Text = "Local storage status unavailable.";
@@ -367,7 +367,7 @@ public partial class MainWindow : System.Windows.Window
     // Clear the old period immediately; an in-flight read is discarded and retried.
     CodexSummaryText.Text = "Reading local activity...";
     BrowserSummaryText.Text = "Reading local ChatGPT activity...";
-    CombinedSessionText.Text = "Updating combined session count...";
+    SessionBreakdownText.Text = "Updating combined session count...";
     BrowserHistory.ItemsSource = null;
     BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Collapsed;
     BrowserStoreText.Text = "Checking Windows event files...";
