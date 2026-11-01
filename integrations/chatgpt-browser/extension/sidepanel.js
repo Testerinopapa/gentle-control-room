@@ -11,6 +11,10 @@ const assistantNode = document.getElementById("assistant-count");
 const observerNode = document.getElementById("observer-state");
 const connectionNode = document.getElementById("connection-state");
 const checkButton = document.getElementById("check-connection");
+const codeCountNode = document.getElementById("code-count");
+const codingToggle = document.getElementById("coding-toggle");
+const codingHint = document.getElementById("coding-hint");
+let codingMarked = false;
 
 let selectedTab = null;
 let busy = false;
@@ -53,6 +57,14 @@ async function refresh() {
         : "Not recording. Select Start to enable this conversation.";
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
+    codingMarked = active && Boolean(result.codingMarked);
+    codingToggle.disabled = busy || !active;
+    codingToggle.textContent = codingMarked ? "Remove coding tag" : "Mark as coding work";
+    codingHint.textContent = codingMarked
+      ? "Marked as coding work for local recurring patterns."
+      : "Mark this session if you use ChatGPT to work on code without displaying a code example.";
+    codeCountNode.textContent = active && Number.isInteger(result.visibleCodeBlocks)
+      ? String(result.visibleCodeBlocks) : "—";
     userNode.textContent = active && Number.isInteger(result.visibleUser)
       ? String(result.visibleUser) : "—";
     assistantNode.textContent = active && Number.isInteger(result.visibleAssistant)
@@ -83,6 +95,11 @@ async function refresh() {
     noteNode.textContent = "The current browser tab could not be checked.";
     startButton.disabled = true;
     stopButton.disabled = true;
+    codingToggle.disabled = true;
+    codingMarked = false;
+    codingToggle.textContent = "Mark as coding work";
+    codeCountNode.textContent = "—";
+    codingHint.textContent = "Coding status unavailable.";
     userNode.textContent = "—";
     assistantNode.textContent = "—";
     observerNode.textContent = "Unable to check the page observer.";
@@ -137,6 +154,30 @@ async function testConnection() {
   }
 }
 
+async function toggleCodingTag() {
+  if (busy || !Number.isInteger(selectedTab)) return;
+  busy = true;
+  codingToggle.disabled = true;
+  lastError = "";
+  try {
+    const tab = await activeTab();
+    if (!tab || tab.id !== selectedTab) {
+      throw new Error("The active tab changed. Select coding work again.");
+    }
+    const result = await chrome.runtime.sendMessage({
+      type: "setCodingTag", tabId: selectedTab,
+      codingMarked: !codingMarked
+    });
+    if (!result?.ok) throw new Error(result?.error || "Cannot save coding work tag.");
+  } catch (error) {
+    lastError = error?.message || "Cannot update coding work tag.";
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+
+codingToggle.addEventListener("click", () => void toggleCodingTag());
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
 checkButton.addEventListener("click", () => void testConnection());
