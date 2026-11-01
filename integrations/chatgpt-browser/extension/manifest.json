@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.2.2",
-  "description": "Opt-in, local-only ChatGPT activity in the Microsoft Edge sidebar.",
+  "version": "0.3.0",
+  "description": "Opt-in local ChatGPT session and coding-signal metadata for Gentle Control Room.",
   "permissions": [
     "activeTab",
     "scripting",
