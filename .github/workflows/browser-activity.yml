@@ -1,0 +1,40 @@
+name: Browser activity integration checks
+
+on:
+  push:
+    paths:
+      - 'integrations/chatgpt-browser/**'
+      - 'desktop/GentleControlRoom.Desktop/**'
+      - 'desktop/GentleControlRoom.Desktop.Tests/**'
+      - '.github/workflows/browser-activity.yml'
+  pull_request:
+    paths:
+      - 'integrations/chatgpt-browser/**'
+      - 'desktop/GentleControlRoom.Desktop/**'
+      - 'desktop/GentleControlRoom.Desktop.Tests/**'
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Validate Edge extension syntax
+        shell: pwsh
+        run: |
+          node --check integrations/chatgpt-browser/extension/background.js
+          node --check integrations/chatgpt-browser/extension/content.js
+          node --check integrations/chatgpt-browser/extension/popup.js
+      - name: Browser extension tests
+        run: node --test integrations/chatgpt-browser/tests/extension.test.mjs
+      - name: Native messaging host self-test
+        run: dotnet run --project integrations/chatgpt-browser/native-host/GentleControlRoom.ChatGPTHost.csproj -- --self-test
+      - name: Desktop reader and insight regression tests
+        run: dotnet run --project desktop/GentleControlRoom.Desktop.Tests/GentleControlRoom.Desktop.Tests.csproj
+      - name: Build Windows desktop host
+        run: dotnet build desktop/GentleControlRoom.Desktop/GentleControlRoom.Desktop.csproj --configuration Release
