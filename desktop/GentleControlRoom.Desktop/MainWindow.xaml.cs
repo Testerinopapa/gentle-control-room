@@ -350,8 +350,7 @@ public partial class MainWindow : System.Windows.Window
       BrowserSummaryText.Text = "Browser activity could not be read.";
       SessionBreakdownText.Text = "Combined session count unavailable.";
       WorkflowSummaryText.Text = "Coding workflow analysis unavailable.";
-      WorkflowSummaryText.Text = "Reading local coding workflow analysis...";
-    BrowserHistory.ItemsSource = null;
+      BrowserHistory.ItemsSource = null;
       BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Visible;
       BrowserStoreText.Text = "Local storage status unavailable.";
     }
