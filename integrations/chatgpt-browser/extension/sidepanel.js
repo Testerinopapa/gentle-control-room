@@ -14,6 +14,9 @@ const checkButton = document.getElementById("check-connection");
 const codeCountNode = document.getElementById("code-count");
 const codingToggle = document.getElementById("coding-toggle");
 const codingHint = document.getElementById("coding-hint");
+const workflowToggle = document.getElementById("workflow-toggle");
+const workflowState = document.getElementById("workflow-state");
+let workflowEnabled = false;
 let codingMarked = false;
 
 let selectedTab = null;
@@ -57,6 +60,15 @@ async function refresh() {
         : "Not recording. Select Start to enable this conversation.";
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
+    workflowEnabled = active && Boolean(result.workflowEnabled);
+    workflowToggle.disabled = busy || !active;
+    workflowToggle.textContent = workflowEnabled
+      ? "Disable workflow analysis" : "Enable workflow analysis";
+    workflowState.textContent = !active
+      ? "Off · start recording this conversation first."
+      : workflowEnabled
+        ? "On · " + (result.workflowStages || 0) + " categorized requests recorded locally."
+        : "Off · no message text is being inspected.";
     codingMarked = active && Boolean(result.codingMarked);
     codingToggle.disabled = busy || !active;
     codingToggle.textContent = codingMarked ? "Remove coding tag" : "Mark as coding work";
@@ -96,6 +108,10 @@ async function refresh() {
     startButton.disabled = true;
     stopButton.disabled = true;
     codingToggle.disabled = true;
+    workflowToggle.disabled = true;
+    workflowEnabled = false;
+    workflowToggle.textContent = "Enable workflow analysis";
+    workflowState.textContent = "Unavailable.";
     codingMarked = false;
     codingToggle.textContent = "Mark as coding work";
     codeCountNode.textContent = "—";
@@ -177,6 +193,29 @@ async function toggleCodingTag() {
   }
 }
 
+async function toggleWorkflow() {
+  if (busy || !Number.isInteger(selectedTab)) return;
+  busy = true;
+  workflowToggle.disabled = true;
+  lastError = "";
+  try {
+    const tab = await activeTab();
+    if (!tab || tab.id !== selectedTab)
+      throw new Error("Active tab changed. Choose workflow analysis again.");
+    const result = await chrome.runtime.sendMessage({
+      type: "setWorkflowAnalysis",
+      tabId: selectedTab,
+      enabled: !workflowEnabled
+    });
+    if (!result?.ok) throw new Error(result?.error || "Cannot change workflow analysis.");
+  } catch (error) {
+    lastError = error?.message || "Cannot change workflow analysis.";
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+workflowToggle.addEventListener("click", () => void toggleWorkflow());
 codingToggle.addEventListener("click", () => void toggleCodingTag());
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
