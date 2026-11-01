@@ -44,6 +44,8 @@ The browser extension and native host do not need the Gentle Control Room Window
 
 ## Diagnose a sidebar stuck at Off
 
+If **Start for this conversation** is **greyed out / cannot be clicked**, Edge may be withholding the active tab URL from the sidebar. Version 0.2.1 adds permissions for **ChatGPT domains only** to resolve this (no access to unrelated websites). Pull the latest changes, reload the extension at `edge://extensions`, and **approve the updated site-access permission** if Edge prompts for it. In `edge://extensions` → Gentle Control Room → Details → Site access, ensure the ChatGPT sites are allowed. Keep an actual conversation at `https://chatgpt.com` active in that Edge window. The sidebar now displays a specific explanation if it cannot identify the tab. You do **not** need to rerun `install-host.ps1` if the extension ID has not changed.
+
 If **Start for this conversation** leaves the status at Off, the extension has not confirmed a working recording session. The most common reason is an unregistered or outdated Windows native messaging host. The sidebar now has a **Test Windows connection** button; it sends a read-only probe and does **not** create a session or record a chat.
 
 1. From the repository's `integrations\\chatgpt-browser` folder, rebuild and register the native host using the actual Edge extension ID:
@@ -127,4 +129,4 @@ dotnet run --project .\desktop\GentleControlRoom.Desktop.Tests\GentleControlRoom
 dotnet build .\desktop\GentleControlRoom.Desktop\GentleControlRoom.Desktop.csproj
 ```
 
-The extension's permissions are intentionally narrow: `activeTab`, `scripting`, `storage`, `nativeMessaging`, and `sidePanel`. Native host approval is restricted to the specific extension ID. The hosted web dashboard is never granted the ability to read the native event files.
+The extension's permissions are intentionally scoped: `activeTab`, `scripting`, `storage`, `nativeMessaging`, and `sidePanel`, with host permissions for `https://chatgpt.com/*` and `https://chat.openai.com/*` **only**. These site permissions let the sidebar inspect a ChatGPT tab's URL and inject its metadata-only observer after an explicit Start click; no other sites are accessible through this permission. Native host approval is restricted to the specific extension ID. The hosted web dashboard is never granted the ability to read the native event files.
