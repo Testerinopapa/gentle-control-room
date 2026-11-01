@@ -60,7 +60,11 @@ async function stop(tabId) {
 }
 async function start(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  if (!eligible(tab.url)) throw new Error("Open chatgpt.com to enable collection.");
+  if (!eligible(tab.url)) {
+    throw new Error(tab.url
+      ? "Open a ChatGPT conversation before starting recording."
+      : "Edge cannot identify this tab. Reload the extension and approve ChatGPT site access.");
+  }
   if (await getSession(tabId)) return;
   const id = crypto.randomUUID();
   // Fail closed if the native host is not installed.
@@ -121,11 +125,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.type === "getState") {
       const session = await getSession(tabId);
       const allowed = eligible(tab.url);
+      // A persistent side panel does not itself grant activeTab access. The
+      // manifest provides host permissions ONLY for the two ChatGPT origins.
+      // If URL access is unavailable, explain why the controls are disabled.
+      const reason = allowed ? null :
+        !tab.url ? "Edge cannot identify this tab. Reload the extension and approve its ChatGPT site access." :
+        "Open a conversation at chatgpt.com in the active Edge tab.";
       // If a navigation escaped onUpdated, revoke consent before displaying it.
       const samePage = allowed && session?.page === new URL(tab.url).pathname;
       if (session && !samePage) await stop(tabId);
       return {
-        ok: true, allowed, active: Boolean(session && samePage),
+        ok: true, allowed, reason, active: Boolean(session && samePage),
         visibleUser: samePage ? session?.visibleUser ?? null : null,
         visibleAssistant: samePage ? session?.visibleAssistant ?? null : null
       };
