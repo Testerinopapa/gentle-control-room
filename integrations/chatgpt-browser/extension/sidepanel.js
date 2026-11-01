@@ -72,6 +72,12 @@ async function command(type) {
   stopButton.disabled = true;
   lastError = "";
   try {
+    // A sidebar can remain open while Edge changes active tabs. Make sure
+    // the button still targets the tab the user actually sees.
+    const tab = await activeTab();
+    if (!tab || tab.id !== selectedTab) {
+      throw new Error("The active tab changed. Select Start or Stop again.");
+    }
     const result = await chrome.runtime.sendMessage({ type, tabId: selectedTab });
     if (!result?.ok) throw new Error(result?.error || "The local collector is unavailable.");
   } catch (error) {
