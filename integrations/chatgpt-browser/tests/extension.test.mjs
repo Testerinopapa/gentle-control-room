@@ -8,6 +8,7 @@ const source = readFileSync(new URL("../extension/background.js", import.meta.ur
 const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 const panelMarkup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
 const panelLogic = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
+const contentLogic = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
 function harness(url = "https://chatgpt.com/c/synthetic-conversation", nativeResponse = { ok: true }) {
   let listener, updatedListener, removedListener;
   const stored = new Map();
@@ -179,7 +180,7 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   const dom = new Map();
   const listeners = new Map();
   for (const id of ["state", "state-label", "note", "error", "start", "stop",
-    "user-count", "assistant-count", "connection-state", "check-connection"]) {
+    "user-count", "assistant-count", "connection-state", "check-connection", "observer-state"]) {
     dom.set(id, {
       dataset: {}, textContent: "", disabled: false, hidden: true,
       addEventListener(kind, callback) { listeners.set(id + ":" + kind, callback); }
@@ -241,6 +242,127 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   assert.equal(dom.get("start").disabled, true);
   assert.equal(dom.get("user-count").textContent, "—");
   assert.equal(typeof lastTimer, "function");
+});
+
+test("modern ChatGPT DOM reports visible role counts without reading messages", async () => {
+  const sent = [];
+  const modern = { user: 2, assistant: 1 };
+  const region = {
+    querySelectorAll(selector) {
+      if (selector.includes("data-user-message-bubble")) return Array(modern.user).fill({});
+      if (selector.includes(":user")) return Array(modern.user).fill({});
+      if (selector.includes(":assistant")) return Array(modern.assistant).fill({});
+      return [];
+    }
+  };
+  let interval;
+  let now = 10000;
+  let mutationConfig;
+  const observer = class {
+    observe(_element, config) { mutationConfig = config; }
+    disconnect() {}
+  };
+  const sentMessage = async (message) => { sent.push(message); return { ok: true }; };
+  const context = {
+    document: {
+      documentElement: {},
+      querySelector(selector) {
+        return selector.includes("data-app-action-timeline-scroll") ? region : null;
+      }
+    },
+    location: { pathname: "/c/approved" },
+    chrome: {
+      runtime: {
+        sendMessage: sentMessage,
+        onMessage: { addListener() {}, removeListener() {} }
+      }
+    },
+    MutationObserver: observer,
+    setInterval(fn) { interval = fn; return 1; },
+    clearInterval() {},
+    setTimeout() { return 10; },
+    clearTimeout() {},
+    Date: { now: () => now }
+  };
+  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(mutationConfig.attributes);
+  assert.ok(mutationConfig.childList);
+  assert.equal(sent.find(x => x.type === "observerStatus")?.detector, "current");
+  assert.deepEqual(
+    { user: sent.find(x => x.type === "visibleCounts")?.user,
+      assistant: sent.find(x => x.type === "visibleCounts")?.assistant },
+    { user: 2, assistant: 1 }
+  );
+  modern.assistant = 2;
+  now += 4000;
+  interval();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.filter(x => x.type === "visibleCounts").at(-1).assistant, 2);
+  assert.ok(!JSON.stringify(sent).includes("approved"),
+    "conversation pathname must never leave the page observer");
+});
+
+test("unknown ChatGPT layout reports unsupported rather than false zero counts", async () => {
+  const sent = [];
+  const context = {
+    document: {
+      documentElement: {},
+      querySelector() { return null; },
+      querySelectorAll() { return []; }
+    },
+    location: { pathname: "/c/approved" },
+    chrome: {
+      runtime: {
+        async sendMessage(m) { sent.push(m); return { ok: true }; },
+        onMessage: { addListener() {}, removeListener() {} }
+      }
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    Date: { now: () => 10000 }
+  };
+  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent[0].type, "observerStatus");
+  assert.equal(sent[0].detector, "unsupported");
+  assert.ok(!sent.some(x => x.type === "visibleCounts"));
+});
+
+test("legacy author-role markers remain supported when modern timeline is absent", async () => {
+  const sent = [];
+  const context = {
+    document: {
+      documentElement: {},
+      querySelector() { return null; },
+      querySelectorAll(selector) {
+        if (selector === '[data-message-author-role="user"]') return [{}, {}];
+        if (selector === '[data-message-author-role="assistant"]') return [{}];
+        return [];
+      }
+    },
+    location: { pathname: "/c/approved" },
+    chrome: {
+      runtime: {
+        async sendMessage(m) { sent.push(m); return { ok: true }; },
+        onMessage: { addListener() {}, removeListener() {} }
+      }
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    Date: { now: () => 10000 }
+  };
+  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent[0].detector, "legacy");
+  assert.equal(sent.find(x => x.type === "visibleCounts").user, 2);
+  assert.equal(sent.find(x => x.type === "visibleCounts").assistant, 1);
 });
 
 test("native host health check does not start or save a conversation", async () => {
