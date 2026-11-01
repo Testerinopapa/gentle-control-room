@@ -1,4 +1,4 @@
-# ChatGPT Browser Activity — Microsoft Edge extension (Phase 1)
+# ChatGPT Browser Activity — Microsoft Edge sidebar extension (Phase 1)
 
 Opt-in, **local-only** metadata collection for ChatGPT conversations in Edge. This integration is independent of Codex CLI hooks. The Windows Gentle Control Room application reads a summary of its events from the **current Windows account**, and neither hosted WebView pages nor Supabase see them.
 
@@ -11,7 +11,7 @@ For each conversation you explicitly turn ON in Edge, the extension records:
 
 **It does not read or store prompt text, assistant responses, code, message titles, conversation URLs, conversation IDs, browser cookies, credentials, tokens, clipboard, or other tabs.** No network endpoints, fetch clients or background requests are used. This is not ChatGPT account integration and cannot observe all chats automatically. DOM markers may be missing or virtualized, so counts are estimates, not authoritative conversation totals.
 
-Recording is **OFF by default**. It begins only when you click **Start for this conversation** in the extension popup, on chatgpt.com. The popup shows its state and the extension displays an ON badge while recording. It stops on navigation or when you click Stop. No site-wide auto-consent or automatic enrollment of new conversations is implemented.
+Recording is **OFF by default**. Click the extension's toolbar icon to open the persistent **Edge side panel** on the right, alongside ChatGPT. Opening the panel does **not** start collection. Click **Start for this conversation** to enable the current tab. The side panel shows approximate visible message counts when recording, and the toolbar displays an ON badge. Stop manually or navigate to another conversation to end recording. No site-wide auto-consent or automatic enrollment is implemented.
 
 ## Windows installation (Edge)
 
@@ -33,8 +33,12 @@ Prerequisites: Microsoft Edge, Python not required, and **.NET 8 SDK** for build
    ```
 
 5. The installer builds a self-contained .NET native host, copies it to `%LOCALAPPDATA%\GentleControlRoom\BrowserNativeHost`, and registers the host **under HKCU for your current Windows account only**, restricted to your exact extension ID. It does not require admin access.
-6. Open an **existing ChatGPT conversation** in Edge, click the extension icon, then **Start for this conversation**. The toolbar badge will say ON. You must opt in for each conversation separately. If the host is unavailable, the popup reports an error and should remain Off.
+6. Open an **existing ChatGPT conversation** in Edge and click the extension toolbar icon. The ChatGPT Activity **side panel opens on the right**. Click **Start for this conversation**. The toolbar badge will say ON, and the panel will show approximate visible message counts. Each conversation requires separate opt-in. If the host is unavailable, the side panel reports an error and remains Off.
 7. After interacting in the conversation, open Gentle Control Room's Windows app and press Refresh. The native **ChatGPT Browser Activity** card shows opted-in session count, approximate visible message counts, and saved event count for the current UTC day.
+
+**If you installed the extension already:** pull the changes and use **Reload** on its card at `edge://extensions`. Click the extension's toolbar icon again; the old popup is replaced by the side panel. You do **not** need to reinstall the native host if the extension ID stays the same.
+
+If the sidebar is not shown, review **Settings → Sidebar** in Edge and make sure the sidebar is enabled. The extension can also be opened via the Extensions hub's **Open in sidebar** action. Sidebar visibility and placement are controlled by Edge.
 
 The browser extension and native host do not need the Gentle Control Room Windows app to be running while recording. The window reads the local store when opened.
 
@@ -61,7 +65,7 @@ Only allowlisted fields are written. Storage is local, unencrypted, inherits Win
 
 ## Stop, uninstall, delete
 
-- Click the popup **Stop recording** button to stop the current approved tab.
+- Click **Stop recording** in the right-side Edge panel to stop the current approved tab.
 - Close the ChatGPT tab to end tracking. Navigating to another conversation also stops it; you must opt in again.
 - Disable/remove the extension at `edge://extensions`.
 - Unregister the native host: `.\integrations\chatgpt-browser\uninstall-host.ps1`
@@ -78,7 +82,7 @@ Only allowlisted fields are written. Storage is local, unencrypted, inherits Win
 - Visible message counts reflect currently rendered ChatGPT DOM nodes, not guaranteed full history; never interpret these as definitive message totals.
 - This browser collector does not capture Codex coding operations, prompt content, tasks completed, developer quality, or productivity.
 - There is no continuous tracking outside explicitly enabled ChatGPT tabs, and no remote admin access.
-- Re-loading the unpacked extension can change its ID; if that happens, re-run the native host installer with the new ID. The Edge native host and its allowed origins follow Microsoft's native messaging protocol.
+- Reloading the unpacked extension usually keeps the same ID when the folder path is unchanged; if the ID changes, re-run the native host installer with the new ID. The Edge native host and its allowed origins follow Microsoft's native messaging protocol.
 - If a host command fails, check the extension's service worker console in `edge://extensions` and confirm your extension ID matches the installed native manifest. **Do not** paste browser session tokens or private conversations into logs/issues.
 
 ## Tests
@@ -102,4 +106,4 @@ dotnet run --project .\desktop\GentleControlRoom.Desktop.Tests\GentleControlRoom
 dotnet build .\desktop\GentleControlRoom.Desktop\GentleControlRoom.Desktop.csproj
 ```
 
-The extensions' permissions are intentionally narrow: `activeTab`, `scripting`, `storage`, `nativeMessaging`. Native host approval is restricted to the specific extension ID. The hosted web dashboard is never granted the ability to read the native event files.
+The extension's permissions are intentionally narrow: `activeTab`, `scripting`, `storage`, `nativeMessaging`, and `sidePanel`. Native host approval is restricted to the specific extension ID. The hosted web dashboard is never granted the ability to read the native event files.
