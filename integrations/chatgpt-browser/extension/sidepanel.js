@@ -16,9 +16,12 @@ let busy = false;
 let lastError = "";
 
 async function activeTab() {
-  // Last focused browser window is the one whose right sidebar the user opened.
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return tab || null;
+  // The sidebar lives inside the current Edge window. Do not blindly use the
+  // last-focused window, which can select another window or an extension page.
+  const current = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (current.length > 0) return current[0];
+  const fallback = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return fallback[0] || null;
 }
 
 function showError(message) {
@@ -43,7 +46,7 @@ async function refresh() {
     stateNode.dataset.active = String(active);
     labelNode.textContent = active ? "Recording" : "Off";
     noteNode.textContent = !allowed
-      ? "Open a ChatGPT conversation to enable collection."
+      ? (result.reason || "Open a ChatGPT conversation to enable collection.")
       : active
         ? "This conversation is explicitly enabled. Stop whenever you like."
         : "Not recording. Select Start to enable this conversation.";
