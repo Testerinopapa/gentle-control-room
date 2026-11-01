@@ -104,6 +104,52 @@ try
     "browser summary excludes payload text and secrets");
   Check(browser.Latest.Contains("tracking stopped"),
     "browser reader exposes only safe status labels");
+
+  var olderDay = day.AddDays(-3);
+  var olderAt = new DateTimeOffset(olderDay.AddHours(12), TimeSpan.Zero);
+  var sessionsWithCode = Enumerable.Range(2, 3).Select(n =>
+    "123e4567-e89b-42d3-a456-42661417400" + n).ToArray();
+  var olderRecords = sessionsWithCode.SelectMany((sessionId, i) => new[] {
+    BrowserEvent("session_started", sessionId, olderAt.AddMinutes(i * 10)),
+    JsonSerializer.Serialize(new {
+      schemaVersion = 1, source = "chatgpt_browser",
+      timestamp = olderAt.AddMinutes(i * 10 + 1),
+      eventType = "visible_counts", sessionPseudonym = sessionId,
+      visibleUser = 2, visibleAssistant = 2, visibleCodeBlocks = i + 1,
+      secret = "PRIVATE CODE"
+    }),
+    JsonSerializer.Serialize(new {
+      schemaVersion = 1, source = "chatgpt_browser",
+      timestamp = olderAt.AddMinutes(i * 10 + 2),
+      eventType = "coding_tag", sessionPseudonym = sessionId,
+      codingMarked = true, text = "PRIVATE CONVERSATION"
+    })
+  }).ToArray();
+  var olderFile = Path.Combine(browserRoot, $"events-{olderDay:yyyyMMdd}-000.jsonl");
+  File.WriteAllLines(olderFile, olderRecords);
+  var history = BrowserActivityReader.ReadFrom(browserRoot, testNow, CodexPeriod.AvailableHistory);
+  Check(history.CodeBlocks == 6 && history.CodingSessions == 3 &&
+    history.Patterns.Count == 2 && history.Patterns.All(p => p.Contains("3 separate")),
+    "three separate coding sessions generate patterns without exposing code");
+  Check(!JsonSerializer.Serialize(history).Contains("PRIVATE"),
+    "coding history never returns conversation text or code");
+  var recent = BrowserActivityReader.ReadFrom(browserRoot, testNow, CodexPeriod.LastSevenDays);
+  Check(recent.Patterns.Count == 2 && recent.CodeBlocks == 6,
+    "seven-day filter includes previously opted-in coding sessions");
+  var todayOnly = BrowserActivityReader.ReadFrom(browserRoot, testNow, CodexPeriod.Today);
+  Check(todayOnly.Patterns.Count == 0 && todayOnly.CodeBlocks == 0,
+    "today filter does not infer patterns from past sessions");
+  File.AppendAllText(olderFile, "\n" + JsonSerializer.Serialize(new {
+    schemaVersion = 1, source = "chatgpt_browser",
+    timestamp = olderAt.AddMinutes(99), eventType = "coding_tag",
+    sessionPseudonym = sessionsWithCode[0], codingMarked = false
+  }));
+  var unmarked = BrowserActivityReader.ReadFrom(browserRoot, testNow, CodexPeriod.AvailableHistory);
+  Check(unmarked.Patterns.Count == 1 &&
+    unmarked.Patterns[0].Contains("code examples") && unmarked.CodingSessions == 3,
+    "removing a coding tag retracts only the manual-tag recurrence");
+
+
 }
 finally { Directory.Delete(browserRoot, true); }
 
