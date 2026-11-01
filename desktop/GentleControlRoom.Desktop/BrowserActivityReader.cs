@@ -41,7 +41,7 @@ internal static class BrowserActivityReader
       long scanned = 0;
 
       foreach (var file in Directory.EnumerateFiles(root, "events-????????-???.jsonl")
-                 .OrderByDescending(Path.GetFileName, StringComparer.Ordinal))
+                 .OrderByDescending(filePath => Path.GetFileName(filePath), StringComparer.Ordinal))
       {
         try
         {
