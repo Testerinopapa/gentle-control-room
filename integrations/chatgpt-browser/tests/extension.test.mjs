@@ -5,17 +5,24 @@ import { randomUUID } from "node:crypto";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
+const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
+const panelMarkup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
+const panelLogic = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
 function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
   let listener, updatedListener, removedListener;
   const stored = new Map();
   const native = [];
   const badge = [];
+  const sidePanelBehavior = [];
   const chrome = {
     storage: { session: {
       async get(key) { return { [key]: stored.get(key) }; },
       async set(items) { for (const [k, v] of Object.entries(items)) stored.set(k, v); },
       async remove(key) { stored.delete(key); }
     } },
+    sidePanel: {
+      async setPanelBehavior(options) { sidePanelBehavior.push(options); }
+    },
     runtime: {
       onMessage: { addListener(fn) { listener = fn; } },
       async sendNativeMessage(_host, message) { native.push(message); return { ok: true }; }
@@ -37,7 +44,7 @@ function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
   async function send(message, sender = {}) {
     return await new Promise((done) => listener(message, sender, done));
   }
-  return { send, native, stored, badge, updatedListener, removedListener };
+  return { send, native, stored, badge, sidePanelBehavior, updatedListener, removedListener };
 }
 
 test("off by default; only explicit ChatGPT tab opt-in starts recording", async () => {
@@ -103,4 +110,46 @@ test("does not activate recording on non-ChatGPT origins", async () => {
   const response = await h.send({ type: "start", tabId: 9 });
   assert.equal(response.ok, false);
   assert.equal(h.native.length, 0);
+});
+
+test("Edge action opens the persistent sidebar without granting consent", async () => {
+  assert.equal(manifest.side_panel?.default_path, "sidepanel.html");
+  assert.ok(manifest.permissions.includes("sidePanel"));
+  assert.equal(Object.hasOwn(manifest.action, "default_popup"), false);
+  assert.ok(panelMarkup.includes('src="sidepanel.js"'));
+  assert.ok(panelMarkup.includes('id="start"'));
+  assert.ok(panelMarkup.includes('id="stop"'));
+
+  const h = harness();
+  assert.equal(h.sidePanelBehavior.length, 1);
+  assert.equal(h.sidePanelBehavior[0].openPanelOnActionClick, true);
+  assert.equal(h.native.length, 0, "opening the sidebar must not start collection");
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).active, false);
+});
+
+test("approved conversation counts can be displayed without exposing content", async () => {
+  const h = harness();
+  await h.send({ type: "start", tabId: 9 });
+  let state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.active, true);
+  assert.equal(state.visibleUser, null);
+  await h.send({ type: "visibleCounts", user: 6, assistant: 7, privateText: "SECRET" }, { tab: { id: 9 } });
+  state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.visibleUser, 6);
+  assert.equal(state.visibleAssistant, 7);
+  assert.equal(JSON.stringify(state).includes("SECRET"), false);
+  await h.send({ type: "stop", tabId: 9 });
+  state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.active, false);
+  assert.equal(state.visibleUser, null);
+  assert.equal(h.stored.size, 0);
+});
+
+test("sidebar updates when the active tab changes and has no automatic start", () => {
+  assert.ok(panelLogic.includes("chrome.tabs.onActivated.addListener"));
+  assert.ok(panelLogic.includes('type: "getState"'));
+  assert.ok(panelLogic.includes('type, tabId: selectedTab'));
+  assert.ok(panelLogic.includes('addEventListener("click"'));
+  assert.equal(panelLogic.includes('sendMessage({ type: "start"'), false);
+  assert.ok(!panelMarkup.includes("popup.js"));
 });
