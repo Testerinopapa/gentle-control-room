@@ -23,7 +23,9 @@ internal static class Program
         {
           return 1;
         }
-        if (JsonSerializer.Serialize(parsed).Contains("NEVER_COPY", StringComparison.Ordinal))
+        if (JsonSerializer.Serialize(parsed).Contains("NEVER_COPY", StringComparison.Ordinal) ||
+            !IsHealthCheck("""{"version":1,"event":"health_check"}""") ||
+            IsHealthCheck("""{"version":2,"event":"health_check"}"""))
         {
           return 1;
         }
@@ -55,7 +57,16 @@ internal static class Program
         return 1;
       }
 
-      var record = ParseEvent(Encoding.UTF8.GetString(data));
+      var json = Encoding.UTF8.GetString(data);
+      // A health check is deliberately read-only: never create an activity file
+      // or a session just to test native messaging connectivity.
+      if (IsHealthCheck(json))
+      {
+        WriteResult(stdout, true);
+        return 0;
+      }
+
+      var record = ParseEvent(json);
       if (record is null)
       {
         WriteResult(stdout, false);
@@ -86,6 +97,26 @@ internal static class Program
         string.Equals(origin.GetString()?.TrimEnd('/'), supplied.TrimEnd('/'), StringComparison.Ordinal));
     }
     catch (Exception)
+    {
+      return false;
+    }
+  }
+
+  internal static bool IsHealthCheck(string raw)
+  {
+    try
+    {
+      using var doc = JsonDocument.Parse(raw, new JsonDocumentOptions { MaxDepth = 5 });
+      var item = doc.RootElement;
+      return item.ValueKind == JsonValueKind.Object &&
+        item.TryGetProperty("version", out var version) &&
+        version.ValueKind == JsonValueKind.Number &&
+        version.TryGetInt32(out var schema) && schema == 1 &&
+        item.TryGetProperty("event", out var kind) &&
+        kind.ValueKind == JsonValueKind.String &&
+        kind.GetString() == "health_check";
+    }
+    catch (JsonException)
     {
       return false;
     }
