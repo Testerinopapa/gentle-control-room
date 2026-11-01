@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using NotifyIcon = System.Windows.Forms.NotifyIcon;
 
@@ -17,6 +18,7 @@ public partial class MainWindow : System.Windows.Window
   private readonly bool _startInBackground;
   private readonly NotifyIcon _notifyIcon;
   private readonly string _diagnosticLogPath;
+  private readonly DispatcherTimer _codexTimer = new() { Interval = TimeSpan.FromSeconds(20) };
   private bool _initialized;
   private bool _exitRequested;
 
@@ -42,11 +44,14 @@ public partial class MainWindow : System.Windows.Window
       "desktop-host.log");
     _notifyIcon = CreateNotifyIcon();
     RegisterToastActivationHandler();
+    _codexTimer.Tick += (_, _) => RefreshCodexActivity();
     LogDiagnostic("Desktop host initialized.");
   }
 
   private async void Window_Loaded(object sender, System.Windows.RoutedEventArgs e)
   {
+    RefreshCodexActivity();
+    _codexTimer.Start();
     try
     {
       await InitializeWebViewAsync();
@@ -182,7 +187,7 @@ public partial class MainWindow : System.Windows.Window
   {
     try
     {
-      LogDiagnostic($"Received WebView message: {args.WebMessageAsJson}");
+      // Raw WebView payloads can contain access/refresh tokens; never log them.
       using var document = JsonDocument.Parse(args.WebMessageAsJson);
       var root = document.RootElement;
 
@@ -244,10 +249,27 @@ public partial class MainWindow : System.Windows.Window
 
       ShowAlertNotification(title, message);
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-      LogDiagnostic($"Malformed WebView message: {ex}");
+      // Avoid echoing private message payloads or parser details into disk logs.
+      LogDiagnostic("Ignored invalid WebView message.");
     }
+  }
+
+  // Local-only native WPF panel. No Codex data is sent into WebView2.
+  private void RefreshCodexActivity()
+  {
+    var snapshot = CodexActivityReader.Read();
+    CodexStatusText.Text = snapshot.State;
+    CodexSummaryText.Text =
+      $"Projects: {snapshot.Projects}  ·  Sessions today: {snapshot.SessionsToday}  ·  " +
+      $"Tool uses today: {snapshot.ToolUsesToday}  ·  Events today: {snapshot.EventsToday}";
+    CodexLastEventText.Text = snapshot.LastActivity;
+  }
+
+  private void CodexRefresh_Click(object sender, System.Windows.RoutedEventArgs e)
+  {
+    RefreshCodexActivity();
   }
 
   private void ShowAlertNotification(string? title, string? message)
@@ -274,7 +296,7 @@ public partial class MainWindow : System.Windows.Window
 
     try
     {
-      LogDiagnostic($"Showing toast notification: {notificationTitle}");
+      LogDiagnostic("Showing toast notification.");
       new ToastContentBuilder()
         .AddArgument("launch", ToastLaunchArgument)
         .AddText(notificationTitle)
@@ -339,6 +361,7 @@ public partial class MainWindow : System.Windows.Window
 
   private void ExitApplication()
   {
+    _codexTimer.Stop();
     LogDiagnostic("Desktop host shutting down.");
     _exitRequested = true;
     _notifyIcon.Visible = false;
