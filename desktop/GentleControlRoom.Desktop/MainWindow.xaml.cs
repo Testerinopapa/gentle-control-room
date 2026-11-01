@@ -301,6 +301,7 @@ public partial class MainWindow : System.Windows.Window
       SessionBreakdownText.Text =
         $"Total recorded sessions: {snapshot.Sessions + browser.SessionsToday} " +
         $"({snapshot.Sessions} Codex + {browser.SessionsToday} ChatGPT).";
+      WorkflowSummaryText.Text = browser.WorkflowSummary;
       BrowserHistory.ItemsSource = browser.History;
       BrowserHistoryEmpty.Visibility = browser.History.Count == 0
         ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
@@ -348,7 +349,9 @@ public partial class MainWindow : System.Windows.Window
       CodexStatusText.Text = "Unavailable";
       BrowserSummaryText.Text = "Browser activity could not be read.";
       SessionBreakdownText.Text = "Combined session count unavailable.";
-      BrowserHistory.ItemsSource = null;
+      WorkflowSummaryText.Text = "Coding workflow analysis unavailable.";
+      WorkflowSummaryText.Text = "Reading local coding workflow analysis...";
+    BrowserHistory.ItemsSource = null;
       BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Visible;
       BrowserStoreText.Text = "Local storage status unavailable.";
     }
@@ -368,6 +371,7 @@ public partial class MainWindow : System.Windows.Window
     CodexSummaryText.Text = "Reading local activity...";
     BrowserSummaryText.Text = "Reading local ChatGPT activity...";
     SessionBreakdownText.Text = "Updating combined session count...";
+    WorkflowSummaryText.Text = "Reading local coding workflow analysis...";
     BrowserHistory.ItemsSource = null;
     BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Collapsed;
     BrowserStoreText.Text = "Checking Windows event files...";
