@@ -198,10 +198,7 @@ try
     "local appended events are included on subsequent refreshes");
   var workflowRoot = Path.Combine(browserRoot, "workflow-fixture");
   Directory.CreateDirectory(workflowRoot);
-  var workflowSessions = Enumerable.Range(8, 3)
-    .Select(i => "123e4567-e89b-42d3-a456-4266141740" + i.ToString("D2")).ToArray();
-  // Ensure the session identifiers are complete, random-looking UUIDs.
-  workflowSessions = new[] {
+  var workflowSessions = new[] {
     "123e4567-e89b-42d3-a456-426614174008",
     "123e4567-e89b-42d3-a456-426614174009",
     "123e4567-e89b-42d3-a456-426614174010"
