@@ -42,6 +42,27 @@ If the sidebar is not shown, review **Settings → Sidebar** in Edge and make su
 
 The browser extension and native host do not need the Gentle Control Room Windows app to be running while recording. The window reads the local store when opened.
 
+## Diagnose a sidebar stuck at Off
+
+If **Start for this conversation** leaves the status at Off, the extension has not confirmed a working recording session. The most common reason is an unregistered or outdated Windows native messaging host. The sidebar now has a **Test Windows connection** button; it sends a read-only probe and does **not** create a session or record a chat.
+
+1. From the repository's `integrations\\chatgpt-browser` folder, rebuild and register the native host using the actual Edge extension ID:
+   ```powershell
+   .\\install-host.ps1 -ExtensionId "YOUR_32_CHARACTER_EDGE_EXTENSION_ID"
+   ```
+   From the repository root, use `.\\integrations\\chatgpt-browser\\install-host.ps1` instead.
+2. Open `edge://extensions`, click **Reload** on Gentle Control Room, then return to an existing ChatGPT conversation.
+3. Open the sidebar and click **Test Windows connection** before clicking Start. Expect **Connected. You can start recording a conversation.**
+4. If the sidebar says **Not connected**, inspect the current-user host registration:
+   ```powershell
+   Get-ItemProperty "HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\org.gentlecontrolroom.chatgpt"
+   Get-Content "$env:LOCALAPPDATA\\GentleControlRoom\\BrowserNativeHost\\native-host.json"
+   ```
+   The manifest's `allowed_origins` must include `chrome-extension://YOUR_EXTENSION_ID/`, and its `path` executable must exist.
+5. Try Start again. Expect **Recording**, an ON badge, and counts updating when ChatGPT renders new messages. Counts are approximate and may remain at zero when ChatGPT does not expose the expected role markers.
+
+If Edge reports that the native host cannot be found, repeat installation. If it reports that access is forbidden, check the extension ID. If it reports that the host exited, rebuild the host and rerun the installer. Never share private chat content or credentials while troubleshooting.
+
 ## Verify
 
 Run the host's built-in validation before testing it in Edge:
