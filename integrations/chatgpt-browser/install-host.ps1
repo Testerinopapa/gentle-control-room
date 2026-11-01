@@ -20,7 +20,9 @@ $manifest = Join-Path $destination "native-host.json"
   path = $exe
   type = "stdio"
   allowed_origins = @("chrome-extension://$ExtensionId/")
-} | ConvertTo-Json -Depth 4 | Set-Content -Path $manifest -Encoding UTF8
+} | ConvertTo-Json -Depth 4 | ForEach-Object {
+  [System.IO.File]::WriteAllText($manifest, $_, [System.Text.UTF8Encoding]::new($false))
+}
 # The native host and manifest are installed only for the current Windows user.
 $key = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\org.gentlecontrolroom.chatgpt"
 New-Item -Path $key -Force | Out-Null
