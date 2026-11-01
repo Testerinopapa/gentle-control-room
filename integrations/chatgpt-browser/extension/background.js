@@ -20,11 +20,34 @@ async function getSession(tabId) {
   const data = await chrome.storage.session.get(KEY(tabId));
   return data[KEY(tabId)] || null;
 }
+function nativeFailure(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("not found") || message.includes("not registered") ||
+      message.includes("specified native messaging host")) {
+    return "Windows collector not installed or not registered. Run install-host.ps1 for this Edge extension ID.";
+  }
+  if (message.includes("forbidden") || message.includes("not allowed") ||
+      message.includes("access to the specified")) {
+    return "Edge rejected the collector. Reinstall it with the current extension ID from edge://extensions.";
+  }
+  if (message.includes("exited") || message.includes("communication") ||
+      message.includes("disconnected") || message.includes("broken pipe")) {
+    return "Windows collector started but could not respond. Rebuild it with install-host.ps1 and try again.";
+  }
+  return "Cannot reach the Windows collector. Verify its installation and Edge extension ID.";
+}
+async function sendToNative(message) {
+  try {
+    return await chrome.runtime.sendNativeMessage(HOST, message);
+  } catch (error) {
+    throw new Error(nativeFailure(error));
+  }
+}
 async function nativeEvent(event, sessionId, counts = undefined) {
   if (!UUID.test(sessionId)) throw new Error("Invalid session metadata.");
   const message = { version: 1, event, sessionId, ...(counts || {}) };
-  const answer = await chrome.runtime.sendNativeMessage(HOST, message);
-  if (!answer?.ok) throw new Error("The Windows native collector is unavailable.");
+  const answer = await sendToNative(message);
+  if (!answer?.ok) throw new Error("The Windows collector rejected the event. Reinstall the latest host and try again.");
 }
 async function stop(tabId) {
   const session = await getSession(tabId);
@@ -57,6 +80,14 @@ async function start(tabId) {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   (async () => {
     if (!message || typeof message.type !== "string") throw new Error("Invalid request.");
+    if (message.type === "testConnection") {
+      // Read-only probe. No conversation/session is created.
+      const reply = await sendToNative({ version: 1, event: "health_check" });
+      if (!reply?.ok) {
+        return { ok: false, error: "Windows collector did not accept the health check. Reinstall the latest host." };
+      }
+      return { ok: true, connected: true };
+    }
     if (message.type === "visibleCounts" || message.type === "conversationChanged") {
       const tabId = sender.tab?.id;
       if (!Number.isInteger(tabId)) return { ok: false };
