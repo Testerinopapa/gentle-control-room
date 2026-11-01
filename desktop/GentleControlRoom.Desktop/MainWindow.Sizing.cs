@@ -20,7 +20,7 @@ public partial class MainWindow
     if (WindowState != WindowState.Normal) return;
     var frameHeight = Math.Max(0, ActualHeight - WorkspaceRoot.ActualHeight);
     var workArea = SystemParameters.WorkArea;
-    var desired = AppWebView.Height + ActivityCard.ActualHeight + 16 + frameHeight;
+    var desired = AppWebView.Height + ActivityCard.ActualHeight + BrowserActivityCard.ActualHeight + 16 + frameHeight;
     Height = Math.Clamp(desired, Math.Min(MinHeight, workArea.Height), workArea.Height);
     if (Top + Height > workArea.Bottom) Top = Math.Max(workArea.Top, workArea.Bottom - Height);
   }
