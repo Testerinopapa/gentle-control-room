@@ -48,6 +48,27 @@ try
 }
 finally { Directory.Delete(root, true); }
 
+// Native layout regression: one scrolling workspace, unconstrained history rows,
+// and no nested scrollbar that can clip session descriptions.
+var xaml = System.Xml.Linq.XDocument.Load(
+  Path.Combine(AppContext.BaseDirectory, "MainWindow.xaml"));
+var nodes = xaml.Descendants().ToArray();
+Check(nodes.Count(e => e.Name.LocalName == "ScrollViewer") == 1,
+  "one primary scrollbar for the entire native workspace");
+var history = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
+  (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "CodexHistory");
+Check(history.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
+  "session history uses only the outer workspace scroller");
+Check(!nodes.Any(e => e.Name.LocalName == "ScrollViewer" &&
+  (string?)e.Attribute("MaxHeight") == "300"),
+  "session history has no nested capped-height scrolling container");
+Check(nodes.Any(e => e.Name.LocalName == "Grid" &&
+  (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "Workspace"),
+  "constrained Grid controls layout width");
+Check(nodes.Any(e => e.Name.LocalName == "Expander" &&
+  (string?)e.Attribute("Header") == "Detailed statistics"),
+  "secondary statistics are available without duplicating the summary");
+
 InsightTests.Run();
 
 if (args.Contains("--local"))
