@@ -4,6 +4,10 @@ const KEY = (tabId) => "gcrChatGPTTab:" + tabId;
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 
+// Clicking the extension toolbar icon opens the persistent Edge side panel.
+// This does not start tracking: collection still requires an explicit Start click.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
 function eligible(url) {
   try {
     const u = new URL(url);
@@ -38,7 +42,9 @@ async function start(tabId) {
   const id = crypto.randomUUID();
   // Fail closed if the native host is not installed.
   await nativeEvent("session_started", id);
-  await chrome.storage.session.set({ [KEY(tabId)]: { id, page: new URL(tab.url).pathname } });
+  await chrome.storage.session.set({
+    [KEY(tabId)]: { id, page: new URL(tab.url).pathname, visibleUser: null, visibleAssistant: null }
+  });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#166534" });
   await chrome.action.setBadgeText({ tabId, text: "ON" });
   try {
@@ -67,6 +73,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       await nativeEvent("visible_counts", session.id, {
         visibleUser: message.user, visibleAssistant: message.assistant
       });
+      // The sidebar displays safe counts for the tab that opted in.
+      // Never resurrect a session after Stop or navigation.
+      const current = await getSession(tabId);
+      if (current?.id === session.id) {
+        await chrome.storage.session.set({
+          [KEY(tabId)]: { ...current, visibleUser: message.user, visibleAssistant: message.assistant }
+        });
+      }
       return { ok: true };
     }
 
@@ -74,7 +88,16 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!Number.isInteger(tabId)) throw new Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
     if (message.type === "getState") {
-      return { ok: true, allowed: eligible(tab.url), active: Boolean(await getSession(tabId)) };
+      const session = await getSession(tabId);
+      const allowed = eligible(tab.url);
+      // If a navigation escaped onUpdated, revoke consent before displaying it.
+      const samePage = allowed && session?.page === new URL(tab.url).pathname;
+      if (session && !samePage) await stop(tabId);
+      return {
+        ok: true, allowed, active: Boolean(session && samePage),
+        visibleUser: samePage ? session?.visibleUser ?? null : null,
+        visibleAssistant: samePage ? session?.visibleAssistant ?? null : null
+      };
     }
     if (message.type === "start") {
       await start(tabId);
