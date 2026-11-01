@@ -20,11 +20,15 @@ $startIds = @{}
 $types = @{ session_started = 0; visible_counts = 0; coding_tag = 0; session_ended = 0 }
 $latest = [DateTimeOffset]::MinValue
 $invalid = 0
+$unreadableFiles = 0
 $selected = 0
 
 foreach ($file in $files) {
-  # Don't print file contents, code, conversation identifiers or session IDs.
-  foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
+  # A native write can temporarily hold an exclusive file lock; skip the
+  # current file and report incomplete reads rather than crashing.
+  try {
+    # Don't print file contents, code, conversation identifiers or session IDs.
+    foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
     try {
       $row = $line | ConvertFrom-Json -ErrorAction Stop
       if ($row.schemaVersion -ne 1 -or $row.source -ne 'chatgpt_browser' -or
@@ -46,10 +50,15 @@ foreach ($file in $files) {
     catch {
       $invalid++
     }
+    }
+  }
+  catch {
+    $unreadableFiles++
   }
 }
 
 Write-Host "Local event files: $($files.Count)"
+Write-Host "Temporarily unreadable files: $unreadableFiles"
 Write-Host "Selected period: $Period"
 Write-Host "Recorded sessions: $($sessionIds.Count)"
 Write-Host "Confirmed starts: $($startIds.Count)"
