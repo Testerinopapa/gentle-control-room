@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT Activity · Gentle Control Room</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-width: 240px; min-height: 100vh;
+      font: 16px/1.5 system-ui, "Segoe UI", sans-serif;
+      background: #f8fafc; color: #0f172a;
+    }
+    .layout { display: flex; flex-direction: column; min-height: 100vh; }
+    header { padding: 24px 20px 18px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+    .eyebrow { color: #64748b; font-weight: 600; margin: 0 0 5px; }
+    h1 { margin: 0; font-size: 22px; line-height: 1.25; letter-spacing: -.025em; }
+    .red { color: #cf3339; }
+    main { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+    section {
+      background: #fff; padding: 18px; border: 1px solid #e2e8f0;
+      border-radius: 12px; min-width: 0;
+    }
+    .section-heading { font-size: 17px; font-weight: 700; margin: 0 0 10px; }
+    .status { display: flex; align-items: center; gap: 10px; font-weight: 650; overflow-wrap: anywhere; }
+    .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #94a3b8; }
+    .status[data-active="true"] .dot { background: #16803c; }
+    .status[data-active="true"] { color: #166534; }
+    .hint { margin: 9px 0 0; color: #475569; overflow-wrap: anywhere; }
+    .buttons { display: grid; gap: 10px; margin-top: 16px; }
+    button {
+      width: 100%; border-radius: 9px; padding: 12px; font: inherit; font-weight: 650;
+      border: 1px solid #cbd5e1; background: #fff; color: #0f172a; cursor: pointer;
+    }
+    button.primary { background: #183b63; border-color: #183b63; color: #fff; }
+    button:hover:not(:disabled) { filter: brightness(.96); }
+    button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+    button:disabled { cursor: default; opacity: .48; }
+    .counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .count { background: #f1f5f9; border-radius: 8px; padding: 12px; min-width: 0; }
+    .count strong { display: block; font-size: 28px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .count span { display: block; color: #475569; margin-top: 4px; }
+    .muted { color: #64748b; }
+    .notice {
+      border-left: 3px solid #cbd5e1; padding: 0 0 0 12px; color: #475569;
+      margin: 0; overflow-wrap: anywhere;
+    }
+    .error { color: #9f1239; font-weight: 600; }
+    footer { padding: 18px 20px 24px; color: #475569; border-top: 1px solid #e2e8f0; }
+    footer p { margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <p class="eyebrow">Gentle Control Room</p>
+    <h1>ChatGPT Activity<span class="red">.</span></h1>
+  </header>
+
+  <main>
+    <section aria-label="Collection status">
+      <h2 class="section-heading">This tab</h2>
+      <div id="state" class="status" data-active="false" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span>
+      </div>
+      <p id="note" class="hint">Recording starts only when you enable a conversation.</p>
+      <p id="error" class="error" role="alert" hidden></p>
+      <div class="buttons">
+        <button id="start" class="primary" disabled>Start for this conversation</button>
+        <button id="stop" disabled>Stop recording</button>
+      </div>
+    </section>
+
+    <section aria-label="Visible message counts">
+      <h2 class="section-heading">Visible messages</h2>
+      <div class="counts">
+        <div class="count"><strong id="user-count">—</strong><span>Your messages</span></div>
+        <div class="count"><strong id="assistant-count">—</strong><span>ChatGPT replies</span></div>
+      </div>
+      <p class="hint">Approximate counts from the visible conversation, not messages sent since you started recording.</p>
+    </section>
+
+    <p class="notice">
+      This panel follows the active Edge tab. Each conversation needs its own approval.
+      Switching conversations stops collection for the previous one.
+    </p>
+  </main>
+
+  <footer>
+    <p><strong>Local only.</strong> No chat text, conversation titles, URLs, cookies, or tokens are saved.</p>
+    <p class="muted">Your activity summary appears in the Gentle Control Room Windows app.</p>
+  </footer>
+</div>
+<script src="sidepanel.js"></script>
+</body>
+</html>
