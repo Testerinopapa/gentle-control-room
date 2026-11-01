@@ -45,6 +45,7 @@ internal static class BrowserActivityReader
               var record = doc.RootElement;
               if (record.ValueKind != JsonValueKind.Object ||
                   !record.TryGetProperty("schemaVersion", out var version) ||
+                  version.ValueKind != JsonValueKind.Number ||
                   !version.TryGetInt32(out var schema) || schema != 1 ||
                   GetString(record, "source") != "chatgpt_browser")
               {
@@ -68,6 +69,7 @@ internal static class BrowserActivityReader
               {
                 if (!record.TryGetProperty("visibleUser", out var u) ||
                     !record.TryGetProperty("visibleAssistant", out var a) ||
+                    u.ValueKind != JsonValueKind.Number || a.ValueKind != JsonValueKind.Number ||
                     !u.TryGetInt32(out var un) || !a.TryGetInt32(out var an) ||
                     un is < 0 or > 10000 || an is < 0 or > 10000)
                 {
