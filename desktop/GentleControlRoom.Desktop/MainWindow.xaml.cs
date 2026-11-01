@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using NotifyIcon = System.Windows.Forms.NotifyIcon;
@@ -19,6 +20,7 @@ public partial class MainWindow : System.Windows.Window
   private readonly NotifyIcon _notifyIcon;
   private readonly string _diagnosticLogPath;
   private readonly DispatcherTimer _codexTimer = new() { Interval = TimeSpan.FromSeconds(20) };
+  private bool _codexRefreshInFlight;
   private bool _initialized;
   private bool _exitRequested;
 
@@ -257,14 +259,38 @@ public partial class MainWindow : System.Windows.Window
   }
 
   // Local-only native WPF panel. No Codex data is sent into WebView2.
-  private void RefreshCodexActivity()
+  private async void RefreshCodexActivity()
   {
-    var snapshot = CodexActivityReader.Read();
-    CodexStatusText.Text = snapshot.State;
-    CodexSummaryText.Text =
-      $"Projects: {snapshot.Projects}  ·  Sessions today: {snapshot.SessionsToday}  ·  " +
-      $"Tool uses today: {snapshot.ToolUsesToday}  ·  Events today: {snapshot.EventsToday}";
-    CodexLastEventText.Text = snapshot.LastActivity;
+    if (_codexRefreshInFlight || _exitRequested)
+    {
+      return;
+    }
+
+    _codexRefreshInFlight = true;
+    try
+    {
+      // Reading up to 50 MiB of local JSONL must not freeze the alert UI.
+      var snapshot = await Task.Run(CodexActivityReader.Read);
+      if (_exitRequested)
+      {
+        return;
+      }
+
+      CodexStatusText.Text = snapshot.State;
+      CodexSummaryText.Text =
+        $"Projects: {snapshot.Projects}  ·  Sessions today: {snapshot.SessionsToday}  ·  " +
+        $"Tool uses today: {snapshot.ToolUsesToday}  ·  Events today: {snapshot.EventsToday}";
+      CodexLastEventText.Text = snapshot.LastActivity;
+    }
+    catch (Exception)
+    {
+      // Fail closed without logging local paths, consent values or event data.
+      CodexStatusText.Text = "Unavailable";
+    }
+    finally
+    {
+      _codexRefreshInFlight = false;
+    }
   }
 
   private void CodexRefresh_Click(object sender, System.Windows.RoutedEventArgs e)
