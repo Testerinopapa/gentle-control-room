@@ -75,8 +75,12 @@
             </ComboBox>
 
             <TextBlock Grid.Row="3" Text="Codex activity summary" Style="{StaticResource Heading}" />
-            <TextBlock Grid.Row="4" x:Name="CodexSummaryText" Text="Reading local activity..."
-                       Margin="0,0,0,16" />
+            <StackPanel Grid.Row="4" Margin="0,0,0,16">
+              <TextBlock x:Name="CodexSummaryText" Text="Reading local activity..."
+                         Margin="0,0,0,6" />
+              <TextBlock x:Name="SessionBreakdownText" FontWeight="SemiBold"
+                         Text="Loading Codex and ChatGPT session totals..." />
+            </StackPanel>
 
             <TextBlock Grid.Row="5" Text="Codex session history" Style="{StaticResource Heading}" />
             <Grid Grid.Row="6" Margin="0,0,0,16">
@@ -223,7 +227,6 @@
               <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid Grid.Row="0">
               <Grid.ColumnDefinitions>
@@ -239,12 +242,9 @@
                        Foreground="#64748B" Margin="0,4,0,10" />
             <TextBlock Grid.Row="2" x:Name="BrowserSummaryText"
                        Text="Reading local ChatGPT activity..." Margin="0,0,0,8" />
-            <TextBlock Grid.Row="3" x:Name="CombinedSessionText"
-                       Text="Combined session count loading..." FontWeight="SemiBold"
-                       Margin="0,0,0,10" />
-            <TextBlock Grid.Row="4" Text="Recent ChatGPT sessions" Style="{StaticResource Heading}"
+            <TextBlock Grid.Row="3" Text="Recent ChatGPT sessions" Style="{StaticResource Heading}"
                        Margin="0,0,0,8" />
-            <Grid Grid.Row="5" Margin="0,0,0,16">
+            <Grid Grid.Row="4" Margin="0,0,0,16">
               <TextBlock x:Name="BrowserHistoryEmpty" Foreground="#64748B"
                          Text="No opted-in ChatGPT sessions in the selected period." />
               <ItemsControl x:Name="BrowserHistory" HorizontalAlignment="Stretch">
@@ -280,9 +280,9 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </Grid>
-            <TextBlock Grid.Row="6" x:Name="BrowserLatestText"
+            <TextBlock Grid.Row="5" x:Name="BrowserLatestText"
                        Text="No events observed yet" Foreground="#475569" Margin="0,0,0,6" />
-            <TextBlock Grid.Row="7" x:Name="BrowserStoreText"
+            <TextBlock Grid.Row="6" x:Name="BrowserStoreText"
                        Text="Checking Windows event files..." Foreground="#64748B" />
           </Grid>
         </Border>
