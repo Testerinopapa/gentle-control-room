@@ -8,6 +8,8 @@ const startButton = document.getElementById("start");
 const stopButton = document.getElementById("stop");
 const userNode = document.getElementById("user-count");
 const assistantNode = document.getElementById("assistant-count");
+const connectionNode = document.getElementById("connection-state");
+const checkButton = document.getElementById("check-connection");
 
 let selectedTab = null;
 let busy = false;
@@ -80,9 +82,33 @@ async function command(type) {
     }
     const result = await chrome.runtime.sendMessage({ type, tabId: selectedTab });
     if (!result?.ok) throw new Error(result?.error || "The local collector is unavailable.");
+    connectionNode.textContent = "Connected to the Windows collector.";
   } catch (error) {
     lastError = error?.message || "The local collector is unavailable.";
+    connectionNode.textContent = "Windows connection needs attention.";
   } finally {
+    busy = false;
+    await refresh();
+  }
+}
+
+async function testConnection() {
+  if (busy) return;
+  busy = true;
+  checkButton.disabled = true;
+  connectionNode.textContent = "Checking the local Windows collector…";
+  lastError = "";
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "testConnection" });
+    if (!result?.ok || !result.connected) {
+      throw new Error(result?.error || "The Windows collector did not respond.");
+    }
+    connectionNode.textContent = "Connected. You can start recording a conversation.";
+  } catch (error) {
+    lastError = error?.message || "Cannot connect to the Windows collector.";
+    connectionNode.textContent = "Not connected.";
+  } finally {
+    checkButton.disabled = false;
     busy = false;
     await refresh();
   }
@@ -90,6 +116,7 @@ async function command(type) {
 
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
+checkButton.addEventListener("click", () => void testConnection());
 
 // Edge keeps a side panel open across tab switches; never leave stale controls
 // showing the previous tab's consent state.
