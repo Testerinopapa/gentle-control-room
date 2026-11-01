@@ -365,6 +365,28 @@ test("legacy author-role markers remain supported when modern timeline is absent
   assert.equal(sent.find(x => x.type === "visibleCounts").assistant, 1);
 });
 
+test("page observer status is local-only metadata and is authorized per session", async () => {
+  const h = harness();
+  const before = await h.send({ type: "observerStatus", detector: "current",
+    privateText: "PRIVATE" }, { tab: { id: 9 } });
+  assert.equal(before.ok, false);
+  await h.send({ type: "start", tabId: 9 });
+  const result = await h.send({ type: "observerStatus", detector: "current",
+    privateText: "PRIVATE" }, { tab: { id: 9 } });
+  assert.equal(result.ok, true);
+  const state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.detector, "current");
+  assert.ok(Number.isFinite(state.lastObservedAt));
+  assert.equal(h.native.length, 1,
+    "observer heartbeat must not write additional events to Windows");
+  assert.equal(JSON.stringify(state).includes("PRIVATE"), false);
+  const invalid = await h.send({ type: "observerStatus", detector: "secret-pattern" },
+    { tab: { id: 9 } });
+  assert.equal(invalid.ok, false);
+  const stateAgain = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(stateAgain.detector, "current");
+});
+
 test("native host health check does not start or save a conversation", async () => {
   const h = harness();
   const answer = await h.send({ type: "testConnection" });
