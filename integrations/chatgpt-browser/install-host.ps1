@@ -23,6 +23,13 @@ $manifest = Join-Path $destination "native-host.json"
 } | ConvertTo-Json -Depth 4 | ForEach-Object {
   [System.IO.File]::WriteAllText($manifest, $_, [System.Text.UTF8Encoding]::new($false))
 }
+# Verify the published executable and its extension allowlist before
+# registering Edge. This uses no browser data or activity records.
+& $exe --self-test
+if ($LASTEXITCODE -ne 0) { throw "Native host self-test failed." }
+& $exe --check-install "chrome-extension://$ExtensionId/"
+if ($LASTEXITCODE -ne 0) { throw "Native host manifest did not allow this extension ID." }
+Write-Host "Native host self-check passed."
 # The native host and manifest are installed only for the current Windows user.
 $key = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\org.gentlecontrolroom.chatgpt"
 New-Item -Path $key -Force | Out-Null
