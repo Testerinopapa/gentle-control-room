@@ -120,7 +120,7 @@
               </ItemsControl>
             </Grid>
 
-            <TextBlock Grid.Row="7" Text="Recurring Patterns" Style="{StaticResource Heading}" />
+            <TextBlock Grid.Row="7" Text="Recurring Patterns · Codex + ChatGPT" Style="{StaticResource Heading}" />
             <ItemsControl Grid.Row="8" x:Name="CodexPatterns" Margin="0,0,0,16"
                           HorizontalAlignment="Stretch">
               <ItemsControl.ItemTemplate>
