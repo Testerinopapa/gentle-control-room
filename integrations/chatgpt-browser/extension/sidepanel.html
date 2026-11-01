@@ -84,7 +84,15 @@
         <div class="count"><strong id="assistant-count">—</strong><span>ChatGPT replies</span></div>
       </div>
       <p class="hint" id="observer-state" role="status" aria-live="polite">Start recording to check the page observer.</p>
+      <p class="hint"><strong id="code-count">—</strong> visible code examples</p>
       <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
+    </section>
+
+    <section aria-label="Coding work tag">
+      <h2 class="section-heading">Coding work</h2>
+      <p class="hint" id="coding-hint">For work done using ChatGPT tools without displayed code, mark this conversation as coding-related.</p>
+      <button id="coding-toggle" type="button" disabled>Mark as coding work</button>
+      <p class="hint">Only a yes/no tag is saved. No code or conversation text is recorded.</p>
     </section>
 
     <p class="notice">
