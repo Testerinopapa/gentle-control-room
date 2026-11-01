@@ -14,6 +14,60 @@
   let nextCountAt = 0;
   let countInFlight = false;
   let statusInFlight = false;
+  // Deeper analysis is a separate explicit opt-in and is never enabled by
+  // ordinary Start. Text is inspected inside the webpage process only.
+  let workflowEnabled = false;
+  const seenMessages = new WeakSet();
+  let workflowSent = 0;
+  const maxWorkflowStages = 120;
+  const workflowCategories = Object.freeze([
+    ["debugging", /\b(?:debug|bug|exception|stack\s*trace|traceback|broken|error|errors|fail(?:ed|ing|ure|s)?|not\s+working|doesn.t\s+work|fix\s+(?:the\s+)?(?:issue|problem|error|bug))\b/i],
+    ["version_control", /\b(?:git|commit|pull\s+request|merge|rebase|cherry.pick|branch|push\s+to\s+(?:main|remote)|sync\s+(?:local|remote))\b/i],
+    ["deployment", /\b(?:deploy|deployment|release|publish\s+to\s+(?:production|staging)|production\s+rollout|hosting|go\s+live)\b/i],
+    ["testing", /\b(?:tests?|testing|unit\s+tests?|integration\s+tests?|regression|lint|build\s+check|verify|validate|quality\s+checks?|run\s+checks?)\b/i],
+    ["implementation", /\b(?:implement|implementation|add|create|build|modify|edit|refactor|remove|integrate|wire|develop|write|update|configure|set\s*up|replace|change)\b/i],
+    ["investigation", /\b(?:inspect|investigate|analy[sz]e|review|explain|understand|diagnos[ei]|look\s+into|find\s+out|what\s+causes|why\s+(?:does|is|are))\b/i]
+  ]);
+
+  function categorize(text) {
+    const excerpt = text.slice(0, 2400);
+    for (const [category, pattern] of workflowCategories) {
+      if (pattern.test(excerpt)) return category;
+    }
+    return null;
+  }
+
+  function userMessages() {
+    const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
+    if (region) {
+      const bubbles = region.querySelectorAll('[data-user-message-bubble="true"]');
+      if (bubbles.length) return bubbles;
+      return region.querySelectorAll('[data-content-search-unit-key$=":user"]');
+    }
+    return document.querySelectorAll('[data-message-author-role="user"]');
+  }
+
+  async function scanWorkflow() {
+    if (!workflowEnabled || stopped || workflowSent >= maxWorkflowStages) return;
+    // Bound the scan; only the 120 most recent mounted user messages are read.
+    const units = Array.from(userMessages()).slice(-120);
+    for (const unit of units) {
+      if (!workflowEnabled || stopped || workflowSent >= maxWorkflowStages) break;
+      if (seenMessages.has(unit)) continue;
+      seenMessages.add(unit);
+      // Read only visible user-message text, transiently, and only while the
+      // user enabled workflow analysis for this specific conversation.
+      const stage = categorize(String(unit.innerText ?? unit.textContent ?? ""));
+      if (!stage) continue;
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "workflowStage", stage });
+        if (result?.ok) workflowSent++;
+        // Failed delivery is not retried for a message to avoid duplicate writes.
+      } catch {
+        // No message text, exceptions or DOM identifiers leave this content script.
+      }
+    }
+  }
 
   // ChatGPT changed its DOM in 2026. Current conversations place messages
   // inside a visible timeline region, with user/assistant units as siblings.
@@ -122,12 +176,14 @@
     void reportStatus(counts.detector);
     if (counts.detector === "current" || counts.detector === "legacy") {
       void reportCounts(counts);
+      if (workflowEnabled) void scanWorkflow();
     }
   }
 
   function stop() {
     if (stopped) return;
     stopped = true;
+    workflowEnabled = false;
     observer.disconnect();
     clearInterval(ticker);
     clearTimeout(debounce);
@@ -138,6 +194,10 @@
   }
   function onCommand(message) {
     if (message?.type === "gcrStop") stop();
+    if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
+      workflowEnabled = message.enabled;
+      if (workflowEnabled) void scanWorkflow();
+    }
   }
 
   let debounce = null;
