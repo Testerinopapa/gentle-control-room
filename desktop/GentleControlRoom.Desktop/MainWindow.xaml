@@ -11,6 +11,7 @@
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <Style x:Key="Heading" TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
@@ -33,10 +34,46 @@
               </StackPanel>
             </DockPanel>
             <Border Background="#F1F5F9" CornerRadius="6" Padding="10,6" Margin="0,0,0,12">
-              <TextBlock x:Name="CodexStatusText" Text="Collector Â· Checkingâ€¦" FontWeight="SemiBold" />
+              <TextBlock x:Name="CodexStatusText" Text="Collector - Checking..." FontWeight="SemiBold" />
             </Border>
+            <ComboBox x:Name="CodexPeriodFilter" SelectedIndex="0" Margin="0,0,0,12"
+                      Padding="8,4" HorizontalAlignment="Left" MinWidth="190"
+                      AutomationProperties.Name="Activity time period" SelectionChanged="CodexPeriod_Changed">
+              <ComboBoxItem Content="Today" />
+              <ComboBoxItem Content="Last 7 days" />
+              <ComboBoxItem Content="Available history" />
+            </ComboBox>
+            <TextBlock Text="Activity Summary" Style="{StaticResource Heading}" />
+            <TextBlock x:Name="CodexSummaryText" Text="Reading local activity..." Margin="0,0,0,16" />
+            <TextBlock Text="Session History" Style="{StaticResource Heading}" />
+            <TextBlock x:Name="CodexHistoryEmpty" Text="No identifiable sessions in this period." Foreground="#64748B" Margin="0,0,0,12" />
+            <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,16">
+              <ItemsControl x:Name="CodexHistory">
+                <ItemsControl.ItemTemplate><DataTemplate>
+                  <Border BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="0,8">
+                    <StackPanel>
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Summary}" Margin="0,4,0,4" />
+                      <Expander Header="Recorded timeline" HorizontalContentAlignment="Stretch">
+                        <StackPanel Margin="0,6,0,0">
+                          <TextBlock Text="{Binding Boundaries}" Foreground="#475569" Margin="0,0,0,8" />
+                          <TextBlock Text="{Binding Timeline}" Foreground="#475569" />
+                        </StackPanel>
+                      </Expander>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+            <TextBlock Text="Recurring Patterns" Style="{StaticResource Heading}" />
+            <ItemsControl x:Name="CodexPatterns" Margin="0,0,0,12">
+              <ItemsControl.ItemTemplate><DataTemplate>
+                <TextBlock Text="{Binding}" Margin="0,0,0,8" />
+              </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="Activity Statistics" Style="{StaticResource Heading}" />
             <ItemsControl x:Name="CodexOverview">
-              <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate><DataTemplate>
                 <StackPanel Margin="0,0,12,12">
                   <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold" />
@@ -47,7 +84,7 @@
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
               <StackPanel>
-            <TextBlock Text="Tool activity Â· today" Style="{StaticResource Heading}" />
+            <TextBlock Text="Tool Category Breakdown" Style="{StaticResource Heading}" />
             <ItemsControl x:Name="CodexCategories">
               <ItemsControl.ItemTemplate><DataTemplate>
                 <Grid Margin="0,0,0,7">
@@ -63,7 +100,7 @@
               </StackPanel>
               <StackPanel Grid.Column="2">
             <TextBlock Text="Recent activity" Style="{StaticResource Heading}" Margin="0,0,0,8" />
-            <TextBlock x:Name="CodexEmptyText" Text="No events recorded yet." Foreground="#64748B" />
+            <TextBlock x:Name="CodexEmptyText" Text="No events recorded in this period." Foreground="#64748B" />
             <ItemsControl x:Name="CodexRecent">
               <ItemsControl.ItemTemplate><DataTemplate>
                 <StackPanel Margin="0,0,0,7">
@@ -82,7 +119,7 @@
     <Border x:Name="LoadingOverlay" Background="#F6F7F9" Padding="24">
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
         <TextBlock Text="Gentle Control Room" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" />
-        <TextBlock x:Name="StatusText" Margin="0,16,0,0" Text="Starting desktop shellâ€¦" Foreground="#475569" TextAlignment="Center" />
+        <TextBlock x:Name="StatusText" Margin="0,16,0,0" Text="Starting desktop shell..." Foreground="#475569" TextAlignment="Center" />
       </StackPanel>
     </Border>
   </Grid>

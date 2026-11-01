@@ -21,6 +21,7 @@ public partial class MainWindow : System.Windows.Window
   private readonly string _diagnosticLogPath;
   private readonly DispatcherTimer _codexTimer = new() { Interval = TimeSpan.FromSeconds(20) };
   private bool _codexRefreshInFlight;
+  private CodexPeriod _codexPeriod;
   private bool _initialized;
   private bool _exitRequested;
 
@@ -268,28 +269,33 @@ public partial class MainWindow : System.Windows.Window
     }
 
     _codexRefreshInFlight = true;
+    var period = _codexPeriod;
     try
     {
       // Reading up to 50 MiB of local JSONL must not freeze the alert UI.
-      var snapshot = await Task.Run(CodexActivityReader.Read);
-      if (_exitRequested)
+      var snapshot = await Task.Run(() => CodexActivityReader.Read(period));
+      if (_exitRequested || period != _codexPeriod)
       {
         return;
       }
 
-      CodexStatusText.Text = $"Collector Â· {snapshot.State}";
+      CodexStatusText.Text = $"Collector: {snapshot.State} | Approved projects now: {snapshot.Projects}";
+      CodexSummaryText.Text = snapshot.Summary;
+      CodexHistory.ItemsSource = snapshot.History;
+      CodexPatterns.ItemsSource = snapshot.Patterns;
+      CodexHistoryEmpty.Visibility = snapshot.History.Count == 0
+        ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
       CodexOverview.ItemsSource = new[]
       {
-        new { Label = "Approved projects", Value = snapshot.Projects },
-        new { Label = "Sessions today", Value = snapshot.SessionsToday },
-        new { Label = "Tool uses today", Value = snapshot.ToolUsesToday },
-        new { Label = "Events today", Value = snapshot.EventsToday }
+        new { Label = "Sessions", Value = snapshot.Sessions },
+        new { Label = "Tool operations", Value = snapshot.ToolUses },
+        new { Label = "Recorded events", Value = snapshot.Events }
       };
       CodexCategories.ItemsSource = snapshot.Categories;
       CodexRecent.ItemsSource = snapshot.Recent;
       CodexEmptyText.Visibility = snapshot.Recent.Count == 0
         ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-      CodexUpdatedText.Text = $"Updated {DateTime.Now:HH:mm:ss} Â· every 20 seconds";
+      CodexUpdatedText.Text = $"Updated {DateTime.Now:HH:mm:ss} - every 20 seconds";
     }
     catch (Exception)
     {
@@ -299,7 +305,25 @@ public partial class MainWindow : System.Windows.Window
     finally
     {
       _codexRefreshInFlight = false;
+      if (!_exitRequested && period != _codexPeriod) RefreshCodexActivity();
     }
+  }
+
+  private void CodexPeriod_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+  {
+    if (CodexPeriodFilter is null || CodexPeriodFilter.SelectedIndex < 0) return;
+    _codexPeriod = (CodexPeriod)CodexPeriodFilter.SelectedIndex;
+    if (!IsLoaded) return;
+    // Clear the old period immediately; an in-flight read is discarded and retried.
+    CodexSummaryText.Text = "Reading local activity...";
+    CodexHistory.ItemsSource = null;
+    CodexPatterns.ItemsSource = null;
+    CodexOverview.ItemsSource = null;
+    CodexCategories.ItemsSource = null;
+    CodexRecent.ItemsSource = null;
+    CodexHistoryEmpty.Visibility = System.Windows.Visibility.Collapsed;
+    CodexEmptyText.Visibility = System.Windows.Visibility.Collapsed;
+    RefreshCodexActivity();
   }
 
   private void CodexRefresh_Click(object sender, System.Windows.RoutedEventArgs e)

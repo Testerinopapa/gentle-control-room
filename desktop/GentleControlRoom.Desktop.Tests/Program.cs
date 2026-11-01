@@ -19,7 +19,7 @@ try
   Check(CodexActivityReader.ReadFrom(root, false, now).State == "Off", "missing consent is off");
   Consent();
   var empty = CodexActivityReader.ReadFrom(root, true, now);
-  Check(empty.State == "Recording" && empty.EventsToday == 0 && empty.Recent.Count == 0,
+  Check(empty.State == "Recording" && empty.Events == 0 && empty.Recent.Count == 0,
     "recording does not imply recent events");
   var file = Path.Combine(root, "events-20000101-0.jsonl");
   var today = new DateTimeOffset(now.LocalDateTime.Date, TimeZoneInfo.Local.GetUtcOffset(now.LocalDateTime.Date));
@@ -31,7 +31,7 @@ try
     Event("tool_used", today.AddSeconds(-1)), Event("unknown", today),
     Event("tool_used", now.AddDays(1)), "{partial" });
   var result = CodexActivityReader.ReadFrom(root, true, now);
-  Check(result.SessionsToday == 1 && result.ToolUsesToday == 6 && result.EventsToday == 8,
+  Check(result.Sessions == 1 && result.ToolUses == 6 && result.Events == 8,
     "local day, session deduplication, malformed and future records");
   Check(result.Categories.All(c => c.Count == 1), "all six categories, unknown tools map to Other");
   Check(result.Recent.Count == 5 && result.Recent.SequenceEqual(result.Recent.OrderByDescending(e => e.Timestamp)),
@@ -41,12 +41,14 @@ try
   Check(CodexActivityReader.ReadFrom(root, true, now).State == "Paused", "paused collector keeps history");
   File.AppendAllText(file, "\n" + Event("turn_finished", now));
   var updated = CodexActivityReader.ReadFrom(root, true, now);
-  Check(updated.EventsToday == 9 && updated.Recent[0].Category == "Turn finished", "refresh sees appended event");
+  Check(updated.Events == 9 && updated.Recent[0].Category == "Response turn ended", "refresh sees appended event");
   Check(CodexActivityReader.ReadFrom(root, false, now).State.StartsWith("Off"), "missing hooks cannot report recording");
   File.WriteAllText(Path.Combine(root, "consent.json"), "{}");
   Check(CodexActivityReader.ReadFrom(root, true, now).State == "Unavailable", "malformed consent fails closed");
 }
 finally { Directory.Delete(root, true); }
+
+InsightTests.Run();
 
 if (args.Contains("--local"))
 {

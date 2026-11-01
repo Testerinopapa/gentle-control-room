@@ -2,20 +2,20 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 
 namespace GentleControlRoom.Desktop;
 
 /// <summary>Reads only aggregate Codex activity for the current Windows account.</summary>
 internal readonly record struct CodexActivitySnapshot(
-  string State, int Projects, int SessionsToday, int ToolUsesToday,
-  int EventsToday, IReadOnlyList<CodexToolCount> Categories, IReadOnlyList<CodexRecentEvent> Recent);
+  string State, int Projects, int Sessions, int ToolUses,
+  int Events, IReadOnlyList<CodexToolCount> Categories, IReadOnlyList<CodexRecentEvent> Recent,
+  string Summary, IReadOnlyList<CodexSessionInsight> History, IReadOnlyList<string> Patterns);
 
 internal sealed record CodexToolCount(string Label, int Count, int Maximum);
 internal sealed record CodexRecentEvent(string Category, DateTimeOffset Timestamp)
 {
-  public string TimeLabel => Timestamp.ToLocalTime().ToString("MMM d Â· HH:mm:ss", CultureInfo.CurrentCulture);
+  public string TimeLabel => Timestamp.ToLocalTime().ToString("MMM d - HH:mm:ss", CultureInfo.CurrentCulture);
 }
 
 internal static class CodexActivityReader
@@ -23,16 +23,16 @@ internal static class CodexActivityReader
   private const string CollectorMarker = "GCR opt-in local collector";
   private const int MaxEventLineLength = 4096;
 
-  public static CodexActivitySnapshot Read()
+  public static CodexActivitySnapshot Read(CodexPeriod period = CodexPeriod.Today)
   {
     var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     if (string.IsNullOrWhiteSpace(localData)) return Empty("Unavailable");
     return ReadFrom(Path.Combine(localData, "GentleControlRoom", "CodexActivity"),
-      HooksRegistered(), DateTimeOffset.Now);
+      HooksRegistered(), DateTimeOffset.Now, period);
   }
 
   // Explicit inputs keep fixture tests isolated from real consent and activity.
-  internal static CodexActivitySnapshot ReadFrom(string root, bool hooksPresent, DateTimeOffset now)
+  internal static CodexActivitySnapshot ReadFrom(string root, bool hooksPresent, DateTimeOffset now, CodexPeriod period = CodexPeriod.Today)
   {
     // No logging: local consent contains approved paths and a secret.
     try
@@ -64,16 +64,12 @@ internal static class CodexActivityReader
         }
       }
 
-      var state = !hooksPresent ? "Off Â· hooks missing" :
+      var state = !hooksPresent ? "Off - hooks missing" :
         projectCount == 0 ? "Off" :
         paused.GetBoolean() ? "Paused" : "Recording";
 
-      var today = now.LocalDateTime.Date;
-      var events = 0;
-      var toolUses = 0;
-      var sessions = new HashSet<string>(StringComparer.Ordinal);
-      var counts = new int[6];
-      var recent = new List<CodexRecentEvent>();
+      var records = new List<CodexObservedEvent>();
+      var incompleteRead = false;
 
       if (Directory.Exists(root))
       {
@@ -119,33 +115,15 @@ internal static class CodexActivityReader
                   continue;
                 }
 
-                var isToday = when.LocalDateTime.Date == today;
-                if (isToday) events++;
-                if (isToday && eventType == "session_started")
+                if (!CodexInsights.InPeriod(when, now, period)) continue;
+                var session = ReadString(item, "sessionPseudonym");
+                if (string.IsNullOrWhiteSpace(session) || session.Length > 64) session = null;
+                var category = ReadString(item, "toolCategory") switch
                 {
-                  var session = ReadString(item, "sessionPseudonym");
-                  if (!string.IsNullOrEmpty(session) && session.Length <= 64)
-                  {
-                    sessions.Add(session);
-                  }
-                }
-
-                if (eventType == "tool_used")
-                {
-                  if (isToday) toolUses++;
-                  var category = ReadString(item, "toolCategory");
-                  var index = category switch
-                  {
-                    "shell" => 0, "file_edit" => 1, "inspect" => 2,
-                    "git" => 3, "test_build" => 4, _ => 5
-                  };
-                  if (isToday) counts[index]++;
-                  label = CategoryLabels[index];
-                }
-
-                recent.Add(new CodexRecentEvent(label, when));
-                recent.Sort((left, right) => right.Timestamp.CompareTo(left.Timestamp));
-                if (recent.Count > 5) recent.RemoveAt(5);
+                  "shell" => 0, "file_edit" => 1, "inspect" => 2,
+                  "git" => 3, "test_build" => 4, _ => 5
+                };
+                records.Add(new CodexObservedEvent(eventType!, when, session, category));
               }
               catch (JsonException)
               {
@@ -155,17 +133,16 @@ internal static class CodexActivityReader
           }
           catch (IOException)
           {
-            // File may be rotated, deleted or locked while it is being read.
+            incompleteRead = true; // File may be rotated, deleted or locked.
           }
           catch (UnauthorizedAccessException)
           {
-            // Do not crash the Windows app because of the activity store.
+            incompleteRead = true; // Keep the dashboard usable without claiming complete counts.
           }
         }
       }
 
-      return new CodexActivitySnapshot(state, projectCount, sessions.Count,
-        toolUses, events, MakeCategories(counts), recent.ToArray());
+      return CodexInsights.Describe(state, projectCount, records, incompleteRead);
     }
     catch (Exception)
     {
@@ -174,15 +151,8 @@ internal static class CodexActivityReader
     }
   }
 
-  private static readonly string[] CategoryLabels =
-    { "Shell", "File edits", "Inspections", "Git", "Tests / builds", "Other" };
-
-  private static CodexToolCount[] MakeCategories(int[] counts) => CategoryLabels
-    .Select((label, index) => new CodexToolCount(label, counts[index], Math.Max(1, counts.Max())))
-    .ToArray();
-
   private static CodexActivitySnapshot Empty(string state) =>
-    new(state, 0, 0, 0, 0, MakeCategories(new int[6]), Array.Empty<CodexRecentEvent>());
+    CodexInsights.Describe(state, 0, Array.Empty<CodexObservedEvent>());
 
   private static string? ReadString(JsonElement element, string name)
   {
