@@ -23,7 +23,13 @@ internal static class Program
         {
           return 1;
         }
-        if (JsonSerializer.Serialize(parsed).Contains("NEVER_COPY", StringComparison.Ordinal) ||
+        var coding = ParseEvent("""{"version":1,"event":"coding_tag","sessionId":"123e4567-e89b-42d3-a456-426614174000","codingMarked":true,"code":"PRIVATE"}""");
+        var codeBlocks = ParseEvent("""{"version":1,"event":"visible_counts","sessionId":"123e4567-e89b-42d3-a456-426614174000","visibleUser":4,"visibleAssistant":3,"visibleCodeBlocks":2}""");
+        if (coding?.CodingMarked != true || codeBlocks?.VisibleCodeBlocks != 2 ||
+            ParseEvent("""{"version":1,"event":"visible_counts","sessionId":"123e4567-e89b-42d3-a456-426614174000","visibleUser":4,"visibleAssistant":3,"visibleCodeBlocks":-1}""") is not null ||
+            ParseEvent("""{"version":1,"event":"coding_tag","sessionId":"123e4567-e89b-42d3-a456-426614174000","codingMarked":"PRIVATE"}""") is not null ||
+            JsonSerializer.Serialize(coding).Contains("PRIVATE", StringComparison.Ordinal) ||
+            JsonSerializer.Serialize(parsed).Contains("NEVER_COPY", StringComparison.Ordinal) ||
             !IsHealthCheck("""{"version":1,"event":"health_check"}""") ||
             IsHealthCheck("""{"version":2,"event":"health_check"}"""))
         {
