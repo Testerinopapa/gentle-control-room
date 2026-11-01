@@ -130,7 +130,8 @@ internal static class Program
   }
 
   internal readonly record struct BrowserEvent(
-    string EventType, string Session, int? VisibleUser, int? VisibleAssistant);
+    string EventType, string Session, int? VisibleUser, int? VisibleAssistant,
+    int? VisibleCodeBlocks, bool? CodingMarked);
 
   internal static BrowserEvent? ParseEvent(string raw)
   {
@@ -144,7 +145,7 @@ internal static class Program
       if (!root.TryGetProperty("event", out var kind) || kind.ValueKind != JsonValueKind.String)
         return null;
       var name = kind.GetString();
-      if (name is not ("session_started" or "visible_counts" or "session_ended")) return null;
+      if (name is not ("session_started" or "visible_counts" or "session_ended" or "coding_tag")) return null;
       if (!root.TryGetProperty("sessionId", out var token) ||
           token.ValueKind != JsonValueKind.String ||
           !Guid.TryParseExact(token.GetString(), "D", out var session))
@@ -152,6 +153,8 @@ internal static class Program
 
       int? user = null;
       int? assistant = null;
+      int? codeBlocks = null;
+      bool? codingMarked = null;
       if (name == "visible_counts")
       {
         if (!root.TryGetProperty("visibleUser", out var userProp) ||
@@ -162,9 +165,25 @@ internal static class Program
           return null;
         user = userCount;
         assistant = assistantCount;
+        // Absent for older extension versions; do not invent a code count.
+        if (root.TryGetProperty("visibleCodeBlocks", out var codeProp))
+        {
+          if (codeProp.ValueKind != JsonValueKind.Number ||
+              !codeProp.TryGetInt32(out var count) || count is < 0 or > 10000)
+            return null;
+          codeBlocks = count;
+        }
+      }
+      if (name == "coding_tag")
+      {
+        if (!root.TryGetProperty("codingMarked", out var tag) ||
+            tag.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+          return null;
+        codingMarked = tag.GetBoolean();
       }
       // Reconstruct from allowed fields only: unknown fields are never saved.
-      return new BrowserEvent(name!, session.ToString("D"), user, assistant);
+      return new BrowserEvent(name!, session.ToString("D"), user, assistant,
+        codeBlocks, codingMarked);
     }
     catch (Exception)
     {
@@ -187,7 +206,9 @@ internal static class Program
       timestamp = now.ToString("O"), eventType = record.EventType,
       sessionPseudonym = record.Session,
       visibleUser = record.VisibleUser,
-      visibleAssistant = record.VisibleAssistant
+      visibleAssistant = record.VisibleAssistant,
+      visibleCodeBlocks = record.VisibleCodeBlocks,
+      codingMarked = record.CodingMarked
     }) + "\n";
     var bytes = Encoding.UTF8.GetBytes(line);
     var index = 0;
