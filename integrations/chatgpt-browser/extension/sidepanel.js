@@ -8,6 +8,7 @@ const startButton = document.getElementById("start");
 const stopButton = document.getElementById("stop");
 const userNode = document.getElementById("user-count");
 const assistantNode = document.getElementById("assistant-count");
+const observerNode = document.getElementById("observer-state");
 const connectionNode = document.getElementById("connection-state");
 const checkButton = document.getElementById("check-connection");
 
@@ -56,6 +57,24 @@ async function refresh() {
       ? String(result.visibleUser) : "—";
     assistantNode.textContent = active && Number.isInteger(result.visibleAssistant)
       ? String(result.visibleAssistant) : "—";
+
+    if (!active) {
+      observerNode.textContent = "Start recording to check the page observer.";
+    } else if (!Number.isFinite(result.lastObservedAt)) {
+      observerNode.textContent = "Waiting for the ChatGPT page observer. If this persists, stop, reload the page, and start again.";
+    } else if (Date.now() - result.lastObservedAt > 20000) {
+      observerNode.textContent = "Page observer is not responding. Stop, reload ChatGPT, and start again.";
+    } else if (result.detector === "unsupported") {
+      observerNode.textContent = "ChatGPT's message layout is not recognized. Recording is on, but message counts are unavailable.";
+    } else if (result.detector === "waiting") {
+      observerNode.textContent = "Observer connected. Waiting for message containers to render.";
+    } else if (Number.isFinite(result.lastCountAt) && Date.now() - result.lastCountAt > 20000) {
+      observerNode.textContent = "Observer connected. The last count update is older than 20 seconds; check Windows connection if counts changed.";
+    } else if (Number.isFinite(result.lastCountAt)) {
+      observerNode.textContent = "Page observer working. Counts will update as visible messages change.";
+    } else {
+      observerNode.textContent = "Page observer connected. Waiting for the first count update.";
+    }
     showError(lastError);
   } catch (error) {
     selectedTab = null;
@@ -66,6 +85,7 @@ async function refresh() {
     stopButton.disabled = true;
     userNode.textContent = "—";
     assistantNode.textContent = "—";
+    observerNode.textContent = "Unable to check the page observer.";
     showError(lastError || (error?.message || "Try opening ChatGPT again."));
   }
 }
