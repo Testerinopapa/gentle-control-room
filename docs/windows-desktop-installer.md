@@ -57,6 +57,22 @@ The Inno Setup script in this repo supports both. The default packaging path ass
 - `scripts/windows/package-installer.ps1`
   Publish + package script.
 
+## ChatGPT + Codex session reporting
+
+The native activity dashboard shows **Codex session history** and **ChatGPT browser session history** as separate source-labeled sections. Near the top of the activity summary, it also shows a combined total for the selected **Today / Last 7 days / Available history** filter. The three Codex detailed statistics counters remain Codex-only; ChatGPT message counts do not become Codex tool operations.
+
+The ChatGPT history lists up to 25 most recent opted-in sessions, ordered by their latest local event. Each entry can show safe timestamps, observed message counts, displayed code-example counts, voluntary coding tags, and the presence or absence of start/end markers. It never displays conversation text, titles, URLs, session pseudonyms, code, or token values. A missing boundary does not imply the session was still running.
+
+To update the **Windows desktop app** after changes to this native dashboard:
+
+```powershell
+cd C:\\Users\\null\\Documents\\ChatGPT\\gentle-control-room
+git pull --ff-only origin main
+dotnet run --project .\\desktop\\GentleControlRoom.Desktop\\GentleControlRoom.Desktop.csproj -c Release
+```
+
+**Exit** any older Gentle Control Room instance from the Windows system tray before running the new build. An installed Start-menu copy does not update automatically when the repository changes. No Edge extension or native messaging host reinstall is needed for this dashboard-only change.
+
 ## Build pipeline
 
 ### 1. Restore
