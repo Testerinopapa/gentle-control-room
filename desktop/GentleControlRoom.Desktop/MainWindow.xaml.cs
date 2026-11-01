@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -276,7 +277,7 @@ public partial class MainWindow : System.Windows.Window
       // Reading up to 50 MiB of local JSONL must not freeze the alert UI.
       var result = await Task.Run(() => (
         Codex: CodexActivityReader.Read(period),
-        Browser: BrowserActivityReader.Read()));
+        Browser: BrowserActivityReader.Read(period)));
       if (_exitRequested || period != _codexPeriod)
       {
         return;
@@ -284,15 +285,33 @@ public partial class MainWindow : System.Windows.Window
 
       var snapshot = result.Codex;
       var browser = result.Browser;
+      var periodLabel = period switch
+      {
+        CodexPeriod.Today => "today",
+        CodexPeriod.LastSevenDays => "in the last 7 days",
+        _ => "in available history"
+      };
       BrowserSummaryText.Text =
-        $"Opted-in sessions today: {browser.SessionsToday}. " +
-        $"Visible messages (approx.): {browser.VisibleUser} yours, {browser.VisibleAssistant} ChatGPT. " +
-        $"Events: {browser.EventsToday}.";
+        $"Opted-in ChatGPT sessions {periodLabel}: {browser.SessionsToday}. " +
+        $"Coding-related sessions: {browser.CodingSessions}; " +
+        $"visible code examples: {browser.CodeBlocks}. " +
+        $"Visible messages (approx.): {browser.VisibleUser} yours, " +
+        $"{browser.VisibleAssistant} ChatGPT. Events: {browser.EventsToday}.";
       BrowserLatestText.Text = browser.Latest + " · local only";
       CodexStatusText.Text = $"Collector: {snapshot.State} | Approved projects now: {snapshot.Projects}";
       CodexSummaryText.Text = snapshot.Summary;
       CodexHistory.ItemsSource = snapshot.History;
-      CodexPatterns.ItemsSource = snapshot.Patterns;
+      // Keep sources distinct. ChatGPT code examples or explicit coding tags do
+      // not prove that files were modified; only Codex hook events imply tool use.
+      var patterns = snapshot.Patterns
+        .Where(p => !p.StartsWith("No recurring sequence", StringComparison.Ordinal))
+        .ToList();
+      patterns.AddRange(browser.Patterns);
+      if (patterns.Count == 0)
+      {
+        patterns.Add("No recurring coding pattern yet. At least three separate sessions with a matching signal are needed.");
+      }
+      CodexPatterns.ItemsSource = patterns;
       CodexHistoryEmpty.Visibility = snapshot.History.Count == 0
         ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
       CodexOverview.ItemsSource = new[]
@@ -327,6 +346,7 @@ public partial class MainWindow : System.Windows.Window
     if (!IsLoaded) return;
     // Clear the old period immediately; an in-flight read is discarded and retried.
     CodexSummaryText.Text = "Reading local activity...";
+    BrowserSummaryText.Text = "Reading local ChatGPT activity...";
     CodexHistory.ItemsSource = null;
     CodexPatterns.ItemsSource = null;
     CodexOverview.ItemsSource = null;
