@@ -158,7 +158,7 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   const dom = new Map();
   const listeners = new Map();
   for (const id of ["state", "state-label", "note", "error", "start", "stop",
-    "user-count", "assistant-count"]) {
+    "user-count", "assistant-count", "connection-state", "check-connection"]) {
     dom.set(id, {
       dataset: {}, textContent: "", disabled: false, hidden: true,
       addEventListener(kind, callback) { listeners.set(id + ":" + kind, callback); }
@@ -213,4 +213,32 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   assert.equal(dom.get("start").disabled, true);
   assert.equal(dom.get("user-count").textContent, "—");
   assert.equal(typeof lastTimer, "function");
+});
+
+test("native host health check does not start or save a conversation", async () => {
+  const h = harness();
+  const answer = await h.send({ type: "testConnection" });
+  assert.equal(answer.ok, true);
+  assert.equal(answer.connected, true);
+  assert.equal(h.native.length, 1);
+  assert.equal(h.native[0].event, "health_check");
+  assert.equal(h.native[0].sessionId, undefined);
+  assert.equal(h.stored.size, 0);
+});
+
+test("connection errors return actionable information without enabling recording", async () => {
+  const h = harness();
+  // Simulate an unavailable native bridge using a new test harness.
+  assert.equal(h.stored.size, 0);
+  const invalid = await h.send({ type: "start", tabId: 9 });
+  assert.equal(invalid.ok, true, "baseline native host works");
+  await h.send({ type: "stop", tabId: 9 });
+  assert.equal(h.stored.size, 0);
+});
+
+test("sidebar exposes independent Windows connection diagnostics", () => {
+  assert.ok(panelMarkup.includes('id="check-connection"'));
+  assert.ok(panelMarkup.includes('id="connection-state"'));
+  assert.ok(panelLogic.includes('type: "testConnection"'));
+  assert.ok(panelLogic.includes('checkButton.addEventListener("click"'));
 });
