@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Gentle Control Room — ChatGPT Activity",
+  "version": "0.1.0",
+  "description": "Opt-in, local-only ChatGPT session counts. Does not read or save conversation text.",
+  "permissions": ["activeTab", "scripting", "storage", "nativeMessaging"],
+  "action": {
+    "default_title": "ChatGPT Activity — Off",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
