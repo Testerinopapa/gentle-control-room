@@ -88,3 +88,25 @@ python -m unittest discover -s integrations/codex/tests -v
 ```
 
 Automated tests also run on Unix for pure functions and filesystem checks, but the actual collector command **requires native Windows**. A real Windows/Codex smoke test must confirm hook trust and event dispatch before claiming end-to-end support.
+
+## Windows desktop application — local Codex Activity panel
+
+The Windows WPF host now displays a **Codex Activity · Local** read-only panel directly beneath the existing WebView. This panel is rendered by native WPF, not by the hosted React/HTML application, and **never sends local Codex metrics to the web page, Supabase or administrators**.
+
+- It shows `Not installed`, `Off`, `Paused`, `Recording`, `Hooks missing`, or `Unavailable`. `Recording` describes the consent/hook configuration; it does not guarantee that a given Codex client emits events.
+- Counters show approved projects, unique session-start identifiers, tool-use events and total events recorded **today in UTC**, plus a label and UTC time for the most recent allowlisted event.
+- It refreshes roughly every 20 seconds and includes a **Refresh** button. No pause, resume or consent changes are available from the hosted application; use the local Python CLI commands above.
+- If `CODEX_HOME` is customized, make sure the Windows host uses the same environment variable as the collector, or its hook status may say `Hooks missing` even though local events exist.
+- On Windows, rebuild and restart the host with `dotnet run --project .\desktop\GentleControlRoom.Desktop\GentleControlRoom.Desktop.csproj` from the repository root. If running the embedded web UI through `localhost:8080`, keep `npm run dev` running separately. The native activity panel itself does not require Vite.
+- Older `%LOCALAPPDATA%\GentleControlRoom\logs\desktop-host.log` entries may contain credential-bearing raw WebView messages, although new versions no longer log raw messages. Delete old diagnostics after confirming they are not needed, and invalidate any still-active logged credentials.
+
+### Windows manual verification
+
+1. Check `python .\integrations\codex\collector.py status` and `show-events` first, confirming that your Codex Desktop session has produced events.
+2. Start the WPF app. The native panel must appear beneath the existing alerts/login web interface; project count and today's event totals should agree with the collector output.
+3. Run a Codex Desktop task in an approved local project, then click Refresh (or wait 20 seconds). Expect the counters to increase. A session started by an earlier manual diagnostic will still be counted.
+4. Run `python .\integrations\codex\collector.py pause`, then refresh and confirm the status reads `Paused`. Use `resume` to continue. Pausing must not add new events.
+5. Confirm the regular desktop sign-in, incoming alert display, notification popups, acknowledgement and tray functionality still work.
+6. Run `dotnet build .\desktop\GentleControlRoom.Desktop\GentleControlRoom.Desktop.csproj` to validate Windows compilation.
+
+Local file reading is scoped to the signed-in Windows account. The panel intentionally does not expose raw events, pseudonyms, consent secrets, project paths, prompts, source contents or diagnostics via the WebView bridge. It does not monitor manual coding outside Codex.
