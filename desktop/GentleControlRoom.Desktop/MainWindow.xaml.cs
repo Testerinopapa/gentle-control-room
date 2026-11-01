@@ -292,12 +292,22 @@ public partial class MainWindow : System.Windows.Window
         _ => "in available history"
       };
       BrowserSummaryText.Text =
-        $"Opted-in ChatGPT sessions {periodLabel}: {browser.SessionsToday}. " +
+        $"Recorded ChatGPT sessions {periodLabel}: {browser.SessionsToday} " +
+        $"({browser.StartedSessions} confirmed starts). " +
         $"Coding-related sessions: {browser.CodingSessions}; " +
         $"visible code examples: {browser.CodeBlocks}. " +
         $"Visible messages (approx.): {browser.VisibleUser} yours, " +
         $"{browser.VisibleAssistant} ChatGPT. Events: {browser.EventsToday}.";
       BrowserLatestText.Text = browser.Latest + " · local only";
+      BrowserStoreText.Text = !browser.StoreFound
+        ? "No local browser activity folder found. Check the Edge collector installation."
+        : browser.FilesRead == 0
+          ? "No browser event files were readable. Check local activity in Edge."
+          : $"Local files read: {browser.FilesRead}. " +
+            $"Last recorded event: {(browser.LatestEventUtc?.ToLocalTime().ToString("MMM d, HH:mm:ss") ?? "not in selected period")}. " +
+            (browser.IncompleteRead ? "Some files could not be read. " : "") +
+            $"Checked {DateTime.Now:HH:mm:ss}.";
+
       CodexStatusText.Text = $"Collector: {snapshot.State} | Approved projects now: {snapshot.Projects}";
       CodexSummaryText.Text = snapshot.Summary;
       CodexHistory.ItemsSource = snapshot.History;
@@ -331,6 +341,7 @@ public partial class MainWindow : System.Windows.Window
       // Fail closed without logging local paths, consent values or event data.
       CodexStatusText.Text = "Unavailable";
       BrowserSummaryText.Text = "Browser activity could not be read.";
+      BrowserStoreText.Text = "Local storage status unavailable.";
     }
     finally
     {
@@ -347,6 +358,7 @@ public partial class MainWindow : System.Windows.Window
     // Clear the old period immediately; an in-flight read is discarded and retried.
     CodexSummaryText.Text = "Reading local activity...";
     BrowserSummaryText.Text = "Reading local ChatGPT activity...";
+    BrowserStoreText.Text = "Checking Windows event files...";
     CodexHistory.ItemsSource = null;
     CodexPatterns.ItemsSource = null;
     CodexOverview.ItemsSource = null;
