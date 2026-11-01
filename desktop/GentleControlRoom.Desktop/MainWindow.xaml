@@ -125,18 +125,22 @@
             </Grid>
 
             <TextBlock Grid.Row="7" Text="Recurring Patterns · Codex + ChatGPT" Style="{StaticResource Heading}" />
-            <ItemsControl Grid.Row="8" x:Name="CodexPatterns" Margin="0,0,0,16"
-                          HorizontalAlignment="Stretch">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Grid Margin="0,0,0,8" HorizontalAlignment="Stretch">
-                    <TextBlock Text="{Binding}" Foreground="#334155"
-                               TextWrapping="Wrap" TextTrimming="None"
-                               MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ItemsControl}}" />
-                  </Grid>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <StackPanel Grid.Row="8" Margin="0,0,0,16">
+              <TextBlock x:Name="WorkflowSummaryText"
+                         Text="No local coding workflow analysis yet."
+                         Foreground="#475569" Margin="0,0,0,12" />
+              <ItemsControl x:Name="CodexPatterns" HorizontalAlignment="Stretch">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,0,0,8" HorizontalAlignment="Stretch">
+                      <TextBlock Text="{Binding}" Foreground="#334155"
+                                 TextWrapping="Wrap" TextTrimming="None"
+                                 MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ItemsControl}}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
 
             <!-- Counts remain available, but do not repeat the main summary by default. -->
             <Expander Grid.Row="9" Header="Codex detailed statistics" Margin="0,0,0,12"
