@@ -180,7 +180,8 @@ test("sidebar controls follow tab switches and retain explicit opt-in", async ()
   const dom = new Map();
   const listeners = new Map();
   for (const id of ["state", "state-label", "note", "error", "start", "stop",
-    "user-count", "assistant-count", "connection-state", "check-connection", "observer-state"]) {
+    "user-count", "assistant-count", "connection-state", "check-connection",
+    "observer-state", "code-count", "coding-toggle", "coding-hint"]) {
     dom.set(id, {
       dataset: {}, textContent: "", disabled: false, hidden: true,
       addEventListener(kind, callback) { listeners.set(id + ":" + kind, callback); }
@@ -385,6 +386,71 @@ test("page observer status is local-only metadata and is authorized per session"
   assert.equal(invalid.ok, false);
   const stateAgain = await h.send({ type: "getState", tabId: 9 });
   assert.equal(stateAgain.detector, "current");
+});
+
+test("code examples and user-tagged coding work remain metadata only", async () => {
+  const h = harness();
+  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: true })).ok, false);
+  await h.send({ type: "start", tabId: 9 });
+  const count = await h.send({
+    type: "visibleCounts", user: 3, assistant: 4, codeBlocks: 2, code: "PRIVATE CODE"
+  }, { tab: { id: 9 } });
+  assert.equal(count.ok, true);
+  assert.equal(h.native.at(-1).visibleCodeBlocks, 2);
+  assert.equal(JSON.stringify(h.native).includes("PRIVATE CODE"), false);
+  assert.equal((await h.send({
+    type: "setCodingTag", tabId: 9, codingMarked: true, title: "PRIVATE TITLE"
+  })).ok, true);
+  let status = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(status.visibleCodeBlocks, 2);
+  assert.equal(status.codingMarked, true);
+  assert.equal(h.native.at(-1).event, "coding_tag");
+  assert.equal(h.native.at(-1).codingMarked, true);
+  assert.equal(JSON.stringify(h.native).includes("PRIVATE TITLE"), false);
+  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: "yes" })).ok, false);
+  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: false })).ok, true);
+  status = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(status.codingMarked, false);
+  assert.equal(h.native.at(-1).codingMarked, false);
+});
+
+test("code block changes trigger a new count even if message totals stay fixed", async () => {
+  const sent = [];
+  const current = { user: 2, assistant: 2, blocks: 1 };
+  let tick;
+  let now = 10000;
+  const region = {
+    querySelectorAll(selector) {
+      if (selector.includes("data-user-message-bubble")) return Array(current.user).fill({});
+      if (selector.includes(":user")) return Array(current.user).fill({});
+      if (selector.includes(":assistant")) return Array(current.assistant).fill({});
+      if (selector === "pre") return Array(current.blocks).fill({});
+      return [];
+    }
+  };
+  vm.runInNewContext(contentLogic, {
+    document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/approved" },
+    chrome: { runtime: {
+      async sendMessage(msg) { sent.push(msg); return { ok: true }; },
+      onMessage: { addListener() {}, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval(fn) { tick = fn; return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => now }
+  }, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.find(x => x.type === "visibleCounts").codeBlocks, 1);
+  current.blocks = 2;
+  now += 4000;
+  tick();
+  await new Promise(resolve => setImmediate(resolve));
+  const counts = sent.filter(x => x.type === "visibleCounts");
+  assert.equal(counts.length, 2);
+  assert.equal(counts.at(-1).codeBlocks, 2);
+  assert.equal(counts.at(-1).assistant, 2);
+  assert.ok(!JSON.stringify(sent).includes("/c/approved"));
 });
 
 test("native host health check does not start or save a conversation", async () => {
