@@ -24,6 +24,7 @@
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <wv2:WebView2CompositionControl Grid.Row="0" x:Name="AppWebView" Height="600" />
         <!-- This native subtree is not serialized to the remotely hosted WebView. -->
@@ -205,6 +206,27 @@
             </Expander>
             <TextBlock Grid.Row="10" x:Name="CodexUpdatedText" Foreground="#64748B"
                        Text="Refreshes every 20 seconds" />
+          </Grid>
+        </Border>
+
+        <!-- Browser event summaries are native WPF only, never exposed to hosted WebView. -->
+        <Border Grid.Row="2" x:Name="BrowserActivityCard" Margin="12,0,12,12" Padding="20"
+                Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Text="ChatGPT Browser Activity" FontSize="20"
+                       FontWeight="SemiBold" />
+            <TextBlock Grid.Row="1" Text="Only conversations you enable in the Edge extension"
+                       Foreground="#64748B" Margin="0,4,0,10" />
+            <TextBlock Grid.Row="2" x:Name="BrowserSummaryText" Text="No opted-in browser activity recorded today."
+                       Margin="0,0,0,8" />
+            <TextBlock Grid.Row="3" x:Name="BrowserLatestText" Text="Local only · no conversation content"
+                       Foreground="#64748B" />
           </Grid>
         </Border>
       </Grid>
