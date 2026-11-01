@@ -116,6 +116,23 @@ test("does not activate recording on non-ChatGPT origins", async () => {
   assert.equal(h.native.length, 0);
 });
 
+test("persistent sidebar has access limited to ChatGPT domains", () => {
+  assert.deepEqual(manifest.host_permissions, [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ]);
+  assert.equal(manifest.host_permissions.length, 2);
+  assert.ok(panelLogic.includes("currentWindow: true"));
+});
+
+test("unavailable tab URL displays a site-permission explanation", async () => {
+  const h = harness(null);
+  const result = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.active, false);
+  assert.match(result.reason, /site access/i);
+  assert.equal(h.native.length, 0);
+});
 test("Edge action opens the persistent sidebar without granting consent", async () => {
   assert.equal(manifest.side_panel?.default_path, "sidepanel.html");
   assert.ok(manifest.permissions.includes("sidePanel"));
