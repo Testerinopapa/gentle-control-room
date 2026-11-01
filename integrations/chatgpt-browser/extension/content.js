@@ -26,9 +26,15 @@
       const bubbles = region.querySelectorAll('[data-user-message-bubble="true"]').length;
       const userUnits = region.querySelectorAll('[data-content-search-unit-key$=":user"]').length;
       const assistantUnits = region.querySelectorAll('[data-content-search-unit-key$=":assistant"]').length;
+      // Structural detection only: do not inspect code text, filenames or languages.
+      const codeBlocks = Math.max(
+        region.querySelectorAll("pre").length,
+        region.querySelectorAll('[data-testid="code-block"]').length
+      );
       return {
         user: Math.min(bubbles || userUnits, 10000),
         assistant: Math.min(assistantUnits, 10000),
+        codeBlocks: Math.min(codeBlocks, 10000),
         detector: (bubbles || userUnits || assistantUnits) ? "current" : "waiting"
       };
     }
@@ -56,6 +62,8 @@
     ]);
     return {
       user, assistant,
+      // Legacy layout: preformatted code containers; not inline `code` elements.
+      codeBlocks: Math.min(document.querySelectorAll("pre").length, 10000),
       detector: user || assistant ? "legacy" : "unsupported"
     };
   }
@@ -80,7 +88,8 @@
   async function reportCounts(counts) {
     if (stopped || countInFlight) return;
     const now = Date.now();
-    const signature = counts.detector + ":" + counts.user + ":" + counts.assistant;
+    const signature = counts.detector + ":" + counts.user + ":" +
+      counts.assistant + ":" + counts.codeBlocks;
     if (signature === lastAcknowledged || now < nextCountAt) return;
     countInFlight = true;
     nextCountAt = now + countIntervalMs;
@@ -88,7 +97,8 @@
       const reply = await chrome.runtime.sendMessage({
         type: "visibleCounts",
         user: counts.user,
-        assistant: counts.assistant
+        assistant: counts.assistant,
+        codeBlocks: counts.codeBlocks
       });
       // Do not mark an update as delivered until the native host confirms it.
       // Transient native errors are retried on the next timer tick.
