@@ -48,6 +48,7 @@ public partial class MainWindow : System.Windows.Window
     _notifyIcon = CreateNotifyIcon();
     RegisterToastActivationHandler();
     ActivityCard.SizeChanged += (_, _) => FitWorkspaceHeight();
+    BrowserActivityCard.SizeChanged += (_, _) => FitWorkspaceHeight();
     _codexTimer.Tick += (_, _) => RefreshCodexActivity();
     LogDiagnostic("Desktop host initialized.");
   }
@@ -273,12 +274,21 @@ public partial class MainWindow : System.Windows.Window
     try
     {
       // Reading up to 50 MiB of local JSONL must not freeze the alert UI.
-      var snapshot = await Task.Run(() => CodexActivityReader.Read(period));
+      var result = await Task.Run(() => (
+        Codex: CodexActivityReader.Read(period),
+        Browser: BrowserActivityReader.Read()));
       if (_exitRequested || period != _codexPeriod)
       {
         return;
       }
 
+      var snapshot = result.Codex;
+      var browser = result.Browser;
+      BrowserSummaryText.Text =
+        $"Opted-in sessions today: {browser.SessionsToday}. " +
+        $"Visible messages (approx.): {browser.VisibleUser} yours, {browser.VisibleAssistant} ChatGPT. " +
+        $"Events: {browser.EventsToday}.";
+      BrowserLatestText.Text = browser.Latest + " · local only";
       CodexStatusText.Text = $"Collector: {snapshot.State} | Approved projects now: {snapshot.Projects}";
       CodexSummaryText.Text = snapshot.Summary;
       CodexHistory.ItemsSource = snapshot.History;
@@ -301,6 +311,7 @@ public partial class MainWindow : System.Windows.Window
     {
       // Fail closed without logging local paths, consent values or event data.
       CodexStatusText.Text = "Unavailable";
+      BrowserSummaryText.Text = "Browser activity could not be read.";
     }
     finally
     {
