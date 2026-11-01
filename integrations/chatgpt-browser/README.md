@@ -10,7 +10,7 @@ For each conversation you explicitly turn ON in Edge, the extension records:
 - rendered code-block count and an explicitly selected coding-work tag, when available;
 - event timestamp and a newly generated, random session identifier.
 
-**It does not read or store prompt text, assistant responses, code, message titles, conversation URLs, conversation IDs, browser cookies, credentials, tokens, clipboard, or other tabs.** No network endpoints, fetch clients or background requests are used. This is not ChatGPT account integration and cannot observe all chats automatically. DOM markers may be missing or virtualized, so counts are estimates, not authoritative conversation totals.
+**Normal recording is metadata-only and does not inspect message text.** With the separate **Enable workflow analysis** switch, the extension temporarily reads **visible user-message text inside the active approved page**, classifies each request locally into a small fixed set of coding stages, and sends **only the stage label** to the local native host. No prompt text, assistant responses, code, message titles, conversation URLs, conversation IDs, cookies, credentials, tokens, clipboard, or other tabs are sent or saved. No network endpoints, fetch clients or background requests are used. This is not ChatGPT account integration and cannot observe all chats automatically. DOM markers may be missing or virtualized, so counts are estimates, not authoritative conversation totals.
 
 Recording is **OFF by default**. Click the extension's toolbar icon to open the persistent **Edge side panel** on the right, alongside ChatGPT. Opening the panel does **not** start collection. Click **Start for this conversation** to enable the current tab. The side panel shows approximate visible message counts when recording, and the toolbar displays an ON badge. Stop manually or navigate to another conversation to end recording. No site-wide auto-consent or automatic enrollment is implemented.
 
@@ -116,6 +116,34 @@ This upgrade changes the native event schema, so update **both** the browser ext
 6. To establish an actual recurring pattern, record **three distinct ChatGPT sessions** with that signal. The pattern should then appear in the combined list.
 
 Existing browser activity files remain readable, but historical message counts from older extension versions **cannot** be retrospectively classified as coding.
+
+## Local coding workflow analysis (v0.4.0)
+
+Earlier versions counted code blocks and yes/no coding tags; **they could not identify what coding work was being requested**. Version 0.4.0 adds real but deliberately limited workflow inference.
+
+From the Edge sidebar, **Start for this conversation** first. Then click **Enable workflow analysis** separately. While enabled, the content script briefly inspects currently rendered **user messages only** inside that conversation and classifies them using local keyword patterns into:
+
+- Investigation
+- Implementation
+- Debugging
+- Testing
+- Version control
+- Deployment
+
+The text is never sent, retained, logged or saved. Only the allowlisted category and event timestamp are sent to the Windows native host. The mode is **OFF by default** for every new session. Disabling it stops further text inspection immediately; navigating to a different conversation also ends recording and analysis. At most 120 categorized requests are recorded per session. The first scan can include messages already visible in the current conversation; older unloaded history and chats that were never opted in cannot be analyzed retroactively.
+
+The Windows **Recurring Patterns · Codex + ChatGPT** section now shows a **local coding workflow summary** even with one or two analyzed sessions. It reports which categories appear most often. Once the **same request category or ordered category transition** occurs in at least three separate analyzed ChatGPT sessions, it becomes an established recurring observation. For example, **Debugging → Implementation** may appear across three sessions, but this describes user requests, **not verified code edits or successful tests**. A short ambiguous prompt like "proceed" may not be classifiable. These are heuristic, descriptive observations, not a semantic AI interpretation of every message.
+
+**Upgrade required:** this release adds the new allowlisted `workflow_stage` event to the native-host schema, so the browser extension, native host and desktop reader must all be updated.
+
+```powershell
+cd C:\\Users\\null\\Documents\\ChatGPT\\gentle-control-room
+git pull --ff-only origin main
+.\\integrations\\chatgpt-browser\\install-host.ps1 -ExtensionId "gdolleibohgppodmagaaojodmabnmnkh"
+dotnet run --project .\\desktop\\GentleControlRoom.Desktop\\GentleControlRoom.Desktop.csproj -c Release
+```
+
+Fully exit the old Windows app from its system tray before starting the desktop command. Reload the Edge extension at `edge://extensions` and confirm version `0.4.0`. In a ChatGPT conversation, click Start, then **Enable workflow analysis**. The sidebar shows a categorized-request count. Select **Available history** in Gentle Control Room and Refresh. Once enabled, the first scan can classify currently rendered user messages, but existing local files cannot reconstruct old prompt content.
 
 ## Windows app session count stays unchanged
 
