@@ -64,7 +64,7 @@ var browserHistoryNode = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
 Check(browserHistoryNode.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
   "ChatGPT session history shares the single scrolling dashboard");
 Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
-  e.Attributes().Any(a => a.Name.LocalName == "Name" && a.Value == "CombinedSessionText")),
+  e.Attributes().Any(a => a.Name.LocalName == "Name" && a.Value == "SessionBreakdownText")),
   "combined session total has an explicit native text label");
 Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
   (string?)e.Attribute("Text") == "Codex session history"),
