@@ -64,7 +64,7 @@ var browserHistoryNode = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
 Check(browserHistoryNode.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
   "ChatGPT session history shares the single scrolling dashboard");
 Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
-  (string?)e.Attribute("Name") == "CombinedSessionText"),
+  e.Attributes().Any(a => a.Name.LocalName == "Name" && a.Value == "CombinedSessionText")),
   "combined session total has an explicit native text label");
 Check(nodes.Any(e => e.Name.LocalName == "TextBlock" &&
   (string?)e.Attribute("Text") == "Codex session history"),
@@ -124,7 +124,7 @@ try
     browser.History[0].Summary.Contains("Last observed messages"),
     "browser sessions appear newest first with safe display summaries");
   Check(browser.History.Any(h => h.Boundaries.Contains("Duration unavailable")) &&
-    browser.History.Any(h => h.Boundaries.Contains("End event recorded") == false),
+    browser.History.Any(h => h.Boundaries.Contains("End event not captured.")),
     "browser history does not invent missing session boundaries");
   Check(!JsonSerializer.Serialize(browser.History).Contains(first, StringComparison.Ordinal) &&
     !JsonSerializer.Serialize(browser.History).Contains(second, StringComparison.Ordinal) &&
