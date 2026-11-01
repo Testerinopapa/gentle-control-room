@@ -1,6 +1,8 @@
 "use strict";
 // Injected only after the user explicitly enables this ChatGPT conversation.
-// Reads structural role markers only; never reads message text, IDs, URLs, or inputs.
+// Ordinary recording reads structural counts only. A separate explicit toggle
+// allows ephemeral local classification of visible user requests. Neither mode
+// exports raw message text, code, IDs, URLs or input field values.
 (() => {
   if (globalThis.__gcrChatGPTObserver) globalThis.__gcrChatGPTObserver.stop();
 
