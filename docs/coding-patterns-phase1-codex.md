@@ -1,3 +1,5 @@
+> **Implementation status:** Deliverable A (local opt-in Codex hook collector) is implemented in [`integrations/codex/`](../integrations/codex/README.md) as of commit `a77a827`. Run the documented installation commands to activate it. Deliverable B (Windows desktop status panel) is **not yet implemented**. The plan below remains the phase-by-phase acceptance specification.
+
 # Phase 1 — Codex-native activity collector (Codex implementation specification)
 
 ## Corrected product objective
