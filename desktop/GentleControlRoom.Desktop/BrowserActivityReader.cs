@@ -267,8 +267,9 @@ internal static class BrowserActivityReader
       boundaries += _ends == 1 && _end.HasValue
         ? $" End recorded: {_end.Value.ToLocalTime():MMM d HH:mm:ss}."
         : _ends == 0 ? " End event not captured." : " Multiple end events; end uncertain.";
-      if (_starts == 1 && _ends == 1 && _end > _start &&
-          FirstSeen >= _start && LastSeen <= _end)
+      if (_starts == 1 && _ends == 1 && _start.HasValue && _end.HasValue &&
+          _end.Value > _start.Value &&
+          FirstSeen >= _start.Value && LastSeen <= _end.Value)
         boundaries += $" Recorded duration: {(_end.Value - _start.Value).TotalMinutes:0.##} minutes.";
       else
         boundaries += " Duration unavailable.";
