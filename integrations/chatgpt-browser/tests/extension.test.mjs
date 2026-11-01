@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import vm from "node:vm";
 
-const source = readFileSync(resolve(import.meta.dirname, "../extension/background.js"), "utf8");
+const source = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
 function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
   let listener, updatedListener, removedListener;
   const stored = new Map();
@@ -32,7 +32,7 @@ function harness(url = "https://chatgpt.com/c/synthetic-conversation") {
     },
     scripting: { async executeScript() {} }
   };
-  const context = vm.createContext({ chrome, URL, crypto: globalThis.crypto, console });
+  const context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console });
   vm.runInContext(source, context, { filename: "background.js" });
   async function send(message, sender = {}) {
     return await new Promise((done) => listener(message, sender, done));
