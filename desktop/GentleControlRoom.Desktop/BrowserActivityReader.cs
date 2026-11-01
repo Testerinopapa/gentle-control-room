@@ -55,7 +55,6 @@ internal static class BrowserActivityReader
           var length = new FileInfo(file).Length;
           if (length > MaxBytesPerRefresh - scanned) break;
           scanned += length;
-          filesRead++;
           foreach (var line in File.ReadLines(file))
           {
             if (line.Length is 0 or > 4096) continue;
@@ -126,6 +125,7 @@ internal static class BrowserActivityReader
               // Ignore malformed and partially written event lines.
             }
           }
+          filesRead++;
         }
         catch (IOException) { incompleteRead = true; }
         catch (UnauthorizedAccessException) { incompleteRead = true; }
