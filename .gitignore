@@ -37,3 +37,7 @@ prisma/dev.db-journal
 *.njsproj
 *.sln
 *.sw?
+
+# Local validation outputs
+.artifacts/
+__pycache__/

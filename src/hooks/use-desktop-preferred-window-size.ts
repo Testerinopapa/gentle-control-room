@@ -7,16 +7,13 @@ interface PreferredWindowSize {
   contentHeight: number;
 }
 
-export function useDesktopPreferredWindowSize(enabled: boolean) {
+export function useDesktopPreferredWindowSize(signedIn: boolean) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastSizeRef = useRef<PreferredWindowSize | null>(null);
 
+  // Re-observe the mounted login/alerts card when authentication switches views.
   useEffect(() => {
-    if (!enabled) {
-      lastSizeRef.current = null;
-      postDesktopHostMessage({ type: "desktop.window.resetSize" });
-      return;
-    }
+    lastSizeRef.current = null;
 
     const element = contentRef.current;
     if (!element) {
@@ -74,7 +71,7 @@ export function useDesktopPreferredWindowSize(enabled: boolean) {
         cancelAnimationFrame(frameId);
       }
     };
-  }, [enabled]);
+  }, [signedIn]);
 
   return contentRef;
 }

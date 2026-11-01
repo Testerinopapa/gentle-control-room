@@ -1,70 +1,88 @@
 <Window x:Class="GentleControlRoom.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        mc:Ignorable="d"
-        Title="Gentle Control Room"
-        Width="920"
-        Height="720"
-        MinWidth="720"
-        MinHeight="420"
-        WindowStartupLocation="CenterScreen"
-        Closing="Window_Closing"
-        Loaded="Window_Loaded"
+        Title="Gentle Control Room" Width="740" Height="760" MinWidth="520" MinHeight="360"
+        FontFamily="Segoe UI" FontSize="16" Foreground="#0F172A" Background="#F6F7F9"
+        WindowStartupLocation="CenterScreen" Closing="Window_Closing" Loaded="Window_Loaded"
         StateChanged="Window_StateChanged">
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
-
-    <wv2:WebView2 Grid.Row="0" x:Name="AppWebView" />
-
-    <!-- Native only: no Codex data is passed to the hosted web page. -->
-    <Border Grid.Row="1" Background="#F8FAFC" BorderBrush="#CBD5E1"
-            BorderThickness="0,1,0,0" Padding="16,12">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <DockPanel Grid.Row="0" LastChildFill="False">
-          <TextBlock Text="Codex Activity · Local" FontSize="16" FontWeight="SemiBold"
-                     Foreground="#0F172A" VerticalAlignment="Center" />
-          <TextBlock x:Name="CodexStatusText" Text="Checking..." FontSize="16"
-                     Foreground="#475569" Margin="12,0,0,0" VerticalAlignment="Center" />
-          <Button Content="Refresh" DockPanel.Dock="Right" Margin="14,0,0,0" Padding="8,2"
-                  FontSize="16" Click="CodexRefresh_Click" />
-        </DockPanel>
-        <TextBlock Grid.Row="1" x:Name="CodexSummaryText" Margin="0,6,0,0"
-                   FontSize="16" Foreground="#334155" TextWrapping="Wrap"
-                   Text="No local activity available." />
-        <TextBlock Grid.Row="2" x:Name="CodexLastEventText" Margin="0,4,0,0"
-                   FontSize="16" Foreground="#64748B" TextWrapping="Wrap"
-                   Text="Local data stays on this Windows account." />
-      </Grid>
-    </Border>
-
-    <Border Grid.Row="0" x:Name="LoadingOverlay"
-            Background="#F3F6FB"
-            Padding="32">
-      <StackPanel VerticalAlignment="Center"
-                  HorizontalAlignment="Center"
-                  Width="480">
-        <TextBlock Text="Gentle Control Room"
-                   FontSize="28"
-                   FontWeight="SemiBold"
-                   HorizontalAlignment="Center" />
-        <TextBlock x:Name="StatusText"
-                   Margin="0,16,0,0"
-                   Text="Starting desktop shell..."
-                   FontSize="15"
-                   Foreground="#475569"
-                   TextAlignment="Center"
-                   TextWrapping="Wrap" />
+  <Window.Resources>
+    <Style TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="Heading" TargetType="TextBlock">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+  </Window.Resources>
+  <Grid x:Name="WorkspaceRoot">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel x:Name="Workspace" MaxWidth="696" HorizontalAlignment="Stretch">
+        <!-- Composition control clips correctly inside the shared workspace scroller. -->
+        <wv2:WebView2CompositionControl x:Name="AppWebView" Height="600" />
+        <!-- This native subtree is never serialized into the hosted page. -->
+        <Border x:Name="ActivityCard" Margin="12,4,12,12" Padding="20" Background="White"
+                BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10">
+          <StackPanel>
+            <DockPanel LastChildFill="True" Margin="0,0,0,12">
+              <Button DockPanel.Dock="Right" Content="Refresh" Padding="12,5" Margin="12,0,0,0"
+                      VerticalAlignment="Top" Click="CodexRefresh_Click" />
+              <StackPanel>
+                <TextBlock Text="Codex Activity" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Local to this Windows account" Foreground="#64748B" />
+              </StackPanel>
+            </DockPanel>
+            <Border Background="#F1F5F9" CornerRadius="6" Padding="10,6" Margin="0,0,0,12">
+              <TextBlock x:Name="CodexStatusText" Text="Collector Â· Checkingâ€¦" FontWeight="SemiBold" />
+            </Border>
+            <ItemsControl x:Name="CodexOverview">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate><DataTemplate>
+                <StackPanel Margin="0,0,12,12">
+                  <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Label}" Foreground="#475569" />
+                </StackPanel>
+              </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <StackPanel>
+            <TextBlock Text="Tool activity Â· today" Style="{StaticResource Heading}" />
+            <ItemsControl x:Name="CodexCategories">
+              <ItemsControl.ItemTemplate><DataTemplate>
+                <Grid Margin="0,0,0,7">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="98" /><ColumnDefinition Width="*" /><ColumnDefinition Width="42" /></Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding Label}" />
+                  <ProgressBar Grid.Column="1" Height="6" VerticalAlignment="Center" Value="{Binding Count}"
+                               Maximum="{Binding Maximum}" Foreground="#2563EB" Background="#E2E8F0" BorderThickness="0"
+                               AutomationProperties.Name="{Binding Label}" />
+                  <TextBlock Grid.Column="2" Text="{Binding Count}" TextAlignment="Right" />
+                </Grid>
+              </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+            <TextBlock Text="Recent activity" Style="{StaticResource Heading}" Margin="0,0,0,8" />
+            <TextBlock x:Name="CodexEmptyText" Text="No events recorded yet." Foreground="#64748B" />
+            <ItemsControl x:Name="CodexRecent">
+              <ItemsControl.ItemTemplate><DataTemplate>
+                <StackPanel Margin="0,0,0,7">
+                  <TextBlock Text="{Binding Category}" />
+                  <TextBlock Text="{Binding TimeLabel}" Foreground="#64748B" />
+                </StackPanel>
+              </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+              </StackPanel>
+            </Grid>
+            <TextBlock x:Name="CodexUpdatedText" Margin="0,8,0,0" Foreground="#64748B" Text="Refreshes every 20 seconds" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+    <Border x:Name="LoadingOverlay" Background="#F6F7F9" Padding="24">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
+        <TextBlock Text="Gentle Control Room" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" />
+        <TextBlock x:Name="StatusText" Margin="0,16,0,0" Text="Starting desktop shellâ€¦" Foreground="#475569" TextAlignment="Center" />
       </StackPanel>
     </Border>
   </Grid>

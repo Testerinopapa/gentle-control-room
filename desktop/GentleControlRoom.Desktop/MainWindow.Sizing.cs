@@ -1,92 +1,44 @@
 using System;
 using System.Text.Json;
+using System.Windows;
 
 namespace GentleControlRoom.Desktop;
 
 public partial class MainWindow
 {
-  private const double PreferredWindowClientPadding = 24;
-  private const double PreferredWindowMinWidth = 720;
-  private const double PreferredWindowMaxWidth = 960;
-  private const double PreferredWindowMinHeight = 420;
-  private const double PreferredWindowMaxHeight = 760;
-
-  private double _defaultWindowWidth;
-  private double _defaultWindowHeight;
-
-  private void EnsureDefaultWindowSizeCaptured()
-  {
-    if (_defaultWindowWidth > 0 && _defaultWindowHeight > 0)
-    {
-      return;
-    }
-
-    _defaultWindowWidth = Width;
-    _defaultWindowHeight = Height;
-  }
-
   private void ApplyPreferredWindowSize(double? contentWidth, double? contentHeight)
   {
-    EnsureDefaultWindowSizeCaptured();
+    // Width is controlled by the user and shared max-width, never by a measurement
+    // of the constrained browser viewport (which would cause a shrink feedback loop).
+    if (contentHeight is not > 0 || !double.IsFinite(contentHeight.Value)) return;
+    AppWebView.Height = Math.Clamp(contentHeight.Value + 16, 120, 10000);
+    FitWorkspaceHeight();
+  }
 
-    var (frameWidth, frameHeight) = GetWindowFrameSize();
-
-    if (contentWidth is > 0)
-    {
-      var desiredWidth = Clamp(
-        contentWidth.Value + frameWidth + PreferredWindowClientPadding,
-        Math.Max(MinWidth, PreferredWindowMinWidth),
-        PreferredWindowMaxWidth);
-
-      if (!double.IsNaN(desiredWidth) && !double.IsInfinity(desiredWidth))
-      {
-        Width = desiredWidth;
-      }
-    }
-
-    if (contentHeight is > 0)
-    {
-      var desiredHeight = Clamp(
-        contentHeight.Value + frameHeight + PreferredWindowClientPadding,
-        Math.Max(MinHeight, PreferredWindowMinHeight),
-        PreferredWindowMaxHeight);
-
-      if (!double.IsNaN(desiredHeight) && !double.IsInfinity(desiredHeight))
-      {
-        Height = desiredHeight;
-      }
-    }
+  private void FitWorkspaceHeight()
+  {
+    if (WindowState != WindowState.Normal) return;
+    var frameHeight = Math.Max(0, ActualHeight - WorkspaceRoot.ActualHeight);
+    var workArea = SystemParameters.WorkArea;
+    var desired = AppWebView.Height + ActivityCard.ActualHeight + 16 + frameHeight;
+    Height = Math.Clamp(desired, Math.Min(MinHeight, workArea.Height), workArea.Height);
+    if (Top + Height > workArea.Bottom) Top = Math.Max(workArea.Top, workArea.Bottom - Height);
   }
 
   private void ResetPreferredWindowSize()
   {
-    EnsureDefaultWindowSizeCaptured();
-
-    Width = Math.Max(_defaultWindowWidth, MinWidth);
-    Height = Math.Max(_defaultWindowHeight, MinHeight);
-  }
-
-  private (double Width, double Height) GetWindowFrameSize()
-  {
-    var frameWidth = Width - AppWebView.ActualWidth;
-    var frameHeight = Height - AppWebView.ActualHeight;
-
-    return (
-      frameWidth > 0 ? frameWidth : 32,
-      frameHeight > 0 ? frameHeight : 48);
+    // Older hosted pages only report size after login. Keep their full login form
+    // scrollable until a measured content height is available.
+    AppWebView.Height = 600;
+    FitWorkspaceHeight();
   }
 
   private static bool TryReadDouble(JsonElement element, string propertyName, out double value)
   {
     value = 0;
-
-    return element.TryGetProperty(propertyName, out var property)
+    return element.ValueKind == JsonValueKind.Object
+      && element.TryGetProperty(propertyName, out var property)
       && property.ValueKind == JsonValueKind.Number
-      && property.TryGetDouble(out value);
-  }
-
-  private static double Clamp(double value, double min, double max)
-  {
-    return Math.Min(Math.Max(value, min), max);
+      && property.TryGetDouble(out value) && double.IsFinite(value);
   }
 }

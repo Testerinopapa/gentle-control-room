@@ -46,6 +46,7 @@ public partial class MainWindow : System.Windows.Window
       "desktop-host.log");
     _notifyIcon = CreateNotifyIcon();
     RegisterToastActivationHandler();
+    ActivityCard.SizeChanged += (_, _) => FitWorkspaceHeight();
     _codexTimer.Tick += (_, _) => RefreshCodexActivity();
     LogDiagnostic("Desktop host initialized.");
   }
@@ -276,11 +277,19 @@ public partial class MainWindow : System.Windows.Window
         return;
       }
 
-      CodexStatusText.Text = snapshot.State;
-      CodexSummaryText.Text =
-        $"Projects: {snapshot.Projects}  ·  Sessions today: {snapshot.SessionsToday}  ·  " +
-        $"Tool uses today: {snapshot.ToolUsesToday}  ·  Events today: {snapshot.EventsToday}";
-      CodexLastEventText.Text = snapshot.LastActivity;
+      CodexStatusText.Text = $"Collector Â· {snapshot.State}";
+      CodexOverview.ItemsSource = new[]
+      {
+        new { Label = "Approved projects", Value = snapshot.Projects },
+        new { Label = "Sessions today", Value = snapshot.SessionsToday },
+        new { Label = "Tool uses today", Value = snapshot.ToolUsesToday },
+        new { Label = "Events today", Value = snapshot.EventsToday }
+      };
+      CodexCategories.ItemsSource = snapshot.Categories;
+      CodexRecent.ItemsSource = snapshot.Recent;
+      CodexEmptyText.Visibility = snapshot.Recent.Count == 0
+        ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+      CodexUpdatedText.Text = $"Updated {DateTime.Now:HH:mm:ss} Â· every 20 seconds";
     }
     catch (Exception)
     {

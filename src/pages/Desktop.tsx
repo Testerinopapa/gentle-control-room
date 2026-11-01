@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDesktopPreferredWindowSize } from "@/hooks/use-desktop-preferred-window-size";
 import { supabase } from "@/integrations/supabase/client";
 import { buildJsonRequestInit, getDesktopConfig, getEdgeFunctionsBaseUrl, getSupabaseAnonKey, parseApiResponse, postDesktopHostMessage } from "@/lib/api";
@@ -557,15 +556,15 @@ const Desktop = () => {
 
   if (!sessionUser) {
     return (
-      <div className="min-h-screen bg-background px-4 py-6">
-        <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-4xl items-center justify-center">
-          <Card className="w-full max-w-xl shadow-elevated">
+      <div className="desktop-workspace bg-background px-3 py-2">
+        <div ref={preferredWindowSizeRef} className="mx-auto max-w-2xl">
+          <Card className="w-full shadow-card">
             <CardHeader className="space-y-4 text-center">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl gradient-primary text-2xl font-bold text-primary-foreground">
                 G
               </div>
               <div className="space-y-2">
-                <p className="text-sm uppercase tracking-[0.18em] text-primary">Windows Host + WebView2</p>
+                <p className="text-sm uppercase tracking-[0.18em] text-primary">Gentle Control Room</p>
                 <CardTitle className="text-4xl">Desktop alert client</CardTitle>
                 <CardDescription className="mx-auto max-w-md text-base">
                   Sign in once and the app will stay in the background to receive alerts automatically.
@@ -611,12 +610,12 @@ const Desktop = () => {
   }
 
   return (
-    <div className="bg-background px-3 py-2">
+    <div className="desktop-workspace bg-background px-3 py-2">
       <div ref={preferredWindowSizeRef} className="mx-auto max-w-2xl">
         <Card className="shadow-card overflow-hidden">
-          <div className="flex">
+          <div className="flex flex-col sm:flex-row">
             {/* Left sidebar */}
-            <div className="flex w-[180px] shrink-0 flex-col justify-between border-r px-3 py-3">
+            <div className="flex w-full sm:w-[180px] shrink-0 flex-col justify-between border-b sm:border-b-0 sm:border-r px-3 py-3">
               <div className="flex flex-col items-center gap-1.5 text-center">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <User className="h-4 w-4" />
@@ -655,13 +654,13 @@ const Desktop = () => {
                 {alerts.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No alerts have arrived yet.</p>
                 ) : (
-                  <ScrollArea className="max-h-[280px] pr-2">
+                  <div className="max-h-[280px] overflow-y-auto pr-2" tabIndex={0} aria-label="Recent alerts">
                     <div className="space-y-1.5">
-                      {alerts.slice(0, 5).map((alert) => (
+                      {alerts.map((alert) => (
                         <div key={alert.id} className="rounded-lg border bg-card/80 px-3 py-2 shadow-sm">
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 space-y-0.5">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 <BellRing className="h-3.5 w-3.5 shrink-0 text-primary" />
                                 <p className="truncate text-sm font-medium">{alert.title ?? "Alert"}</p>
                                 <Badge variant={badgeVariant[alert.status]} className="text-[0.65rem] px-1.5 py-0">{alert.status}</Badge>
@@ -683,7 +682,7 @@ const Desktop = () => {
                         </div>
                       ))}
                     </div>
-                  </ScrollArea>
+                  </div>
                 )}
               </div>
             </div>

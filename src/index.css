@@ -109,3 +109,8 @@
     box-shadow: var(--shadow-elevated);
   }
 }
+
+/* The desktop workspace shares the native host's readable 16px baseline. */
+.desktop-workspace :is(p, label, input, button, span) {
+  font-size: max(1rem, 1em);
+}
