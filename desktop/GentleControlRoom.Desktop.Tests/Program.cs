@@ -55,9 +55,9 @@ var xaml = System.Xml.Linq.XDocument.Load(
 var nodes = xaml.Descendants().ToArray();
 Check(nodes.Count(e => e.Name.LocalName == "ScrollViewer") == 1,
   "one primary scrollbar for the entire native workspace");
-var history = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
+var codexHistoryNode = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
   (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "CodexHistory");
-Check(history.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
+Check(codexHistoryNode.Ancestors().Count(e => e.Name.LocalName == "ScrollViewer") == 1,
   "session history uses only the outer workspace scroller");
 var browserHistoryNode = nodes.Single(e => e.Name.LocalName == "ItemsControl" &&
   (string?)e.Attributes().FirstOrDefault(a => a.Name.LocalName == "Name") == "BrowserHistory");
