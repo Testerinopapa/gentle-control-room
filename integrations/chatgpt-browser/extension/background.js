@@ -3,6 +3,7 @@ const HOST = "org.gentlecontrolroom.chatgpt";
 const KEY = (tabId) => "gcrChatGPTTab:" + tabId;
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const DETECTORS = new Set(["current", "legacy", "waiting", "unsupported"]);
 
 // Clicking the extension toolbar icon opens the persistent Edge side panel.
 // This does not start tracking: collection still requires an explicit Start click.
@@ -70,7 +71,11 @@ async function start(tabId) {
   // Fail closed if the native host is not installed.
   await nativeEvent("session_started", id);
   await chrome.storage.session.set({
-    [KEY(tabId)]: { id, page: new URL(tab.url).pathname, visibleUser: null, visibleAssistant: null }
+    [KEY(tabId)]: {
+      id, page: new URL(tab.url).pathname,
+      visibleUser: null, visibleAssistant: null,
+      detector: null, lastObservedAt: null, lastCountAt: null
+    }
   });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#166534" });
   await chrome.action.setBadgeText({ tabId, text: "ON" });
@@ -92,7 +97,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       }
       return { ok: true, connected: true };
     }
-    if (message.type === "visibleCounts" || message.type === "conversationChanged") {
+    if (message.type === "visibleCounts" ||
+        message.type === "conversationChanged" ||
+        message.type === "observerStatus") {
       const tabId = sender.tab?.id;
       if (!Number.isInteger(tabId)) return { ok: false };
       const session = await getSession(tabId);
@@ -101,8 +108,31 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         await stop(tabId);
         return { ok: true };
       }
+      if (message.type === "observerStatus") {
+        if (!DETECTORS.has(message.detector)) return { ok: false };
+        const tab = await chrome.tabs.get(tabId);
+        if (!eligible(tab.url) || session.page !== new URL(tab.url).pathname) {
+          await stop(tabId);
+          return { ok: false };
+        }
+        const current = await getSession(tabId);
+        if (!current || current.id !== session.id) return { ok: false };
+        await chrome.storage.session.set({
+          [KEY(tabId)]: {
+            ...current, detector: message.detector, lastObservedAt: Date.now()
+          }
+        });
+        return { ok: true };
+      }
       if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
           !Number.isInteger(message.assistant) || message.assistant < 0 || message.assistant > 10000) {
+        return { ok: false };
+      }
+      // Only store visible marker counts for the previously approved tab.
+      // Messages from switched conversations must never enter this session.
+      const sourceTab = await chrome.tabs.get(tabId);
+      if (!eligible(sourceTab.url) || session.page !== new URL(sourceTab.url).pathname) {
+        await stop(tabId);
         return { ok: false };
       }
       await nativeEvent("visible_counts", session.id, {
@@ -113,7 +143,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const current = await getSession(tabId);
       if (current?.id === session.id) {
         await chrome.storage.session.set({
-          [KEY(tabId)]: { ...current, visibleUser: message.user, visibleAssistant: message.assistant }
+          [KEY(tabId)]: {
+            ...current, visibleUser: message.user,
+            visibleAssistant: message.assistant, lastCountAt: Date.now()
+          }
         });
       }
       return { ok: true };
@@ -137,7 +170,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       return {
         ok: true, allowed, reason, active: Boolean(session && samePage),
         visibleUser: samePage ? session?.visibleUser ?? null : null,
-        visibleAssistant: samePage ? session?.visibleAssistant ?? null : null
+        visibleAssistant: samePage ? session?.visibleAssistant ?? null : null,
+        detector: samePage ? session?.detector ?? null : null,
+        lastObservedAt: samePage ? session?.lastObservedAt ?? null : null,
+        lastCountAt: samePage ? session?.lastCountAt ?? null : null
       };
     }
     if (message.type === "start") {
