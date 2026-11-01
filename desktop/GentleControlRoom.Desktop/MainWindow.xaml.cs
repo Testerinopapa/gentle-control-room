@@ -298,6 +298,12 @@ public partial class MainWindow : System.Windows.Window
         $"visible code examples: {browser.CodeBlocks}. " +
         $"Visible messages (approx.): {browser.VisibleUser} yours, " +
         $"{browser.VisibleAssistant} ChatGPT. Events: {browser.EventsToday}.";
+      CombinedSessionText.Text =
+        $"Total recorded sessions: {snapshot.Sessions + browser.SessionsToday} " +
+        $"({snapshot.Sessions} Codex + {browser.SessionsToday} ChatGPT).";
+      BrowserHistory.ItemsSource = browser.History;
+      BrowserHistoryEmpty.Visibility = browser.History.Count == 0
+        ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
       BrowserLatestText.Text = browser.Latest + " · local only";
       BrowserStoreText.Text = !browser.StoreFound
         ? "No local browser activity folder found. Check the Edge collector installation."
@@ -326,9 +332,9 @@ public partial class MainWindow : System.Windows.Window
         ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
       CodexOverview.ItemsSource = new[]
       {
-        new { Label = "Sessions", Value = snapshot.Sessions },
-        new { Label = "Tool operations", Value = snapshot.ToolUses },
-        new { Label = "Recorded events", Value = snapshot.Events }
+        new { Label = "Codex sessions", Value = snapshot.Sessions },
+        new { Label = "Codex tool uses", Value = snapshot.ToolUses },
+        new { Label = "Codex events", Value = snapshot.Events }
       };
       CodexCategories.ItemsSource = snapshot.Categories;
       CodexRecent.ItemsSource = snapshot.Recent;
@@ -341,6 +347,9 @@ public partial class MainWindow : System.Windows.Window
       // Fail closed without logging local paths, consent values or event data.
       CodexStatusText.Text = "Unavailable";
       BrowserSummaryText.Text = "Browser activity could not be read.";
+      CombinedSessionText.Text = "Combined session count unavailable.";
+      BrowserHistory.ItemsSource = null;
+      BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Visible;
       BrowserStoreText.Text = "Local storage status unavailable.";
     }
     finally
@@ -358,6 +367,9 @@ public partial class MainWindow : System.Windows.Window
     // Clear the old period immediately; an in-flight read is discarded and retried.
     CodexSummaryText.Text = "Reading local activity...";
     BrowserSummaryText.Text = "Reading local ChatGPT activity...";
+    CombinedSessionText.Text = "Updating combined session count...";
+    BrowserHistory.ItemsSource = null;
+    BrowserHistoryEmpty.Visibility = System.Windows.Visibility.Collapsed;
     BrowserStoreText.Text = "Checking Windows event files...";
     CodexHistory.ItemsSource = null;
     CodexPatterns.ItemsSource = null;
