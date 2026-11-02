@@ -42,12 +42,13 @@
       '[data-role="assistant"]',
       '[data-message-author="assistant"]'
     ];
-    let units = [];
-    for (const selector of assistantSelectors) {
-      units = Array.from(root.querySelectorAll(selector));
-      if (units.length) break;
-    }
-    for (const unit of units.slice(-120)) {
+    // Multiple wrapper families may coexist. Do not stop after the first
+    // non-empty selector if that wrapper omits link elements.
+    const units = new Set();
+    for (const selector of assistantSelectors)
+      for (const unit of Array.from(root.querySelectorAll(selector)).slice(-120))
+        units.add(unit);
+    for (const unit of Array.from(units).slice(-120)) {
       if (!workflowEnabled || stopped) break;
       if (typeof unit.querySelectorAll !== "function") continue;
       for (const anchor of Array.from(unit.querySelectorAll('a[href]')).slice(0, 30)) {
@@ -94,12 +95,20 @@
 
   function userMessages() {
     const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
-    if (region) {
-      const bubbles = region.querySelectorAll('[data-user-message-bubble="true"]');
-      if (bubbles.length) return bubbles;
-      return region.querySelectorAll('[data-content-search-unit-key$=":user"]');
+    const root = region || document;
+    // The modern timeline sometimes uses role markers without bubble markers.
+    for (const selector of [
+      '[data-user-message-bubble="true"]',
+      '[data-content-search-unit-key$=":user"]',
+      '[data-message-author-role="user"]',
+      'article[data-turn="user"]',
+      '[data-role="user"]',
+      '[data-message-author="user"]'
+    ]) {
+      const units = root.querySelectorAll(selector);
+      if (units.length) return units;
     }
-    return document.querySelectorAll('[data-message-author-role="user"]');
+    return [];
   }
 
   async function scanWorkflow() {
@@ -229,10 +238,11 @@
 
     const counts = readCounts();
     void reportStatus(counts.detector);
-    if (counts.detector === "current" || counts.detector === "legacy") {
+    if (counts.detector === "current" || counts.detector === "legacy")
       void reportCounts(counts);
-      if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
-    }
+    // Do not block consented workflow/commit evidence because a cosmetic
+    // message-count detector failed to recognize ChatGPT's latest DOM.
+    if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
   }
 
   function stop() {
