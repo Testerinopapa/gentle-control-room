@@ -12,6 +12,9 @@ const observerNode = document.getElementById("observer-state");
 const evidenceCount = document.getElementById("evidence-count");
 const exportButton = document.getElementById("export-evidence");
 const clearButton = document.getElementById("clear-evidence");
+const commitInput = document.getElementById("commit-url");
+const importButton = document.getElementById("import-commit");
+const importStatus = document.getElementById("import-status");
 const codeCountNode = document.getElementById("code-count");
 const codingToggle = document.getElementById("coding-toggle");
 const codingHint = document.getElementById("coding-hint");
@@ -63,6 +66,10 @@ async function refresh() {
     stopButton.disabled = busy || !active;
     workflowEnabled = active && Boolean(result.workflowEnabled);
     workflowToggle.disabled = busy || !active;
+    importButton.disabled = busy || !workflowEnabled;
+    importStatus.textContent = workflowEnabled
+      ? "Paste a full GitHub commit URL to retrieve its public diff."
+      : "Requires recording and workflow analysis. Only public GitHub commits can be fetched.";
     workflowToggle.textContent = workflowEnabled
       ? "Disable workflow analysis" : "Enable workflow analysis";
     workflowState.textContent = !active
@@ -112,6 +119,7 @@ async function refresh() {
     stopButton.disabled = true;
     codingToggle.disabled = true;
     workflowToggle.disabled = true;
+    importButton.disabled = true;
     workflowEnabled = false;
     workflowToggle.textContent = "Enable workflow analysis";
     workflowState.textContent = "Unavailable.";
@@ -144,6 +152,30 @@ async function command(type) {
     if (!result?.ok) throw new Error(result?.error || "Extension storage unavailable.");
   } catch (error) {
     lastError = error?.message || "Extension storage unavailable.";
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+
+async function importCommit() {
+  if (busy || !workflowEnabled || !Number.isInteger(selectedTab)) return;
+  busy = true; importButton.disabled = true; lastError = "";
+  importStatus.textContent = "Checking the GitHub commit…";
+  try {
+    const tab = await activeTab();
+    if (!tab || tab.id !== selectedTab) throw Error("Active tab changed; select the ChatGPT conversation.");
+    const response = await chrome.runtime.sendMessage({
+      type: "importCommitUrl", tabId: selectedTab, url: commitInput.value.trim()
+    });
+    if (!response?.ok) throw Error(response?.error || "Commit import failed.");
+    importStatus.textContent = response.duplicate
+      ? "This commit was already recorded for this conversation."
+      : "Commit reference recorded. Export JSON to inspect the public patch or retrieval status.";
+    commitInput.value = "";
+  } catch (error) {
+    lastError = error?.message || "Commit import failed.";
+    importStatus.textContent = "Commit not imported.";
   } finally {
     busy = false;
     await refresh();
@@ -227,6 +259,7 @@ workflowToggle.addEventListener("click", () => void toggleWorkflow());
 codingToggle.addEventListener("click", () => void toggleCodingTag());
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
+importButton.addEventListener("click", () => void importCommit());
 exportButton.addEventListener("click", () => void exportEvidence());
 clearButton.addEventListener("click", () => void clearEvidence());
 
