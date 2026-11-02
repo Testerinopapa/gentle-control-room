@@ -90,10 +90,23 @@ internal static class GitHubCommitImporter
                 plus < 0 || minus < 0) continue;
             var kind = entry.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String
                 ? status.GetString() : "modified";
-            var before = kind == "added" ? "/dev/null" : "a/" + path;
+            // GitHub uses the NEW filename for a rename. Preserve the old name
+            // in the patch headers and enforce exclusions against both paths.
+            var previousPath = path;
+            if (kind == "renamed")
+            {
+                if (!entry.TryGetProperty("previous_filename", out var oldName) ||
+                    oldName.ValueKind != JsonValueKind.String) continue;
+                previousPath = oldName.GetString()!;
+                if (!RepositoryReader.SafePath(approved, previousPath)) continue;
+            }
+            var before = kind == "added" ? "/dev/null" : "a/" + previousPath;
             var after = kind == "removed" ? "/dev/null" : "b/" + path;
-            // GitHub supplies the exact patch hunk; only standard file headers are added.
-            var patch = "diff --git a/" + path + " b/" + path + "\n--- " + before + "\n+++ " + after + "\n" + hunk + "\n";
+            var rename = kind == "renamed"
+                ? "rename from " + previousPath + "\nrename to " + path + "\n" : "";
+            // GitHub supplies the exact patch hunk; accurately reconstruct Git headers.
+            var patch = "diff --git a/" + previousPath + " b/" + path + "\n" + rename +
+                "--- " + before + "\n+++ " + after + "\n" + hunk + "\n";
             var size = Encoding.UTF8.GetByteCount(patch);
             if (size > RepositoryReader.MaxPatch) continue;
             total += size;
