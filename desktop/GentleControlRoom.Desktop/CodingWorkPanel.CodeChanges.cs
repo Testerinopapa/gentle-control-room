@@ -21,12 +21,14 @@ public partial class CodingWorkPanel
     }
     private async Task CheckChanges() => await Run(async () => {
         var added = await Task.Run(async () => {
-            var n = await CodeTracking.PollAsync(_store);
+            var n = _store.Update(s => EvidenceImporter.Refresh(s, _activityRoot, DateTimeOffset.UtcNow));
+            n += await CodeTracking.PollAsync(_store);
+            n += await GitHubCommitImporter.ImportAsync(_store);
             n += _store.Update(s => VerificationReceipts.Import(s, Path.Combine(_activityRoot, "CodingWork", "CodeResults")));
             return n;
         });
         var latest = await Task.Run(_store.Read);
-        if (added > 0) { CancelPreview(); Render(loaded: latest); WorkStatus.Text = $"Recorded {added} local change/result observations. No external request was made."; }
+        if (added > 0) { CancelPreview(); Render(loaded: latest); WorkStatus.Text = $"Recorded {added} local activity/change observations. GitHub references may have been fetched; nothing was sent to DeepSeek."; }
         else { _state = latest; RenderCodeChanges(); }
     });
     private async void CheckChanges_Click(object sender, RoutedEventArgs e) => await CheckChanges();
