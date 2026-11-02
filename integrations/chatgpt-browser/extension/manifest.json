@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.5.0",
-  "description": "Local-only, explicitly opted-in ChatGPT activity and coding workflow analysis for Gentle Control Room.",
+  "version": "0.6.0",
+  "description": "Standalone opt-in ChatGPT coding activity and GitHub commit evidence saved privately in Edge.",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "nativeMessaging",
     "sidePanel"
   ],
   "action": {
@@ -21,6 +20,7 @@
   },
   "host_permissions": [
     "https://chatgpt.com/*",
-    "https://chat.openai.com/*"
+    "https://chat.openai.com/*",
+    "https://api.github.com/*"
   ]
 }
