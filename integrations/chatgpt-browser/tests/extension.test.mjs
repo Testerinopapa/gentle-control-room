@@ -687,7 +687,10 @@ test('supporting event indices are recomputed after retained chronology changes'
   data.events.shift();
   const analysis = h.analyze(data);
   const ref = analysis.tasks[0].commitReferences[0];
-  assert.deepEqual(Array.from(ref.attribution.evidenceEventIndices), [0, 1]);
+  const expectedIndices = data.events.flatMap((event, index) =>
+    ["request_boundary", "assistant_response"].includes(event.type) ? [index] : []);
+  assert.deepEqual(Array.from(ref.attribution.evidenceEventIndices), expectedIndices,
+    "indices must match the current exported chronology, including automatic coding metadata");
   assert.equal(analysis.tasks[0].taskId, data.analysis.tasks[0].taskId);
 });
 
