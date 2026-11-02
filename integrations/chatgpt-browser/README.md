@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.7)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.7.1)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.7.0**. Reload the ChatGPT tab itself as well.
+   **0.7.1**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**.
 5. Choose **Enable workflow analysis** separately for local classification of
@@ -79,6 +79,22 @@ DeepSeek analysis; it does **not** automatically call an AI model.
 
 Your first export may show one inferred task and **zero patterns**. This is
 correct until two separately observed coding episodes support recurrence.
+
+### Fresh-activity attribution
+
+Since v0.7.1, enabling **workflow analysis** establishes a baseline: user
+prompts and GitHub commit references **already rendered on the page at the
+moment of opt-in** are treated as historical and are not recorded as new
+activity. Only messages/references appearing after you enable the toggle are
+collected automatically. Start recording and enable workflow analysis
+**before submitting the next coding prompt**; do not expect old chat messages
+to be imported into a new session. Manual commit import remains available
+for explicitly selected older commits, and is labeled `discovery: "manual"`.
+
+This limits misleading task attribution on restart, but does not guarantee
+perfect task identity: the ChatGPT page can virtualize/hide old messages, so
+an old reference not rendered at the time of opt-in may still appear later.
+A future task-level reconciliation step is needed to fully resolve this.
 
 The extension does not inspect other tabs, cookies, session tokens,
 conversation titles/URLs or any arbitrary local Git repositories. It does not
