@@ -400,3 +400,28 @@ test("sidepanel manual commit fallback requires active workflow consent and stri
   assert.equal((await h.send(request)).duplicate, true);
   assert.equal(h.requests.length, 1);
 });
+
+
+test("binary-only GitHub commits export metadata without claiming a code diff", async () => {
+  const h = harness(undefined, {
+    sha: HASH,
+    files: [
+      { filename: "assets/logo.png", status: "modified", additions: 0, deletions: 0 },
+      { filename: ".env.production", status: "modified", additions: 1, deletions: 1,
+        patch: "@@ -1 +1 @@\n-old\n+new" }
+    ]
+  });
+  await enable(h);
+  const response = await h.send({
+    type: "githubCommitReference", repository: "testerinopapa/gentle-control-room", sha: HASH
+  }, origin);
+  assert.equal(response.ok, true);
+  const data = await exported(h);
+  const record = data.commits["testerinopapa/gentle-control-room@" + HASH];
+  assert.equal(record.status, "metadata_only");
+  assert.equal(record.changedFiles, 2);
+  assert.equal(record.files.length, 0);
+  assert.match(record.note, /no safe textual patches/);
+  assert.equal(data.events.at(-1).type, "github_commit_ref");
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).recordedCommits, 0);
+});
