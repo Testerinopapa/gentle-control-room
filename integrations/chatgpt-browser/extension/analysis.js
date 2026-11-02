@@ -199,8 +199,11 @@
           typeof event.sessionId !== "string" || !SESSION_RE.test(event.sessionId)) continue;
       const time = validTime(event.timestamp);
       if (time === null) continue;
+      // Automatic session-level coding tags identify the recording mode, not
+      // a new coding task. Only explicit tag events can serve as legacy signals.
       const relevant = (event.type === "workflow_stage" && STAGES.has(event.stage)) ||
-        (event.type === "coding_tag" && event.codingMarked === true) ||
+        (event.type === "coding_tag" && event.codingMarked === true &&
+          event.method !== "automatic_on_start") ||
         ["github_commit_ref", "request_boundary", "assistant_response"].includes(event.type);
       if (!relevant) continue;
       if (!sessions.has(event.sessionId)) sessions.set(event.sessionId, []);
