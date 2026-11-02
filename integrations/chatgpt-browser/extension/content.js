@@ -23,13 +23,16 @@
   let workflowSent = 0;
   const maxWorkflowStages = 120;
   const seenCommitLinks = new Set();
+  // Distinguish historical commits already visible when opt-in begins from
+  // references appearing afterward. Historical links never become task evidence.
+  const baselineCommitLinks = new Set();
   const pendingCommitLinks = new Set();
   const maxCommitLinks = 30;
 
   // Read only explicit GitHub commit references from assistant turns after opt-in.
   // Visible text is used transiently; never export text, code, conversation URLs, or arbitrary links.
-  async function scanCommitLinks() {
-    if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) return;
+  async function scanCommitLinks(baseline = false) {
+    if (!workflowEnabled || stopped || (!baseline && seenCommitLinks.size >= maxCommitLinks)) return;
     const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
     const root = region || document;
     // ChatGPT can render its modern timeline without content-search-unit keys.
@@ -73,7 +76,14 @@
         const repository = (match[1] + "/" + match[2]).toLowerCase();
         const sha = match[3].toLowerCase();
         const key = repository + "@" + sha;
-        if (seenCommitLinks.has(key) || pendingCommitLinks.has(key)) continue;
+        if (baseline) {
+          // This reference predates consent. Keep only its identifier in
+          // volatile tab memory so scrolling cannot import it later.
+          if (baselineCommitLinks.size < 2000) baselineCommitLinks.add(key);
+          continue;
+        }
+        if (baselineCommitLinks.has(key) ||
+            seenCommitLinks.has(key) || pendingCommitLinks.has(key)) continue;
         pendingCommitLinks.add(key);
         try {
           const result = await chrome.runtime.sendMessage({ type: "githubCommitReference", repository, sha });
@@ -269,8 +279,18 @@
   function onCommand(message) {
     if (message?.type === "gcrStop") stop();
     if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
-      workflowEnabled = message.enabled;
-      if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
+      if (message.enabled && !workflowEnabled) {
+        workflowEnabled = true;
+        // Consent begins NOW, not when the conversation was first opened.
+        // Do not label previously visible prompts or GitHub links as new work.
+        for (const unit of Array.from(userMessages()).slice(-120))
+          seenMessages.add(unit);
+        // The baseline branch does not await or send network messages.
+        // Therefore it finishes marking historical references synchronously.
+        void scanCommitLinks(true);
+      } else if (!message.enabled) {
+        workflowEnabled = false;
+      }
     }
   }
 
