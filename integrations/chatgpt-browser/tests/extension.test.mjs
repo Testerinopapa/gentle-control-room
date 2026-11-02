@@ -331,3 +331,72 @@ test("GitHub capture does not require recognized message-count markup", async ()
   assert.equal(sent.find(m => m.type === "githubCommitReference").sha, HASH);
   assert.equal(sent.find(m => m.type === "workflowStage").stage, "debugging");
 });
+
+
+test("consented assistant plain-text commit URL works when no HTML anchor exists", async () => {
+  const messages = [];
+  const assistant = {
+    innerText: "Implemented in " + COMMIT + " (see commit).",
+    querySelectorAll(selector) {
+      assert.equal(selector, "a[href]");
+      return [];
+    }
+  };
+  const region = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role="assistant"]') return [assistant];
+      return [];
+    }
+  };
+  let command;
+  vm.runInNewContext(content, {
+    URL, document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/safe" },
+    chrome: { runtime: {
+      async sendMessage(m) { messages.push(m); return { ok: true }; },
+      onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await tick();
+  assert.equal(messages.filter(m => m.type === "githubCommitReference").length, 0);
+  command({ type: "gcrWorkflowMode", enabled: true });
+  await tick();
+  const refs = messages.filter(m => m.type === "githubCommitReference");
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].sha, HASH);
+  assert.equal(refs[0].repository, "testerinopapa/gentle-control-room");
+  assert.ok(!JSON.stringify(messages).includes("Implemented in"));
+  assert.ok(!JSON.stringify(messages).includes("/c/safe"));
+});
+
+test("sidepanel manual commit fallback requires active workflow consent and strict GitHub URL", async () => {
+  assert.ok(markup.includes('id="commit-url"'));
+  assert.ok(markup.includes('id="import-commit"'));
+  assert.ok(panel.includes('type: "importCommitUrl"'));
+  const h = harness();
+  const request = { type: "importCommitUrl", tabId: 9, url: COMMIT };
+  assert.equal((await h.send(request)).ok, false);
+  await h.send({ type: "start", tabId: 9 });
+  assert.equal((await h.send(request)).ok, false);
+  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
+  for (const url of [
+    "http://github.com/a/b/commit/" + HASH,
+    "https://github.com.evil.invalid/a/b/commit/" + HASH,
+    "https://github.com/a/b/commit/" + HASH + "?token=secret",
+    "https://github.com/a/b/commit/short-sha"
+  ]) assert.equal((await h.send({ ...request, url })).ok, false);
+  assert.equal(h.requests.length, 0);
+  assert.equal((await h.send(request, origin)).ok, false, "page events cannot impersonate side panel");
+  assert.equal((await h.send(request)).ok, true);
+  const data = await exported(h);
+  assert.equal(data.events.at(-1).type, "github_commit_ref");
+  assert.equal(data.events.at(-1).discovery, "manual");
+  assert.equal(data.commits["testerinopapa/gentle-control-room@" + HASH].status, "retrieved");
+  assert.equal(h.requests.length, 1);
+  assert.equal((await h.send(request)).duplicate, true);
+  assert.equal(h.requests.length, 1);
+});
