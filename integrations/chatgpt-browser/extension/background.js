@@ -120,7 +120,7 @@ async function fetchCommit(repository, sha) {
       note: "A commit link was seen in an assistant message. Authorship, tests and outcome are unverified." };
   } finally { clearTimeout(timeout); }
 }
-async function collectCommit(repository, sha, sessionId) {
+async function collectCommit(repository, sha, sessionId, clearGeneration) {
   const key = repository + "@" + sha;
   if (pendingCommits.has(key)) return;
   pendingCommits.add(key);
@@ -137,6 +137,9 @@ async function collectCommit(repository, sha, sessionId) {
       session?.id === sessionId && session.workflowEnabled && (session.commitRefs || []).includes(key));
     if (!consented) return;
     await mutateEvidence(data => {
+      // Delete stored evidence must also win against a GitHub fetch that was
+      // already in flight. Otherwise, a cleared patch could reappear later.
+      if ((data.clearGeneration || 0) !== clearGeneration) return;
       data.commits[key] = { repository, sha, sessionId,
         savedAt: new Date().toISOString(), ...result };
     });
@@ -207,12 +210,15 @@ async function fromPage(message, sender) {
     const key = repository + "@" + sha;
     if (session.commitRefs.includes(key)) return { ok: true, duplicate: true };
     if (session.commitRefs.length >= 30) return { ok: false };
+    // Capture the deletion generation before writing the reference. The
+    // subsequent asynchronous GitHub fetch cannot outlive a user deletion.
+    const clearGeneration = (await readEvidence()).clearGeneration || 0;
     await event(session.id, "github_commit_ref", { repository, commitSha: sha });
     const current = await getSession(tabId);
     if (!current || current.id !== session.id || !current.workflowEnabled) return { ok: false };
     await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
       commitRefs: [...current.commitRefs, key] } });
-    await collectCommit(repository, sha, session.id);
+    await collectCommit(repository, sha, session.id, clearGeneration);
     return { ok: true };
   }
   if (message.type === "visibleCounts") {
@@ -246,7 +252,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         attribution: "Observed links are not proof of authorship, success, or deployment." } };
     }
     if (message.type === "clearEvidence") {
-      await mutateEvidence(data => { data.events = []; data.commits = {}; });
+      await mutateEvidence(data => {
+        data.events = [];
+        data.commits = {};
+        data.clearGeneration = (data.clearGeneration || 0) + 1;
+      });
       return { ok: true };
     }
     const tabId = message.tabId;
