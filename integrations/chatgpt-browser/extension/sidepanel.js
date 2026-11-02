@@ -9,8 +9,9 @@ const stopButton = document.getElementById("stop");
 const userNode = document.getElementById("user-count");
 const assistantNode = document.getElementById("assistant-count");
 const observerNode = document.getElementById("observer-state");
-const connectionNode = document.getElementById("connection-state");
-const checkButton = document.getElementById("check-connection");
+const evidenceCount = document.getElementById("evidence-count");
+const exportButton = document.getElementById("export-evidence");
+const clearButton = document.getElementById("clear-evidence");
 const codeCountNode = document.getElementById("code-count");
 const codingToggle = document.getElementById("coding-toggle");
 const codingHint = document.getElementById("coding-hint");
@@ -81,6 +82,8 @@ async function refresh() {
       ? String(result.visibleUser) : "—";
     assistantNode.textContent = active && Number.isInteger(result.visibleAssistant)
       ? String(result.visibleAssistant) : "—";
+    evidenceCount.textContent = (result.recordedEvents || 0) + " recorded events · " +
+      (result.recordedCommits || 0) + " retrieved GitHub commits.";
 
     if (!active) {
       observerNode.textContent = "Start recording to check the page observer.";
@@ -118,6 +121,7 @@ async function refresh() {
     codingHint.textContent = "Coding status unavailable.";
     userNode.textContent = "—";
     assistantNode.textContent = "—";
+    evidenceCount.textContent = "Evidence count unavailable.";
     observerNode.textContent = "Unable to check the page observer.";
     showError(lastError || (error?.message || "Try opening ChatGPT again."));
   }
@@ -137,37 +141,41 @@ async function command(type) {
       throw new Error("The active tab changed. Select Start or Stop again.");
     }
     const result = await chrome.runtime.sendMessage({ type, tabId: selectedTab });
-    if (!result?.ok) throw new Error(result?.error || "The local collector is unavailable.");
-    connectionNode.textContent = "Connected to the Windows collector.";
+    if (!result?.ok) throw new Error(result?.error || "Extension storage unavailable.");
   } catch (error) {
-    lastError = error?.message || "The local collector is unavailable.";
-    connectionNode.textContent = "Windows connection needs attention.";
+    lastError = error?.message || "Extension storage unavailable.";
   } finally {
     busy = false;
     await refresh();
   }
 }
 
-async function testConnection() {
+async function exportEvidence() {
   if (busy) return;
-  busy = true;
-  checkButton.disabled = true;
-  connectionNode.textContent = "Checking the local Windows collector…";
-  lastError = "";
+  busy = true; exportButton.disabled = true; lastError = "";
   try {
-    const result = await chrome.runtime.sendMessage({ type: "testConnection" });
-    if (!result?.ok || !result.connected) {
-      throw new Error(result?.error || "The Windows collector did not respond.");
-    }
-    connectionNode.textContent = "Connected. You can start recording a conversation.";
-  } catch (error) {
-    lastError = error?.message || "Cannot connect to the Windows collector.";
-    connectionNode.textContent = "Not connected.";
-  } finally {
-    checkButton.disabled = false;
-    busy = false;
-    await refresh();
-  }
+    const response = await chrome.runtime.sendMessage({ type: "exportEvidence" });
+    if (!response?.ok || !response.data) throw Error("Unable to read local evidence.");
+    // A local object URL keeps JSON off all remote services.
+    const blob = new Blob([JSON.stringify(response.data, null, 2) + "\n"],
+      { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = url; link.download = "gentle-control-room-evidence.json";
+      link.click();
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  } catch (error) { lastError = error?.message || "Could not export evidence."; }
+  finally { busy = false; exportButton.disabled = false; await refresh(); }
+}
+async function clearEvidence() {
+  if (busy || !confirm("Delete all evidence stored by this extension? Active recording will continue.")) return;
+  busy = true; clearButton.disabled = true; lastError = "";
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "clearEvidence" });
+    if (!response?.ok) throw Error("Unable to delete local evidence.");
+  } catch (error) { lastError = error?.message || "Could not delete evidence."; }
+  finally { busy = false; clearButton.disabled = false; await refresh(); }
 }
 
 async function toggleCodingTag() {
@@ -219,7 +227,8 @@ workflowToggle.addEventListener("click", () => void toggleWorkflow());
 codingToggle.addEventListener("click", () => void toggleCodingTag());
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
-checkButton.addEventListener("click", () => void testConnection());
+exportButton.addEventListener("click", () => void exportEvidence());
+clearButton.addEventListener("click", () => void clearEvidence());
 
 // Edge keeps a side panel open across tab switches; never leave stale controls
 // showing the previous tab's consent state.
