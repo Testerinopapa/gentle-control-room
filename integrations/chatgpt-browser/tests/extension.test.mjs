@@ -810,3 +810,69 @@ test("capture diagnostics reject mismatched cached commit identities", () => {
   assert.ok(!JSON.stringify(d).includes("src/wrong.ts"),
     "diagnostics should never copy filenames or patch content");
 });
+
+
+test("capture diagnostics distinguish passive-only recordings from observed coding workflows", () => {
+  const h = harness();
+  const at = "2026-11-02T23:00:00Z";
+  const passive = "passive-session", coded = "coded-session";
+  const ev = (sessionId, type, rest = {}) => ({
+    sessionId, type, timestamp: at, ...rest
+  });
+  const result = h.analyze({
+    events: [
+      ev(passive, "session_started"),
+      ev(passive, "coding_tag", { codingMarked: true, method: "automatic_on_start" }),
+      ev(passive, "visible_counts", { visibleUser: 4, visibleAssistant: 5 }),
+      ev(coded, "session_started"),
+      ev(coded, "coding_tag", { codingMarked: true, method: "automatic_on_start" }),
+      ev(coded, "request_boundary", {
+        taskId: coded + ":m-test-1", requestId: "m-test-1", confidence: "supported"
+      }),
+      ev(coded, "workflow_stage", {
+        stage: "implementation", taskId: coded + ":m-test-1", requestId: "m-test-1"
+      }),
+      ev(coded, "assistant_response", {
+        taskId: coded + ":m-test-1", responseId: "m-test-2"
+      }),
+      ev(coded, "workflow_stage", { stage: "made_up_stage" })
+    ],
+    commits: {}
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.captureDiagnostics.workflow)), {
+    sessionsStarted: 2,
+    sessionsWithRequestBoundaries: 1,
+    sessionsWithoutWorkflowEvidence: 1,
+    requestBoundaries: 1,
+    assistantResponses: 1,
+    workflowStageEvents: 1,
+    visibleCountUpdates: 1,
+    automaticCodingTags: 2
+  });
+  assert.equal(result.tasks.length, 1,
+    "automatic session tags and visible counts do not create phantom coding tasks");
+  assert.equal(result.tasks[0].taskId, coded + ":m-test-1");
+});
+
+test("export exposes passive-only workflow diagnostics after one-click Start", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({
+    type: "visibleCounts", user: 2, assistant: 3, codeBlocks: 1
+  }, origin);
+  const first = await exported(h);
+  const workflow = first.analysis.captureDiagnostics.workflow;
+  assert.equal(workflow.sessionsStarted, 1);
+  assert.equal(workflow.sessionsWithoutWorkflowEvidence, 1);
+  assert.equal(workflow.requestBoundaries, 0);
+  assert.equal(workflow.automaticCodingTags, 1);
+  assert.equal(first.analysis.tasks.length, 0);
+
+  await h.send({
+    type: "requestBoundary", requestId: "m-test-1", confidence: "supported"
+  }, origin);
+  const second = await exported(h);
+  assert.equal(second.analysis.captureDiagnostics.workflow.sessionsWithoutWorkflowEvidence, 0);
+  assert.equal(second.analysis.captureDiagnostics.workflow.sessionsWithRequestBoundaries, 1);
+  assert.equal(second.analysis.tasks.length, 1);
+});
