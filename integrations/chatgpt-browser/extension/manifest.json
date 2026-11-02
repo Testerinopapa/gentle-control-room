@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Local-only, explicitly opted-in ChatGPT activity and coding workflow analysis for Gentle Control Room.",
   "permissions": [
     "activeTab",
