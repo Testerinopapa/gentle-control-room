@@ -87,7 +87,9 @@ function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse
 const origin = { tab: { id: 9 } };
 async function enable(h) {
   assert.equal((await h.send({ type: "start", tabId: 9 })).ok, true);
-  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
+  const state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.workflowEnabled, true);
+  assert.equal(state.codingMarked, true);
 }
 async function exported(h) {
   const result = await h.send({ type: "exportEvidence" });
@@ -105,6 +107,10 @@ test("extension requires no Windows host and uses only approved page + public Gi
   assert.ok(markup.includes('id="clear-evidence"'));
   assert.ok(!markup.includes("Windows connection"));
   assert.ok(panel.includes('type: "exportEvidence"'));
+  assert.ok(!markup.includes('id="coding-toggle"'));
+  assert.ok(!markup.includes('id="workflow-toggle"'));
+  assert.ok(!panel.includes("toggleCodingTag"));
+  assert.ok(!panel.includes("toggleWorkflow"));
 });
 
 test("starts locally without a host and stores minimal session metadata", async () => {
@@ -114,12 +120,16 @@ test("starts locally without a host and stores minimal session metadata", async 
   assert.equal((await h.send({ type: "start", tabId: 9 })).ok, true);
   const state = await h.send({ type: "getState", tabId: 9 });
   assert.equal(state.active, true);
-  assert.equal(state.workflowEnabled, false);
+  assert.equal(state.workflowEnabled, true);
+  assert.equal(state.codingMarked, true);
+  assert.ok(h.pageCommands.some(message =>
+    message.type === "gcrWorkflowMode" && message.enabled === true));
   assert.equal(h.badge.at(-1).text, "ON");
   const data = await exported(h);
   assert.equal(data.version, 1);
-  assert.equal(data.events.length, 1);
-  assert.equal(data.events[0].type, "session_started");
+  assert.deepEqual(Array.from(data.events, e => e.type), ["session_started", "coding_tag"]);
+  assert.equal(data.events[1].codingMarked, true);
+  assert.equal(data.events[1].method, "automatic_on_start");
   assert.equal(JSON.stringify(data).includes("/c/test-conversation"), false);
 });
 
@@ -131,24 +141,23 @@ test("rejects unapproved pages, invalid counts and background-originated page ev
   await h.send({ type: "start", tabId: 9 });
   assert.equal((await h.send({ type: "visibleCounts", user: "3", assistant: 4 }, origin)).ok, false);
   assert.equal((await h.send({ type: "visibleCounts", user: 3, assistant: 4 })).ok, false);
-  assert.equal((await exported(h)).events.length, 1);
+  assert.equal((await exported(h)).events.length, 2);
 });
 
-test("counts and tags remain metadata only, with optional workflow categorization", async () => {
+test("start automatically records a coding tag and enables metadata-only workflow capture", async () => {
   const h = harness();
   await h.send({ type: "start", tabId: 9 });
-  assert.equal((await h.send({ type: "workflowStage", stage: "debugging" }, origin)).ok, false);
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowEnabled, true);
   const counts = await h.send({
     type: "visibleCounts", user: 3, assistant: 4, codeBlocks: 2,
     prompt: "PRIVATE CHAT", url: "https://chatgpt.com/c/private"
   }, origin);
   assert.equal(counts.ok, true);
-  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: true })).ok, true);
-  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
   assert.equal((await h.send({ type: "workflowStage", stage: "debugging", prompt: "SECRET" }, origin)).ok, true);
   assert.equal((await h.send({ type: "workflowStage", stage: "arbitrary" }, origin)).ok, false);
   const data = await exported(h);
-  assert.deepEqual(Array.from(data.events, x => x.type), ["session_started", "visible_counts", "coding_tag", "workflow_stage"]);
+  assert.deepEqual(Array.from(data.events, x => x.type), ["session_started", "coding_tag", "visible_counts", "workflow_stage"]);
+  assert.equal(data.events[1].codingMarked, true);
   assert.equal(data.events.at(-1).stage, "debugging");
   assert.equal(JSON.stringify(data).includes("PRIVATE"), false);
   assert.equal(JSON.stringify(data).includes("SECRET"), false);
@@ -179,19 +188,21 @@ test("GitHub commit link captures actual public diff without local clone or Wind
   assert.equal(h.requests.length, 1);
 });
 
-test("workflow analysis consent is required for public GitHub fetches", async () => {
+test("explicit Start authorizes public GitHub collection, and Stop revokes it", async () => {
   const h = harness();
-  await h.send({ type: "start", tabId: 9 });
   const reference = { type: "githubCommitReference",
     repository: "Testerinopapa/gentle-control-room", sha: HASH };
   assert.equal((await h.send(reference, origin)).ok, false);
   assert.equal(h.requests.length, 0);
-  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
+  await h.send({ type: "start", tabId: 9 });
   assert.equal((await h.send({ ...reference, sha: "bad" }, origin)).ok, false);
   assert.equal((await h.send({ ...reference, repository: "example.com.evil/a" }, origin)).ok, false);
   assert.equal(h.requests.length, 0);
-  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false });
+  assert.equal((await h.send(reference, origin)).ok, true);
+  assert.equal(h.requests.length, 1);
+  await h.send({ type: "stop", tabId: 9 });
   assert.equal((await h.send(reference, origin)).ok, false);
+  assert.equal(h.requests.length, 1);
 });
 
 test("renamed secrets, private keys and risky patches are never retained", async () => {
@@ -347,8 +358,6 @@ test("sidepanel manual commit fallback requires active workflow consent and stri
   const request = { type: "importCommitUrl", tabId: 9, url: COMMIT };
   assert.equal((await h.send(request)).ok, false);
   await h.send({ type: "start", tabId: 9 });
-  assert.equal((await h.send(request)).ok, false);
-  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
   for (const url of [
     "http://github.com/a/b/commit/" + HASH,
     "https://github.com.evil.invalid/a/b/commit/" + HASH,
