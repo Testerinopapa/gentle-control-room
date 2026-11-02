@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.8)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.8.1)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,17 +12,18 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.8.0**. Reload the ChatGPT tab itself as well.
+   **0.8.1**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
-   **Start for this conversation**.
-5. Choose **Enable workflow analysis** separately for local classification of
-   visible user requests and GitHub commit evidence capture.
-6. The extension recognizes complete GitHub commit URLs in assistant HTML
+   **Start for this conversation**. This one explicit action automatically
+   tags the session as coding-related and enables local workflow classification,
+   task-boundary detection, and public GitHub commit evidence collection.
+   No extra coding-work or workflow toggles are needed.
+5. The extension recognizes complete GitHub commit URLs in assistant HTML
    links **or visible plain text**. If ChatGPT renders only a link label
    with no accessible URL, paste the complete GitHub commit URL in the
    **Evidence → GitHub commit URL** field and click **Import commit evidence**.
    This is a manual fallback, not automatic access to hidden ChatGPT tool calls.
-7. Use **Export evidence JSON** in the extension panel. No Windows steps required.
+6. Use **Export evidence JSON** in the extension panel. No Windows steps required.
 
 The extension's host permissions are restricted to ChatGPT and
 `https://api.github.com/*`; no blanket access to GitHub webpages or the
@@ -32,11 +33,12 @@ computer's filesystem is used.
 
 - Opted-in session start/stop timestamps with a fresh random local session ID.
 - Visible message counts and code-block counts, where available.
-- User-selected coding tag and locally classified workflow stages. User text is
-  inspected transiently only when workflow analysis is ON and is never saved.
+- An automatic coding-work tag when you start recording, plus locally classified
+  workflow stages. User text is inspected transiently only while recording is ON
+  and is never saved.
 - Exact **public GitHub commit URL references** observed as links inside
   assistant messages, reduced to `owner/repo` plus the 40-character SHA.
-- When workflow analysis is ON, the extension can fetch a matching public
+- While recording is ON, the extension can fetch a matching public
   commit's changed file patch hunks directly from GitHub's public API. It stores
   bounded, filtered patch data locally along with the link's session ID.
 - A downloadable `gentle-control-room-evidence.json` including recorded
@@ -58,7 +60,7 @@ identify a semantic goal spanning several follow-up requests. Stage sequences ca
 include several categories observed in one request, in textual order. They are
 request classifications, not verified actions.
 
-Messages mounted when workflow analysis is enabled are baselined. Their existing commit
+Messages mounted when recording is started are baselined. Their existing commit
 references are **historical** and do not trigger GitHub retrieval, even when repeated
 in a later response. A new link streamed into an old response can be captured as
 unattributed, since that response has no supported new-task boundary. Streaming text,
@@ -118,9 +120,10 @@ local browser download.
 
 ## Data lifecycle / consent
 
-Recording and workflow analysis start OFF. Stop revokes ongoing collection for
-that conversation; changing conversations also stops it. Each new
-conversation requires separate consent. **Delete stored evidence** in the
+Recording starts OFF. Clicking **Start for this conversation** enables both
+local workflow analysis and an automatic coding-work tag, without extra switches.
+**Stop recording** revokes collection for that conversation; changing conversations
+also stops it. Each new conversation requires separate consent. **Delete stored evidence** in the
 side panel removes recorded events and cached code patches. Deletion does not
 stop an already active recording; use **Stop recording** separately.
 
@@ -150,7 +153,7 @@ conversation for analysis after reviewing its contents.
 ## Debugging
 
 If an export has `session_started` events but no `workflow_stage` events,
-confirm that **Enable workflow analysis** shows ON in the extension panel.
+confirm that recording is ON and the ChatGPT page observer is connected.
 If `github_commit_ref` is missing, confirm a complete GitHub commit link is
 visibly rendered **inside an assistant reply**, not just plain text in a
 user message. In the exported JSON, `commits` entries describe available
@@ -171,7 +174,8 @@ node --test integrations/chatgpt-browser/tests/extension.test.mjs
 ## Verify v0.8 in Edge
 
 1. Reload the unpacked extension and ChatGPT. Open a conversation with an existing
-   assistant commit link. Start recording, then enable workflow analysis.
+   assistant commit link. Click **Start for this conversation** once; both coding
+   tagging and local workflow analysis begin automatically.
 2. Export: that reference should be historical, with no new GitHub patch retrieval.
 3. Submit a new coding request. When a subsequent assistant reply displays a full
    public commit URL, export again. Check its request/response IDs, task ID, automatic
