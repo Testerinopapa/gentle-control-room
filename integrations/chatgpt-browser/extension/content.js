@@ -41,6 +41,7 @@
         if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) break;
         const href = anchor.getAttribute?.("href");
         if (typeof href !== "string" || href.length > 300) continue;
+        if (!/^https:\/\/github\.com\//i.test(href)) continue;
         let url;
         try { url = new URL(href, "https://chatgpt.com"); } catch { continue; }
         if (url.origin !== "https://github.com" || url.search || url.hash) continue;
