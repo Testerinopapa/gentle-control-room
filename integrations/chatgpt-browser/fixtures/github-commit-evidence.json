@@ -1,0 +1,52 @@
+{
+  "fixture": true,
+  "description": "Synthetic reproducible bridge and evidence sample; not captured from an actual Windows session.",
+  "requirements": [
+    "Opt-in browser recording and workflow analysis",
+    "Approved Windows-local Git repository whose origin matches this public GitHub repository"
+  ],
+  "nativeMessage": {
+    "version": 1,
+    "event": "github_commit_ref",
+    "sessionId": "123e4567-e89b-42d3-a456-426614174000",
+    "repository": "testerinopapa/gentle-control-room",
+    "commitSha": "28de267f6353f99977c5185080f5573a45ab12de"
+  },
+  "persistedBrowserEvent": {
+    "schemaVersion": 1,
+    "source": "chatgpt_browser",
+    "timestamp": "2026-11-02T04:00:00Z",
+    "eventType": "github_commit_ref",
+    "sessionPseudonym": "123e4567-e89b-42d3-a456-426614174000",
+    "repository": "testerinopapa/gentle-control-room",
+    "commitSha": "28de267f6353f99977c5185080f5573a45ab12de"
+  },
+  "githubApi": {
+    "endpoint": "https://api.github.com/repos/testerinopapa/gentle-control-room/commits/28de267f6353f99977c5185080f5573a45ab12de",
+    "responseExample": {
+      "sha": "28de267f6353f99977c5185080f5573a45ab12de",
+      "files": [
+        {
+          "filename": "src/main.tsx",
+          "status": "modified",
+          "additions": 1,
+          "deletions": 0,
+          "patch": "@@ -2,4 +2,5 @@\n import App from \"./App.tsx\";\n import \"./index.css\";\n \n+// Gentle Control Room tracking test: this harmless change should appear in local Git diffs.\n createRoot(document.getElementById(\"root\")!).render(<App />);"
+        }
+      ]
+    }
+  },
+  "expectedEvidence": {
+    "source": "GitHub commit",
+    "kind": "code_change",
+    "layer": "GitHub commit",
+    "file": "src/main.tsx",
+    "additions": 1,
+    "deletions": 0,
+    "sessionSource": "corresponding opted-in ChatGPT browser session",
+    "author": "unknown",
+    "verification": "unknown",
+    "exactPatch": "diff --git a/src/main.tsx b/src/main.tsx\n--- a/src/main.tsx\n+++ b/src/main.tsx\n@@ -2,4 +2,5 @@\n import App from \"./App.tsx\";\n import \"./index.css\";\n \n+// Gentle Control Room tracking test: this harmless change should appear in local Git diffs.\n createRoot(document.getElementById(\"root\")!).render(<App />);\n"
+  },
+  "deepSeek": "Exact diff is included only after a task association, explicit evidence selection, and approval of the reviewed outbound JSON."
+}
