@@ -90,6 +90,15 @@ reported separately because they are intentionally not fetched. This is an
 audit aid for determining whether capture and attribution actually succeeded;
 it does not establish commit authorship or whether a task worked.
 
+The exported `analysis.captureDiagnostics.workflow` also reports whether recorded
+sessions actually produced coding evidence: `sessionsStarted`,
+`sessionsWithRequestBoundaries`, `sessionsWithoutWorkflowEvidence`,
+`requestBoundaries`, `assistantResponses`, `workflowStageEvents`,
+`visibleCountUpdates`, and `automaticCodingTags`. A session with only
+message counts and the automatic coding tag is reported as having **no workflow
+evidence**. This identifies a missing request/commit capture signal, but does
+not establish whether the user submitted a new coding request after opting in.
+
 The export envelope remains version 1 with its existing `events` and `commits`.
 `analysis.version` is now 2. Existing task fields remain, with additive `taskId`,
 `requestId`, `responseIds`, `workflowStages`, `attribution`, `filesChanged`,
