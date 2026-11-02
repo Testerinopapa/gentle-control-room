@@ -4,683 +4,261 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
+const background = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
+const content = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
+const panel = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
+const markup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
 const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
-const panelMarkup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
-const panelLogic = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
-const contentLogic = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
-function harness(url = "https://chatgpt.com/c/synthetic-conversation", nativeResponse = { ok: true }) {
-  let listener, updatedListener, removedListener;
-  const stored = new Map();
-  const native = [];
-  const badge = [];
-  const sidePanelBehavior = [];
+const HASH = "3d3812a0aade7b5e7c661741054184fd09886613";
+const COMMIT = "https://github.com/Testerinopapa/gentle-control-room/commit/" + HASH;
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse = null) {
+  const sessions = new Map(), local = new Map(), badge = [], requests = [], pageCommands = [];
+  let listener, tabUpdated, tabRemoved, currentUrl = url;
+  const record = commitResponse || {
+    sha: HASH,
+    files: [
+      { filename: "src/feature.ts", status: "modified", additions: 2, deletions: 1,
+        patch: "@@ -1 +1,2 @@\n-old\n+new\n+more" },
+      { filename: ".env.local", status: "modified", additions: 1, deletions: 0,
+        patch: "@@ -1 +1 @@\n-secret\n+changed" }
+    ]
+  };
   const chrome = {
-    storage: { session: {
-      async get(key) { return { [key]: stored.get(key) }; },
-      async set(items) { for (const [k, v] of Object.entries(items)) stored.set(k, v); },
-      async remove(key) { stored.delete(key); }
-    } },
-    sidePanel: {
-      async setPanelBehavior(options) { sidePanelBehavior.push(options); }
-    },
-    runtime: {
-      onMessage: { addListener(fn) { listener = fn; } },
-      async sendNativeMessage(_host, message) {
-        native.push(message);
-        if (nativeResponse instanceof Error) throw nativeResponse;
-        return nativeResponse;
+    sidePanel: { setPanelBehavior: async () => {} },
+    storage: {
+      session: {
+        async get(key) {
+          if (key === null) return Object.fromEntries(sessions);
+          return { [key]: sessions.get(key) };
+        },
+        async set(items) { for (const [k, v] of Object.entries(items)) sessions.set(k, v); },
+        async remove(key) { sessions.delete(key); }
+      },
+      local: {
+        async get(key) { return { [key]: local.get(key) }; },
+        async set(items) { for (const [k, v] of Object.entries(items)) local.set(k, v); }
       }
     },
+    runtime: { onMessage: { addListener(fn) { listener = fn; } } },
     tabs: {
-      async get(id) { assert.equal(id, 9); return { id, url }; },
-      onUpdated: { addListener(fn) { updatedListener = fn; } },
-      onRemoved: { addListener(fn) { removedListener = fn; } },
-      async sendMessage() {}
+      async get(id) { assert.equal(id, 9); return { id: 9, url: currentUrl }; },
+      async sendMessage(_tab, message) { pageCommands.push(message); },
+      onUpdated: { addListener(fn) { tabUpdated = fn; } },
+      onRemoved: { addListener(fn) { tabRemoved = fn; } }
     },
     action: {
-      async setBadgeText(args) { badge.push(args); },
-      async setBadgeBackgroundColor() {}
+      async setBadgeBackgroundColor() {},
+      async setBadgeText(entry) { badge.push(entry); }
     },
     scripting: { async executeScript() {} }
   };
-  const context = vm.createContext({ chrome, URL, crypto: { randomUUID }, console });
-  vm.runInContext(source, context, { filename: "background.js" });
+  const fetch = async (requested, options) => {
+    requests.push({ requested, options });
+    return {
+      ok: true, status: 200,
+      headers: { get() { return null; } },
+      text: async () => JSON.stringify(record)
+    };
+  };
+  vm.runInNewContext(background, {
+    chrome, URL, crypto: { randomUUID }, Date, JSON, fetch,
+    setTimeout, clearTimeout, console, AbortController
+  }, { filename: "background.js" });
   async function send(message, sender = {}) {
-    return await new Promise((done) => listener(message, sender, done));
+    return await new Promise(resolve => listener(message, sender, resolve));
   }
-  return { send, native, stored, badge, sidePanelBehavior, updatedListener, removedListener };
+  return {
+    send, local, sessions, badge, requests, pageCommands,
+    navigate(next) { currentUrl = next; tabUpdated(9, { url: next }); },
+    tabRemoved
+  };
+}
+const origin = { tab: { id: 9 } };
+async function enable(h) {
+  assert.equal((await h.send({ type: "start", tabId: 9 })).ok, true);
+  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
+}
+async function exported(h) {
+  const result = await h.send({ type: "exportEvidence" });
+  assert.equal(result.ok, true);
+  return result.data;
 }
 
-test("off by default; only explicit ChatGPT tab opt-in starts recording", async () => {
+test("extension requires no Windows host and uses only approved page + public GitHub API permissions", () => {
+  assert.equal(manifest.permissions.includes("nativeMessaging"), false);
+  assert.ok(manifest.permissions.includes("storage"));
+  assert.ok(manifest.host_permissions.includes("https://api.github.com/*"));
+  assert.ok(manifest.host_permissions.includes("https://chatgpt.com/*"));
+  assert.ok(!background.includes("sendNativeMessage"));
+  assert.ok(markup.includes('id="export-evidence"'));
+  assert.ok(markup.includes('id="clear-evidence"'));
+  assert.ok(!markup.includes("Windows connection"));
+  assert.ok(panel.includes('type: "exportEvidence"'));
+});
+
+test("starts locally without a host and stores minimal session metadata", async () => {
   const h = harness();
-  const initial = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(initial.active, false);
-  assert.equal(h.native.length, 0);
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).active, false);
+  assert.equal(h.local.size, 0);
   assert.equal((await h.send({ type: "start", tabId: 9 })).ok, true);
-  assert.equal(h.native.length, 1);
-  assert.equal(h.native[0].event, "session_started");
-  assert.equal((await h.send({ type: "getState", tabId: 9 })).active, true);
+  const state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.active, true);
+  assert.equal(state.workflowEnabled, false);
   assert.equal(h.badge.at(-1).text, "ON");
+  const data = await exported(h);
+  assert.equal(data.version, 1);
+  assert.equal(data.events.length, 1);
+  assert.equal(data.events[0].type, "session_started");
+  assert.equal(JSON.stringify(data).includes("/c/test-conversation"), false);
 });
 
-test("records only allowlisted numeric metadata, without supplied content", async () => {
+test("rejects unapproved pages, invalid counts and background-originated page events", async () => {
+  const blocked = harness("https://example.org/c/test");
+  assert.equal((await blocked.send({ type: "start", tabId: 9 })).ok, false);
   const h = harness();
+  assert.equal((await h.send({ type: "visibleCounts", user: 3, assistant: 4 }, origin)).ok, false);
   await h.send({ type: "start", tabId: 9 });
-  const response = await h.send({
-    type: "visibleCounts", user: 3, assistant: 2, secret: "DO-NOT-SAVE",
-    url: "https://chatgpt.com/c/private"
-  }, { tab: { id: 9 } });
-  assert.equal(response.ok, true);
-  assert.equal(h.native.at(-1).visibleUser, 3);
-  assert.equal(h.native.at(-1).visibleAssistant, 2);
-  assert.equal(JSON.stringify(h.native).includes("DO-NOT-SAVE"), false);
-  assert.equal(JSON.stringify(h.native).includes("/c/private"), false);
+  assert.equal((await h.send({ type: "visibleCounts", user: "3", assistant: 4 }, origin)).ok, false);
+  assert.equal((await h.send({ type: "visibleCounts", user: 3, assistant: 4 })).ok, false);
+  assert.equal((await exported(h)).events.length, 1);
 });
 
-test("rejects invalid message counts and unapproved tabs", async () => {
+test("counts and tags remain metadata only, with optional workflow categorization", async () => {
   const h = harness();
-  assert.equal((await h.send({
-    type: "visibleCounts", user: 2, assistant: 1
-  }, { tab: { id: 9 } })).ok, false);
   await h.send({ type: "start", tabId: 9 });
-  assert.equal((await h.send({
-    type: "visibleCounts", user: "PRIVATE", assistant: 1
-  }, { tab: { id: 9 } })).ok, false);
-  assert.equal((await h.send({
-    type: "visibleCounts", user: 2, assistant: 10001
-  }, { tab: { id: 9 } })).ok, false);
-  assert.equal(h.native.length, 1);
+  assert.equal((await h.send({ type: "workflowStage", stage: "debugging" }, origin)).ok, false);
+  const counts = await h.send({
+    type: "visibleCounts", user: 3, assistant: 4, codeBlocks: 2,
+    prompt: "PRIVATE CHAT", url: "https://chatgpt.com/c/private"
+  }, origin);
+  assert.equal(counts.ok, true);
+  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: true })).ok, true);
+  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
+  assert.equal((await h.send({ type: "workflowStage", stage: "debugging", prompt: "SECRET" }, origin)).ok, true);
+  assert.equal((await h.send({ type: "workflowStage", stage: "arbitrary" }, origin)).ok, false);
+  const data = await exported(h);
+  assert.deepEqual(data.events.map(x => x.type), ["session_started", "visible_counts", "coding_tag", "workflow_stage"]);
+  assert.equal(data.events.at(-1).stage, "debugging");
+  assert.equal(JSON.stringify(data).includes("PRIVATE"), false);
+  assert.equal(JSON.stringify(data).includes("SECRET"), false);
+  assert.equal(JSON.stringify(data).includes("chatgpt.com/c/"), false);
 });
 
-test("manual stop revokes collection and emits a session end", async () => {
+test("GitHub commit link captures actual public diff without local clone or Windows process", async () => {
+  const h = harness();
+  await enable(h);
+  const reference = { type: "githubCommitReference",
+    repository: "Testerinopapa/gentle-control-room", sha: HASH, assistantText: "PRIVATE" };
+  assert.equal((await h.send(reference, origin)).ok, true);
+  const data = await exported(h);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0].requested,
+    "https://api.github.com/repos/testerinopapa/gentle-control-room/commits/" + HASH);
+  assert.equal(h.requests[0].options.credentials, "omit");
+  assert.equal(data.events.at(-1).type, "github_commit_ref");
+  assert.equal(data.events.at(-1).commitSha, HASH);
+  const commit = data.commits["testerinopapa/gentle-control-room@" + HASH];
+  assert.equal(commit.status, "retrieved");
+  assert.equal(commit.files.length, 1);
+  assert.equal(commit.files[0].path, "src/feature.ts");
+  assert.match(commit.files[0].patch, /\+more/);
+  assert.equal(JSON.stringify(data).includes("PRIVATE"), false);
+  assert.equal(commit.note.includes("unverified"), true);
+  assert.equal((await h.send(reference, origin)).duplicate, true);
+  assert.equal(h.requests.length, 1);
+});
+
+test("workflow analysis consent is required for public GitHub fetches", async () => {
   const h = harness();
   await h.send({ type: "start", tabId: 9 });
-  await h.send({ type: "stop", tabId: 9 });
-  assert.equal(h.native.at(-1).event, "session_ended");
-  assert.equal(h.stored.size, 0);
+  const reference = { type: "githubCommitReference",
+    repository: "Testerinopapa/gentle-control-room", sha: HASH };
+  assert.equal((await h.send(reference, origin)).ok, false);
+  assert.equal(h.requests.length, 0);
+  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
+  assert.equal((await h.send({ ...reference, sha: "bad" }, origin)).ok, false);
+  assert.equal((await h.send({ ...reference, repository: "example.com.evil/a" }, origin)).ok, false);
+  assert.equal(h.requests.length, 0);
+  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false });
+  assert.equal((await h.send(reference, origin)).ok, false);
+});
+
+test("renamed secrets, private keys and risky patches are never retained", async () => {
+  const h = harness(undefined, { sha: HASH, files: [
+    { filename: "src/safe.ts", previous_filename: ".env.local", status: "renamed",
+      additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-x\n+y" },
+    { filename: "src/token.ts", status: "added", additions: 1, deletions: 0,
+      patch: "@@ -0,0 +1 @@\n+sk-ABCDEFGHIJKLMNOPQRSTUVWXabcdefghijklmnop" },
+    { filename: "src/ok.ts", status: "added", additions: 1, deletions: 0,
+      patch: "@@ -0,0 +1 @@\n+ok" }
+  ] });
+  await enable(h);
+  await h.send({ type: "githubCommitReference",
+    repository: "testerinopapa/gentle-control-room", sha: HASH }, origin);
+  const data = await exported(h);
+  const files = data.commits["testerinopapa/gentle-control-room@" + HASH].files;
+  assert.deepEqual(files.map(f => f.path), ["src/ok.ts"]);
+});
+
+test("end recording, page switch, and explicit evidence deletion work without native host", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "githubCommitReference",
+    repository: "testerinopapa/gentle-control-room", sha: HASH }, origin);
+  assert.equal((await h.send({ type: "clearEvidence" })).ok, true);
+  let data = await exported(h);
+  assert.equal(data.events.length, 0);
+  assert.equal(Object.keys(data.commits).length, 0);
+  assert.equal((await h.send({ type: "stop", tabId: 9 })).ok, true);
+  data = await exported(h);
+  assert.equal(data.events.at(-1).type, "session_ended");
   assert.equal(h.badge.at(-1).text, "");
-});
-
-test("conversation change ends approved session", async () => {
-  const h = harness();
-  await h.send({ type: "start", tabId: 9 });
-  await h.send({ type: "conversationChanged" }, { tab: { id: 9 } });
-  assert.equal(h.stored.size, 0);
-  assert.equal(h.native.at(-1).event, "session_ended");
-});
-
-test("does not activate recording on non-ChatGPT origins", async () => {
-  const h = harness("https://example.com/c/demo");
-  const response = await h.send({ type: "start", tabId: 9 });
-  assert.equal(response.ok, false);
-  assert.equal(h.native.length, 0);
-});
-
-test("persistent sidebar has access limited to ChatGPT domains", () => {
-  assert.deepEqual(manifest.host_permissions, [
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*"
-  ]);
-  assert.equal(manifest.host_permissions.length, 2);
-  assert.ok(panelLogic.includes("currentWindow: true"));
-});
-
-test("unavailable tab URL displays a site-permission explanation", async () => {
-  const h = harness(null);
-  const result = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(result.allowed, false);
-  assert.equal(result.active, false);
-  assert.match(result.reason, /site access/i);
-  assert.equal(h.native.length, 0);
-});
-test("Edge action opens the persistent sidebar without granting consent", async () => {
-  assert.equal(manifest.side_panel?.default_path, "sidepanel.html");
-  assert.ok(manifest.permissions.includes("sidePanel"));
-  assert.equal(Object.hasOwn(manifest.action, "default_popup"), false);
-  assert.ok(panelMarkup.includes('src="sidepanel.js"'));
-  assert.ok(panelMarkup.includes('id="start"'));
-  assert.ok(panelMarkup.includes('id="stop"'));
-
-  const h = harness();
-  assert.equal(h.sidePanelBehavior.length, 1);
-  assert.equal(h.sidePanelBehavior[0].openPanelOnActionClick, true);
-  assert.equal(h.native.length, 0, "opening the sidebar must not start collection");
   assert.equal((await h.send({ type: "getState", tabId: 9 })).active, false);
 });
 
-test("approved conversation counts can be displayed without exposing content", async () => {
+test("a navigation away ends approval and rejects further page events", async () => {
   const h = harness();
-  await h.send({ type: "start", tabId: 9 });
-  let state = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(state.active, true);
-  assert.equal(state.visibleUser, null);
-  await h.send({ type: "visibleCounts", user: 6, assistant: 7, privateText: "SECRET" }, { tab: { id: 9 } });
-  state = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(state.visibleUser, 6);
-  assert.equal(state.visibleAssistant, 7);
-  assert.equal(JSON.stringify(state).includes("SECRET"), false);
-  await h.send({ type: "stop", tabId: 9 });
-  state = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(state.active, false);
-  assert.equal(state.visibleUser, null);
-  assert.equal(h.stored.size, 0);
+  await enable(h);
+  h.navigate("https://example.com/");
+  await tick();
+  assert.equal((await h.send({ type: "workflowStage", stage: "testing" }, origin)).ok, false);
+  assert.equal(h.sessions.size, 0);
 });
 
-test("sidebar updates when the active tab changes and has no automatic start", () => {
-  assert.ok(panelLogic.includes("chrome.tabs.onActivated.addListener"));
-  assert.ok(panelLogic.includes('type: "getState"'));
-  assert.ok(panelLogic.includes('type, tabId: selectedTab'));
-  assert.ok(panelLogic.includes('addEventListener("click"'));
-  assert.equal(panelLogic.includes('sendMessage({ type: "start"'), false);
-  assert.ok(!panelMarkup.includes("popup.js"));
-});
-
-test("sidebar controls follow tab switches and retain explicit opt-in", async () => {
-  const dom = new Map();
-  const listeners = new Map();
-  for (const id of ["state", "state-label", "note", "error", "start", "stop",
-    "user-count", "assistant-count", "connection-state", "check-connection",
-    "observer-state", "code-count", "coding-toggle", "coding-hint",
-    "workflow-toggle", "workflow-state"]) {
-    dom.set(id, {
-      dataset: {}, textContent: "", disabled: false, hidden: true,
-      addEventListener(kind, callback) { listeners.set(id + ":" + kind, callback); }
-    });
-  }
-
-  let tabId = 9;
-  let active = false;
-  let tabActivated;
-  let nativeStarts = 0;
-  let lastTimer;
-  const chromeMock = {
-    tabs: {
-      async query() { return [{ id: tabId }]; },
-      onActivated: { addListener(fn) { tabActivated = fn; } },
-      onUpdated: { addListener() {} }
-    },
-    runtime: {
-      async sendMessage(message) {
-        if (message.type === "getState") {
-          return { ok: true, allowed: tabId === 9, active: active && tabId === 9,
-            visibleUser: active && tabId === 9 ? 2 : null,
-            visibleAssistant: active && tabId === 9 ? 3 : null };
-        }
-        if (message.type === "testConnection") {
-          return { ok: true, connected: true };
-        }
-        if (message.type === "start") { active = true; nativeStarts++; return { ok: true }; }
-        if (message.type === "stop") { active = false; return { ok: true }; }
-        throw new Error("Unexpected operation");
-      }
-    }
-  };
-  vm.runInNewContext(panelLogic, {
-    chrome: chromeMock,
-    document: { getElementById(id) { return dom.get(id); } },
-    setInterval(fn) { lastTimer = fn; }
-  }, { filename: "sidepanel.js" });
-  const settle = async () => { await new Promise(resolve => setImmediate(resolve)); };
-  await settle();
-  assert.equal(nativeStarts, 0, "opening the panel must never start collection");
-  assert.equal(dom.get("state-label").textContent, "Off");
-  assert.equal(dom.get("start").disabled, false);
-  listeners.get("check-connection:click")();
-  await settle();
-  assert.equal(nativeStarts, 0, "diagnosing the host must not start tracking");
-  assert.match(dom.get("connection-state").textContent, /Connected/);
-  listeners.get("start:click")();
-  await settle();
-  assert.equal(nativeStarts, 1);
-  assert.equal(dom.get("state-label").textContent, "Recording");
-  assert.equal(dom.get("user-count").textContent, "2");
-  assert.equal(dom.get("assistant-count").textContent, "3");
-
-  tabId = 8;
-  tabActivated();
-  await settle();
-  assert.equal(dom.get("state-label").textContent, "Off");
-  assert.equal(dom.get("start").disabled, true);
-  assert.equal(dom.get("user-count").textContent, "—");
-  assert.equal(typeof lastTimer, "function");
-});
-
-test("modern ChatGPT DOM reports visible role counts without reading messages", async () => {
-  const sent = [];
-  const modern = { user: 2, assistant: 1 };
-  const region = {
-    querySelectorAll(selector) {
-      if (selector.includes("data-user-message-bubble")) return Array(modern.user).fill({});
-      if (selector.includes(":user")) return Array(modern.user).fill({});
-      if (selector.includes(":assistant")) return Array(modern.assistant).fill({});
-      return [];
-    }
-  };
-  let interval;
-  let now = 10000;
-  let mutationConfig;
-  const observer = class {
-    observe(_element, config) { mutationConfig = config; }
-    disconnect() {}
-  };
-  const sentMessage = async (message) => { sent.push(message); return { ok: true }; };
-  const context = {
-    document: {
-      documentElement: {},
-      querySelector(selector) {
-        return selector.includes("data-app-action-timeline-scroll") ? region : null;
-      }
-    },
-    location: { pathname: "/c/approved" },
-    chrome: {
-      runtime: {
-        sendMessage: sentMessage,
-        onMessage: { addListener() {}, removeListener() {} }
-      }
-    },
-    MutationObserver: observer,
-    setInterval(fn) { interval = fn; return 1; },
-    clearInterval() {},
-    setTimeout() { return 10; },
-    clearTimeout() {},
-    Date: { now: () => now }
-  };
-  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.ok(mutationConfig.attributes);
-  assert.ok(mutationConfig.childList);
-  assert.equal(sent.find(x => x.type === "observerStatus")?.detector, "current");
-  assert.deepEqual(
-    { user: sent.find(x => x.type === "visibleCounts")?.user,
-      assistant: sent.find(x => x.type === "visibleCounts")?.assistant },
-    { user: 2, assistant: 1 }
-  );
-  modern.assistant = 2;
-  now += 4000;
-  interval();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(sent.filter(x => x.type === "visibleCounts").at(-1).assistant, 2);
-  assert.ok(!JSON.stringify(sent).includes("approved"),
-    "conversation pathname must never leave the page observer");
-});
-
-test("unknown ChatGPT layout reports unsupported rather than false zero counts", async () => {
-  const sent = [];
-  const context = {
-    document: {
-      documentElement: {},
-      querySelector() { return null; },
-      querySelectorAll() { return []; }
-    },
-    location: { pathname: "/c/approved" },
-    chrome: {
-      runtime: {
-        async sendMessage(m) { sent.push(m); return { ok: true }; },
-        onMessage: { addListener() {}, removeListener() {} }
-      }
-    },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; },
-    clearInterval() {},
-    setTimeout() { return 1; },
-    clearTimeout() {},
-    Date: { now: () => 10000 }
-  };
-  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(sent[0].type, "observerStatus");
-  assert.equal(sent[0].detector, "unsupported");
-  assert.ok(!sent.some(x => x.type === "visibleCounts"));
-});
-
-test("legacy author-role markers remain supported when modern timeline is absent", async () => {
-  const sent = [];
-  const context = {
-    document: {
-      documentElement: {},
-      querySelector() { return null; },
-      querySelectorAll(selector) {
-        if (selector === '[data-message-author-role="user"]') return [{}, {}];
-        if (selector === '[data-message-author-role="assistant"]') return [{}];
-        return [];
-      }
-    },
-    location: { pathname: "/c/approved" },
-    chrome: {
-      runtime: {
-        async sendMessage(m) { sent.push(m); return { ok: true }; },
-        onMessage: { addListener() {}, removeListener() {} }
-      }
-    },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; },
-    clearInterval() {},
-    setTimeout() { return 1; },
-    clearTimeout() {},
-    Date: { now: () => 10000 }
-  };
-  vm.runInNewContext(contentLogic, context, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(sent[0].detector, "legacy");
-  assert.equal(sent.find(x => x.type === "visibleCounts").user, 2);
-  assert.equal(sent.find(x => x.type === "visibleCounts").assistant, 1);
-});
-
-test("page observer status is local-only metadata and is authorized per session", async () => {
-  const h = harness();
-  const before = await h.send({ type: "observerStatus", detector: "current",
-    privateText: "PRIVATE" }, { tab: { id: 9 } });
-  assert.equal(before.ok, false);
-  await h.send({ type: "start", tabId: 9 });
-  const result = await h.send({ type: "observerStatus", detector: "current",
-    privateText: "PRIVATE" }, { tab: { id: 9 } });
-  assert.equal(result.ok, true);
-  const state = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(state.detector, "current");
-  assert.ok(Number.isFinite(state.lastObservedAt));
-  assert.equal(h.native.length, 1,
-    "observer heartbeat must not write additional events to Windows");
-  assert.equal(JSON.stringify(state).includes("PRIVATE"), false);
-  const invalid = await h.send({ type: "observerStatus", detector: "secret-pattern" },
-    { tab: { id: 9 } });
-  assert.equal(invalid.ok, false);
-  const stateAgain = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(stateAgain.detector, "current");
-});
-
-test("code examples and user-tagged coding work remain metadata only", async () => {
-  const h = harness();
-  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: true })).ok, false);
-  await h.send({ type: "start", tabId: 9 });
-  const count = await h.send({
-    type: "visibleCounts", user: 3, assistant: 4, codeBlocks: 2, code: "PRIVATE CODE"
-  }, { tab: { id: 9 } });
-  assert.equal(count.ok, true);
-  assert.equal(h.native.at(-1).visibleCodeBlocks, 2);
-  assert.equal(JSON.stringify(h.native).includes("PRIVATE CODE"), false);
-  assert.equal((await h.send({
-    type: "setCodingTag", tabId: 9, codingMarked: true, title: "PRIVATE TITLE"
-  })).ok, true);
-  let status = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(status.visibleCodeBlocks, 2);
-  assert.equal(status.codingMarked, true);
-  assert.equal(h.native.at(-1).event, "coding_tag");
-  assert.equal(h.native.at(-1).codingMarked, true);
-  assert.equal(JSON.stringify(h.native).includes("PRIVATE TITLE"), false);
-  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: "yes" })).ok, false);
-  assert.equal((await h.send({ type: "setCodingTag", tabId: 9, codingMarked: false })).ok, true);
-  status = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(status.codingMarked, false);
-  assert.equal(h.native.at(-1).codingMarked, false);
-});
-
-test("code block changes trigger a new count even if message totals stay fixed", async () => {
-  const sent = [];
-  const current = { user: 2, assistant: 2, blocks: 1 };
-  let tick;
-  let now = 10000;
-  const region = {
-    querySelectorAll(selector) {
-      if (selector.includes("data-user-message-bubble")) return Array(current.user).fill({});
-      if (selector.includes(":user")) return Array(current.user).fill({});
-      if (selector.includes(":assistant")) return Array(current.assistant).fill({});
-      if (selector === "pre") return Array(current.blocks).fill({});
-      return [];
-    }
-  };
-  vm.runInNewContext(contentLogic, {
-    document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/approved" },
-    chrome: { runtime: {
-      async sendMessage(msg) { sent.push(msg); return { ok: true }; },
-      onMessage: { addListener() {}, removeListener() {} }
-    } },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { tick = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => now }
-  }, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(sent.find(x => x.type === "visibleCounts").codeBlocks, 1);
-  current.blocks = 2;
-  now += 4000;
-  tick();
-  await new Promise(resolve => setImmediate(resolve));
-  const counts = sent.filter(x => x.type === "visibleCounts");
-  assert.equal(counts.length, 2);
-  assert.equal(counts.at(-1).codeBlocks, 2);
-  assert.equal(counts.at(-1).assistant, 2);
-  assert.ok(!JSON.stringify(sent).includes("/c/approved"));
-});
-
-test("workflow classification requires separate explicit consent", async () => {
-  const h = harness();
-  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, false);
-  await h.send({ type: "start", tabId: 9 });
-  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowEnabled, false);
-  assert.equal((await h.send({ type: "workflowStage", stage: "debugging" },
-    { tab: { id: 9 } })).ok, false);
-  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true })).ok, true);
-  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowEnabled, true);
-  assert.equal((await h.send({
-    type: "workflowStage", stage: "debugging",
-    prompt: "PRIVATE-PROMPT", code: "PRIVATE-CODE", url: "PRIVATE-URL"
-  }, { tab: { id: 9 } })).ok, true);
-  assert.equal(h.native.at(-1).event, "workflow_stage");
-  assert.equal(h.native.at(-1).stage, "debugging");
-  assert.equal((await h.send({ type: "getState", tabId: 9 })).workflowStages, 1);
-  assert.ok(!JSON.stringify(h.native).includes("PRIVATE"), "never export message text");
-  assert.equal((await h.send({ type: "workflowStage", stage: "arbitrary" },
-    { tab: { id: 9 } })).ok, false);
-  assert.equal((await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false })).ok, true);
-  assert.equal((await h.send({ type: "workflowStage", stage: "testing" },
-    { tab: { id: 9 } })).ok, false);
-  await h.send({ type: "stop", tabId: 9 });
-  assert.equal(h.stored.size, 0);
-});
-
-test("page never reads user messages unless workflow analysis is enabled", async () => {
-  let reads = 0;
-  const sent = [];
-  const messages = [
-    { get innerText() { reads++; return "Investigate the bug in the app"; } },
-    { get innerText() { reads++; return "Implement the fix"; } },
-    { get innerText() { reads++; return "Run tests"; } }
-  ];
-  const timeline = {
-    querySelectorAll(selector) {
-      if (selector.includes("data-user-message-bubble")) return messages;
-      if (selector.includes(":assistant")) return [{}];
-      return [];
-    }
-  };
-  let listener;
-  let tick;
-  const chromeMock = {
-    runtime: {
-      async sendMessage(message) { sent.push(message); return { ok: true }; },
-      onMessage: { addListener(fn) { listener = fn; }, removeListener() {} }
-    }
-  };
-  vm.runInNewContext(contentLogic, {
-    document: { documentElement: {}, querySelector() { return timeline; } },
-    location: { pathname: "/c/test" }, chrome: chromeMock,
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { tick = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(reads, 0);
-  assert.equal(sent.some(m => m.type === "workflowStage"), false);
-  listener({ type: "gcrWorkflowMode", enabled: true });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(sent.filter(m => m.type === "workflowStage").map(m => m.stage),
-    ["debugging", "implementation", "testing"]);
-  assert.ok(!JSON.stringify(sent).includes("Investigate") &&
-            !JSON.stringify(sent).includes("Implement the fix"));
-  const readsWhenDisabled = reads;
-  listener({ type: "gcrWorkflowMode", enabled: false });
-  messages.push({ get innerText() { reads++; return "Deploy to production"; } });
-  tick();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(reads, readsWhenDisabled,
-    "disabling analysis must immediately stop reading new messages");
-  assert.ok(!sent.some(m => m.stage === "deployment"));
-});
-test("native host health check does not start or save a conversation", async () => {
-  const h = harness();
-  const answer = await h.send({ type: "testConnection" });
-  assert.equal(answer.ok, true);
-  assert.equal(answer.connected, true);
-  assert.equal(h.native.length, 1);
-  assert.equal(h.native[0].event, "health_check");
-  assert.equal(h.native[0].sessionId, undefined);
-  assert.equal(h.stored.size, 0);
-});
-
-test("connection errors explain missing host and keep recording off", async () => {
-  const h = harness("https://chatgpt.com/c/demo",
-    new Error("Specified native messaging host not found."));
-  const ping = await h.send({ type: "testConnection" });
-  assert.equal(ping.ok, false);
-  assert.match(ping.error, /install-host\.ps1/);
-  const start = await h.send({ type: "start", tabId: 9 });
-  assert.equal(start.ok, false);
-  assert.match(start.error, /install-host\.ps1/);
-  assert.equal(h.stored.size, 0);
-});
-
-test("sidebar exposes independent Windows connection diagnostics", () => {
-  assert.ok(panelMarkup.includes('id="check-connection"'));
-  assert.ok(panelMarkup.includes('id="connection-state"'));
-  assert.ok(panelLogic.includes('type: "testConnection"'));
-  assert.ok(panelLogic.includes('checkButton.addEventListener("click"'));
-});
-
-
-test("GitHub commit references require workflow consent and are deduplicated", async () => {
-  const h = harness();
-  const sender = { tab: { id: 9 } };
-  const commit = {
-    type: "githubCommitReference", repository: "Testerinopapa/gentle-control-room",
-    sha: "28de267f6353f99977c5185080f5573a45ab12de",
-    prompt: "PRIVATE TEXT", code: "PRIVATE SOURCE"
-  };
-  assert.equal((await h.send(commit, sender)).ok, false);
-  await h.send({ type: "start", tabId: 9 });
-  assert.equal((await h.send(commit, sender)).ok, false);
-  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
-  assert.equal((await h.send(commit, sender)).ok, true);
-  assert.equal(h.native.at(-1).event, "github_commit_ref");
-  assert.equal(h.native.at(-1).repository, "testerinopapa/gentle-control-room");
-  assert.equal(h.native.at(-1).commitSha, commit.sha);
-  assert.ok(!JSON.stringify(h.native).includes("PRIVATE"));
-  const calls = h.native.length;
-  assert.equal((await h.send(commit, sender)).ok, true);
-  assert.equal(h.native.length, calls, "same commit must not be sent twice");
-  assert.equal((await h.send({ ...commit, repository: "github.com.evil.invalid/a/b" }, sender)).ok, false);
-  assert.equal((await h.send({ ...commit, sha: "not-a-sha" }, sender)).ok, false);
-  assert.equal(h.native.length, calls);
-  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false });
-  assert.equal((await h.send(commit, sender)).ok, false);
-});
-
-test("assistant GitHub links are read only after explicit workflow opt-in", async () => {
-  const messages = [];
-  const valid = "https://github.com/Testerinopapa/gentle-control-room/commit/28de267f6353f99977c5185080f5573a45ab12de";
-  let hrefReads = 0;
-  const anchor = (href) => ({
-    getAttribute(name) {
-      assert.equal(name, "href");
-      hrefReads++;
-      return href;
-    }
-  });
-  const assistant = {
-    querySelectorAll(query) {
-      assert.equal(query, "a[href]");
-      return [anchor(valid), anchor("https://evil.invalid/a/b/commit/" +
-        "28de267f6353f99977c5185080f5573a45ab12de")];
-    }
-  };
-  const region = {
-    querySelectorAll(query) {
-      if (query.includes(":assistant")) return [assistant];
-      return [];
-    }
-  };
-  let onCommand;
-  vm.runInNewContext(contentLogic, {
-    document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/test" }, URL,
-    chrome: { runtime: {
-      async sendMessage(message) { messages.push(message); return { ok: true }; },
-      onMessage: { addListener(fn) { onCommand = fn; }, removeListener() {} }
-    } },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(hrefReads, 0, "normal recording must not inspect assistant links");
-  onCommand({ type: "gcrWorkflowMode", enabled: true });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(messages.filter(x => x.type === "githubCommitReference").length, 1);
-  assert.equal(messages.find(x => x.type === "githubCommitReference").repository,
-    "testerinopapa/gentle-control-room");
-  assert.ok(!JSON.stringify(messages).includes("evil.invalid"));
-  assert.ok(!JSON.stringify(messages).includes("/c/test"));
-});
-
-
-test("commit link detector falls back to assistant role in modern timeline", async () => {
-  const sent = [];
-  const commit = "https://github.com/Testerinopapa/gentle-control-room/commit/3d3812a0aade7b5e7c661741054184fd09886613";
-  const anchor = (href) => ({ getAttribute(name) { assert.equal(name, "href"); return href; } });
-  const assistant = {
-    querySelectorAll(selector) {
-      assert.equal(selector, "a[href]");
-      return [anchor(commit)];
-    }
-  };
-  const user = {
-    innerText: "Please check this commit",
-    querySelectorAll() { throw new Error("User links must never be scanned"); }
-  };
-  const region = {
-    querySelectorAll(selector) {
-      if (selector === '[data-content-search-unit-key$=":assistant"]') return [];
-      if (selector === '[data-message-author-role="assistant"]') return [assistant];
-      if (selector === '[data-user-message-bubble="true"]') return [user];
-      return [];
-    }
-  };
+test("content observer reports only categories and GitHub commit identifiers", async () => {
+  const seen = [], message = { innerText: "Fix this issue, then test it." };
+  const link = { getAttribute: () => COMMIT };
+  const assistant = { querySelectorAll: () => [link] };
   let command;
-  vm.runInNewContext(contentLogic, {
-    document: {
-      documentElement: {},
-      querySelector(selector) { return selector.includes("data-app-action-timeline-scroll") ? region : null; }
-    },
-    location: { pathname: "/c/current" }, URL,
-    chrome: { runtime: {
-      async sendMessage(message) { sent.push(message); return { ok: true }; },
-      onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
-    } },
+  const region = {
+    querySelectorAll(selector) {
+      if (selector.includes("data-user-message-bubble")) return [message];
+      if (selector.includes(":assistant")) return [assistant];
+      if (selector.includes(":user")) return [];
+      if (selector === "pre") return [];
+      return [];
+    }
+  };
+  const chrome = { runtime: {
+    async sendMessage(m) { seen.push(m); return { ok: true }; },
+    onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
+  } };
+  vm.runInNewContext(content, {
+    URL, document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/test" }, chrome,
     MutationObserver: class { observe() {} disconnect() {} },
     setInterval() { return 1; }, clearInterval() {},
     setTimeout() { return 1; }, clearTimeout() {},
     Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(sent.some(m => m.type === "githubCommitReference"), false);
+  });
+  await tick();
+  assert.equal(seen.some(e => e.type === "githubCommitReference"), false);
   command({ type: "gcrWorkflowMode", enabled: true });
-  await new Promise(resolve => setImmediate(resolve));
-  const refs = sent.filter(m => m.type === "githubCommitReference");
-  assert.equal(refs.length, 1);
-  assert.equal(refs[0].repository, "testerinopapa/gentle-control-room");
-  assert.equal(refs[0].sha, "3d3812a0aade7b5e7c661741054184fd09886613");
-  assert.ok(!JSON.stringify(sent).includes("/c/current"));
+  await tick();
+  assert.equal(seen.find(e => e.type === "workflowStage").stage, "debugging");
+  assert.equal(seen.find(e => e.type === "githubCommitReference").sha, HASH);
+  assert.ok(!JSON.stringify(seen).includes("Fix this issue"));
+  assert.ok(!JSON.stringify(seen).includes("/c/test"));
 });
