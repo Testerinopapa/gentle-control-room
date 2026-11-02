@@ -634,3 +634,53 @@ test("assistant GitHub links are read only after explicit workflow opt-in", asyn
   assert.ok(!JSON.stringify(messages).includes("evil.invalid"));
   assert.ok(!JSON.stringify(messages).includes("/c/test"));
 });
+
+
+test("commit link detector falls back to assistant role in modern timeline", async () => {
+  const sent = [];
+  const commit = "https://github.com/Testerinopapa/gentle-control-room/commit/3d3812a0aade7b5e7c661741054184fd09886613";
+  const anchor = (href) => ({ getAttribute(name) { assert.equal(name, "href"); return href; } });
+  const assistant = {
+    querySelectorAll(selector) {
+      assert.equal(selector, "a[href]");
+      return [anchor(commit)];
+    }
+  };
+  const user = {
+    innerText: "Please check this commit",
+    querySelectorAll() { throw new Error("User links must never be scanned"); }
+  };
+  const region = {
+    querySelectorAll(selector) {
+      if (selector === '[data-content-search-unit-key$=":assistant"]') return [];
+      if (selector === '[data-message-author-role="assistant"]') return [assistant];
+      if (selector === '[data-user-message-bubble="true"]') return [user];
+      return [];
+    }
+  };
+  let command;
+  vm.runInNewContext(contentLogic, {
+    document: {
+      documentElement: {},
+      querySelector(selector) { return selector.includes("data-app-action-timeline-scroll") ? region : null; }
+    },
+    location: { pathname: "/c/current" }, URL,
+    chrome: { runtime: {
+      async sendMessage(message) { sent.push(message); return { ok: true }; },
+      onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.some(m => m.type === "githubCommitReference"), false);
+  command({ type: "gcrWorkflowMode", enabled: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const refs = sent.filter(m => m.type === "githubCommitReference");
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].repository, "testerinopapa/gentle-control-room");
+  assert.equal(refs[0].sha, "3d3812a0aade7b5e7c661741054184fd09886613");
+  assert.ok(!JSON.stringify(sent).includes("/c/current"));
+});
