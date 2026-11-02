@@ -173,6 +173,30 @@ async function start(tabId) {
     throw Error("Cannot observe this tab. Reload ChatGPT and start again.");
   }
 }
+async function recordCommit(tabId, session, repository, sha, discovery) {
+  const key = repository + "@" + sha;
+  if ((session.commitRefs || []).includes(key)) return { ok: true, duplicate: true };
+  if ((session.commitRefs || []).length >= 30) return { ok: false };
+  const current = await getSession(tabId);
+  if (!current || current.id !== session.id || !current.workflowEnabled) return { ok: false };
+  // Capture deletion generation before an asynchronous GitHub request.
+  const clearGeneration = (await readEvidence()).clearGeneration || 0;
+  await event(session.id, "github_commit_ref", { repository, commitSha: sha, discovery });
+  const next = await getSession(tabId);
+  if (!next || next.id !== session.id || !next.workflowEnabled) return { ok: false };
+  await chrome.storage.session.set({ [KEY(tabId)]: { ...next,
+    commitRefs: [...(next.commitRefs || []), key] } });
+  await collectCommit(repository, sha, session.id, clearGeneration);
+  return { ok: true };
+}
+function parseCommitUrl(input) {
+  if (typeof input !== "string" || input.length > 300) return null;
+  let url;
+  try { url = new URL(input.trim()); } catch { return null; }
+  if (url.origin !== "https://github.com" || url.search || url.hash) return null;
+  const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
+  return match ? { repository: (match[1] + "/" + match[2]).toLowerCase(), sha: match[3].toLowerCase() } : null;
+}
 async function fromPage(message, sender) {
   const tabId = sender.tab?.id;
   if (!Number.isInteger(tabId)) return { ok: false };
@@ -207,19 +231,7 @@ async function fromPage(message, sender) {
         typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
         !COMMIT_SHA.test(message.sha)) return { ok: false };
     const repository = message.repository.toLowerCase(), sha = message.sha.toLowerCase();
-    const key = repository + "@" + sha;
-    if (session.commitRefs.includes(key)) return { ok: true, duplicate: true };
-    if (session.commitRefs.length >= 30) return { ok: false };
-    // Capture the deletion generation before writing the reference. The
-    // subsequent asynchronous GitHub fetch cannot outlive a user deletion.
-    const clearGeneration = (await readEvidence()).clearGeneration || 0;
-    await event(session.id, "github_commit_ref", { repository, commitSha: sha });
-    const current = await getSession(tabId);
-    if (!current || current.id !== session.id || !current.workflowEnabled) return { ok: false };
-    await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
-      commitRefs: [...current.commitRefs, key] } });
-    await collectCommit(repository, sha, session.id, clearGeneration);
-    return { ok: true };
+    return recordCommit(tabId, session, repository, sha, "assistant");
   }
   if (message.type === "visibleCounts") {
     if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
@@ -246,6 +258,19 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (["visibleCounts", "conversationChanged", "observerStatus",
       "workflowStage", "githubCommitReference"].includes(message.type))
       return fromPage(message, sender);
+    if (message.type === "importCommitUrl") {
+      // Only the extension's own side panel may invoke manual import.
+      if (sender.tab) return { ok: false };
+      const tabId = message.tabId;
+      if (!Number.isInteger(tabId)) return { ok: false };
+      const session = await getSession(tabId);
+      const tab = await chrome.tabs.get(tabId);
+      if (!session?.workflowEnabled || !eligible(tab.url) ||
+          session.page !== new URL(tab.url).pathname) return { ok: false };
+      const commit = parseCommitUrl(message.url);
+      if (!commit) return { ok: false, error: "Provide a full GitHub commit URL containing a 40-character SHA." };
+      return recordCommit(tabId, session, commit.repository, commit.sha, "manual");
+    }
     if (message.type === "exportEvidence") {
       const data = await readEvidence();
       return { ok: true, data: { ...bounded(data), exportedAt: new Date().toISOString(),
