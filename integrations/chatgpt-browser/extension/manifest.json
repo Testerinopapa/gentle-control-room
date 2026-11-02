@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.6.1",
-  "description": "Standalone opt-in ChatGPT coding activity and GitHub commit evidence saved privately in Edge.",
+  "version": "0.7.0",
+  "description": "Opt-in local coding evidence, task grouping and recurring workflow pattern analysis.",
   "permissions": [
     "activeTab",
     "scripting",
