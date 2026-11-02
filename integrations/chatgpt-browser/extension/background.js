@@ -116,8 +116,17 @@ async function fetchCommit(repository, sha) {
       files.push({ path, previousPath: old, status: file.status,
         additions: file.additions, deletions: file.deletions, patch });
     }
-    return { status: "retrieved", files, changedFiles: json.files.length,
-      note: "A commit link was seen in an assistant message. Authorship, tests and outcome are unverified." };
+    // A public commit can contain only binary files, sensitive paths, or
+    // omitted GitHub patch hunks. Do not claim code evidence was retrieved
+    // when no safe textual diff can actually be exported.
+    return {
+      status: files.length ? "retrieved" : "metadata_only",
+      files,
+      changedFiles: json.files.length,
+      note: files.length
+        ? "A commit link was seen in an assistant message. Authorship, tests and outcome are unverified."
+        : "Commit metadata was retrieved, but no safe textual patches were available. Authorship, tests and outcome are unverified."
+    };
   } finally { clearTimeout(timeout); }
 }
 async function collectCommit(repository, sha, sessionId, clearGeneration) {
