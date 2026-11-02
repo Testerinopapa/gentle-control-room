@@ -13,7 +13,7 @@ const HASH = "3d3812a0aade7b5e7c661741054184fd09886613";
 const COMMIT = "https://github.com/Testerinopapa/gentle-control-room/commit/" + HASH;
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse = null) {
+function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse = null, fetchOverride = null) {
   const sessions = new Map(), local = new Map(), badge = [], requests = [], pageCommands = [];
   let listener, tabUpdated, tabRemoved, currentUrl = url;
   const record = commitResponse || {
@@ -56,6 +56,7 @@ function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse
   };
   const fetch = async (requested, options) => {
     requests.push({ requested, options });
+    if (fetchOverride) return fetchOverride(requested, options);
     return {
       ok: true, status: 200,
       headers: { get() { return null; } },
@@ -216,6 +217,39 @@ test("end recording, page switch, and explicit evidence deletion work without na
   assert.equal(data.events.at(-1).type, "session_ended");
   assert.equal(h.badge.at(-1).text, "");
   assert.equal((await h.send({ type: "getState", tabId: 9 })).active, false);
+});
+
+test("deleting evidence prevents an in-flight GitHub patch from returning", async () => {
+  let releaseResponse;
+  const delayedResponse = new Promise(resolve => { releaseResponse = resolve; });
+  const h = harness(undefined, null, () => delayedResponse);
+  await enable(h);
+
+  const pending = h.send({
+    type: "githubCommitReference",
+    repository: "testerinopapa/gentle-control-room", sha: HASH
+  }, origin);
+  for (let i = 0; i < 30 && h.requests.length === 0; i++) await tick();
+  assert.equal(h.requests.length, 1, "the GitHub fetch must already be in progress");
+  assert.equal((await h.send({ type: "clearEvidence" })).ok, true);
+  const cleared = await exported(h);
+  assert.equal(cleared.events.length, 0);
+  assert.equal(Object.keys(cleared.commits).length, 0);
+
+  releaseResponse({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: HASH,
+      files: [{ filename: "src/late.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+late" }]
+    })
+  });
+  assert.equal((await pending).ok, true);
+  const after = await exported(h);
+  assert.equal(after.events.length, 0);
+  assert.equal(Object.keys(after.commits).length, 0,
+    "cleared evidence must stay deleted after an already-started fetch finishes");
+  assert.equal(after.clearGeneration, cleared.clearGeneration);
 });
 
 test("a navigation away ends approval and rejects further page events", async () => {
