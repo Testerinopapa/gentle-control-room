@@ -130,6 +130,8 @@ test("starts locally without a host and stores minimal session metadata", async 
   assert.deepEqual(Array.from(data.events, e => e.type), ["session_started", "coding_tag"]);
   assert.equal(data.events[1].codingMarked, true);
   assert.equal(data.events[1].method, "automatic_on_start");
+  assert.equal(data.analysis.tasks.length, 0,
+    "automatic coding tagging alone must not invent a coding task");
   assert.equal(JSON.stringify(data).includes("/c/test-conversation"), false);
 });
 
