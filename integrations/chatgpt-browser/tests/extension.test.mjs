@@ -707,3 +707,49 @@ test('a previously visible commit repeated in a new response cannot become autom
   assert.ok(data.analysis.unattributedCommits.every(ref => ref.state === 'historical'));
   assert.equal(h.requests.length, 0);
 });
+
+
+test("analysis export diagnoses automatic versus manual capture and patch availability", () => {
+  const h = harness();
+  const repo = "testerinopapa/gentle-control-room";
+  const alternate = ["a", "b", "c", "d"].map(x => x.repeat(40));
+  const now = "2026-11-02T15:00:00Z";
+  const commit = (sha, discovery, state) => ({
+    sessionId: "session-diagnostics",
+    timestamp: now, type: "github_commit_ref",
+    repository: repo, commitSha: sha, discovery, attribution: { state }
+  });
+  const events = [
+    commit(HASH, "assistant", "automatic"),
+    commit(HASH, "manual", "unattributed"),
+    commit(alternate[0], "assistant", "historical"),
+    commit(alternate[1], "manual", "unattributed"),
+    commit(alternate[2], "assistant", "automatic"),
+    commit(alternate[3], "assistant", "unattributed")
+  ];
+  const commits = {
+    [repo + "@" + HASH]: {
+      status: "retrieved",
+      files: [{ path: "src/test.ts", patch: "@@ -1 +1 @@\\n-old\\n+new" }]
+    },
+    [repo + "@" + alternate[1]]: { status: "metadata_only", files: [] },
+    [repo + "@" + alternate[2]]: { status: "unavailable", files: [] }
+  };
+  const data = h.analyze({ events, commits });
+  const diagnostic = data.captureDiagnostics;
+  assert.equal(data.version, 2);
+  assert.equal(diagnostic.observedReferenceEvents, 6);
+  assert.equal(diagnostic.distinctNonhistoricalReferencedCommits, 4);
+  assert.equal(diagnostic.distinctHistoricalReferencedCommits, 1);
+  assert.equal(diagnostic.discovery.assistant, 4);
+  assert.equal(diagnostic.discovery.manual, 2);
+  assert.equal(diagnostic.attribution.automatic, 2);
+  assert.equal(diagnostic.attribution.unattributed, 3);
+  assert.equal(diagnostic.attribution.historical, 1);
+  assert.equal(diagnostic.retrieval.withTextPatches, 1);
+  assert.equal(diagnostic.retrieval.metadataOnly, 1);
+  assert.equal(diagnostic.retrieval.unavailable, 1);
+  assert.equal(diagnostic.retrieval.notCached, 1);
+  assert.ok(!JSON.stringify(diagnostic).includes("src/test.ts"),
+    "diagnostics must not duplicate code or paths");
+});
