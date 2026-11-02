@@ -262,3 +262,38 @@ test("content observer reports only categories and GitHub commit identifiers", a
   assert.ok(!JSON.stringify(seen).includes("Fix the issue"));
   assert.ok(!JSON.stringify(seen).includes("/c/test"));
 });
+
+
+test("GitHub capture does not require recognized message-count markup", async () => {
+  const sent = [];
+  let enable;
+  const assistant = { querySelectorAll(selector) {
+    return selector === "a[href]" ? [{ getAttribute: () => COMMIT }] : [];
+  } };
+  const user = { innerText: "Fix the issue" };
+  const region = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role="assistant"]') return [assistant];
+      if (selector === '[data-message-author-role="user"]') return [user];
+      return [];
+    }
+  };
+  vm.runInNewContext(content, {
+    URL, document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/approved" },
+    chrome: { runtime: {
+      async sendMessage(message) { sent.push(message); return { ok: true }; },
+      onMessage: { addListener(fn) { enable = fn; }, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await tick();
+  assert.equal(sent.find(m => m.type === "observerStatus").detector, "waiting");
+  enable({ type: "gcrWorkflowMode", enabled: true });
+  await tick();
+  assert.equal(sent.find(m => m.type === "githubCommitReference").sha, HASH);
+  assert.equal(sent.find(m => m.type === "workflowStage").stage, "debugging");
+});
