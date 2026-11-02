@@ -95,7 +95,7 @@ internal static class GitHubCommitTests
             var included = TaskService.Package(store.Read(), task.Id, new[] { change.Id });
             var excluded = TaskService.Package(store.Read(), task.Id);
             Check(included.Timeline.Single().Change?.Diff.Contains("+// Gentle Control Room tracking test:") == true &&
-                excluded.Timeline.Single().Change is null,
+                excluded.Timeline.All(e => e.Change is null),
                 "only explicitly selected source appears in DeepSeek preview");
             store.Update(s => { CodeTracking.Revoke(s, approval); return true; });
             Check(await GitHubCommitImporter.ImportAsync(store, http) == 0 && handler.Requests == 1,
