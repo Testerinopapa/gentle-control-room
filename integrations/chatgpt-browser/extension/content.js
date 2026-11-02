@@ -31,10 +31,23 @@
   async function scanCommitLinks() {
     if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) return;
     const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
-    const units = region
-      ? region.querySelectorAll('[data-content-search-unit-key$=":assistant"]')
-      : document.querySelectorAll('[data-message-author-role="assistant"]');
-    for (const unit of Array.from(units).slice(-120)) {
+    const root = region || document;
+    // ChatGPT can render its modern timeline without content-search-unit keys.
+    // Try known assistant wrappers in order, always scoped to the active timeline
+    // when present. Never inspect user-authored links.
+    const assistantSelectors = [
+      '[data-content-search-unit-key$=":assistant"]',
+      '[data-message-author-role="assistant"]',
+      'article[data-turn="assistant"]',
+      '[data-role="assistant"]',
+      '[data-message-author="assistant"]'
+    ];
+    let units = [];
+    for (const selector of assistantSelectors) {
+      units = Array.from(root.querySelectorAll(selector));
+      if (units.length) break;
+    }
+    for (const unit of units.slice(-120)) {
       if (!workflowEnabled || stopped) break;
       if (typeof unit.querySelectorAll !== "function") continue;
       for (const anchor of Array.from(unit.querySelectorAll('a[href]')).slice(0, 30)) {
