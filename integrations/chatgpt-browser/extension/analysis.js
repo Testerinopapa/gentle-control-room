@@ -170,7 +170,51 @@
       }
       retrievedWithPatches++;
     }
+    // A session can successfully record visible counts but never observe a
+    // new coding request. Report that absence explicitly rather than treating
+    // the automatic session tag as proof of workflow capture.
+    const startedSessions = new Set();
+    const sessionsWithWorkflowEvidence = new Set();
+    const sessionsWithRequestBoundaries = new Set();
+    const workflow = {
+      sessionsStarted: 0,
+      sessionsWithRequestBoundaries: 0,
+      sessionsWithoutWorkflowEvidence: 0,
+      requestBoundaries: 0,
+      assistantResponses: 0,
+      workflowStageEvents: 0,
+      visibleCountUpdates: 0,
+      automaticCodingTags: 0
+    };
+    for (const entry of events) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = typeof entry.sessionId === "string" && SESSION_RE.test(entry.sessionId)
+        ? entry.sessionId : null;
+      if (entry.type === "visible_counts") workflow.visibleCountUpdates++;
+      if (entry.type === "coding_tag" && entry.method === "automatic_on_start" &&
+          entry.codingMarked === true) workflow.automaticCodingTags++;
+      if (entry.type === "session_started" && id) startedSessions.add(id);
+      if (entry.type === "request_boundary") {
+        workflow.requestBoundaries++;
+        if (id) sessionsWithRequestBoundaries.add(id);
+      }
+      if (entry.type === "assistant_response") workflow.assistantResponses++;
+      if (entry.type === "workflow_stage" && STAGES.has(entry.stage))
+        workflow.workflowStageEvents++;
+      if (id && (entry.type === "request_boundary" ||
+          entry.type === "assistant_response" ||
+          (entry.type === "workflow_stage" && STAGES.has(entry.stage)) ||
+          entry.type === "github_commit_ref"))
+        sessionsWithWorkflowEvidence.add(id);
+    }
+    workflow.sessionsStarted = startedSessions.size;
+    workflow.sessionsWithRequestBoundaries = [...startedSessions]
+      .filter(id => sessionsWithRequestBoundaries.has(id)).length;
+    workflow.sessionsWithoutWorkflowEvidence = [...startedSessions]
+      .filter(id => !sessionsWithWorkflowEvidence.has(id)).length;
+
     return {
+      workflow,
       observedReferenceEvents: refs.length,
       distinctNonhistoricalReferencedCommits: eligibleKeys.size,
       distinctHistoricalReferencedCommits: historicalKeys.size,
