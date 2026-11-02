@@ -182,19 +182,27 @@ async function start(tabId) {
   if (!eligible(tab.url)) throw Error("Open a ChatGPT conversation before starting recording.");
   if (await getSession(tabId)) return;
   const id = crypto.randomUUID();
+  // Start is the single explicit opt-in: tagging and local workflow analysis
+  // are enabled together, without requiring two additional panel toggles.
   await event(id, "session_started");
+  await event(id, "coding_tag", { codingMarked: true, method: "automatic_on_start" });
   await chrome.storage.session.set({ [KEY(tabId)]: {
     id, page: new URL(tab.url).pathname,
     visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
-    codingMarked: false, workflowEnabled: false, workflowStages: 0, commitRefs: [],
+    codingMarked: true, workflowEnabled: true, consentEpoch: 1,
+    workflowStages: 0, commitRefs: [],
     detector: null, lastObservedAt: null, lastCountAt: null
   } });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#166534" });
   await chrome.action.setBadgeText({ tabId, text: "ON" });
-  try { await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }); }
-  catch {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    // The content observer initially runs in metadata-only mode. Explicitly
+    // enable the bounded text classification/commit observer once installed.
+    await chrome.tabs.sendMessage(tabId, { type: "gcrWorkflowMode", enabled: true });
+  } catch {
     await stop(tabId);
-    throw Error("Cannot observe this tab. Reload ChatGPT and start again.");
+    throw Error("Cannot enable the ChatGPT observer. Reload the page and start recording again.");
   }
 }
 async function recordCommit(tabId, session, repository, sha, discovery, details = {}) {
