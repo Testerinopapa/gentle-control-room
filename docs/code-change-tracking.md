@@ -88,10 +88,13 @@ to observed verification.
 
 ## Exactness, safety, and limits
 
-- Tracking reads only approved repository roots. No disk scan or automatic task
-  discovery exists. No hooks, project commands, Git mutations or network fetches
-  are run by observation. Git external diff/text-conversion helpers and fsmonitor
-  are disabled; literal pathspecs avoid treating filenames as patterns.
+- Local Git snapshots read only approved repository roots and do not fetch from
+  the network. Separately, an opted-in ChatGPT assistant commit link can cause a
+  read-only HTTPS request to GitHub's public commit API, but only when that repo
+  matches an approved local Git origin. See [browser-linked GitHub evidence](browser-github-implementation-pipeline.md).
+  No disk scan, automatic task discovery, project commands, hooks or Git mutations
+  are performed. Git external diff/text-conversion helpers and fsmonitor are
+  disabled; literal pathspecs avoid treating filenames as patterns.
 - Standard local repositories are supported, including an initially unborn HEAD.
   Linked worktrees/submodules, network roots, reparse-point paths/symlinks,
   alternate object stores, partial clones and repositories with locally configured
