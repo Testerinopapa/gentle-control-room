@@ -450,6 +450,11 @@ test("JSON export groups stage/commit evidence into a session-scoped coding epis
   assert.equal(tasks[0].commitReferences[0].retrieval, "retrieved");
   assert.equal(tasks[0].commitReferences[0].filesWithCapturedPatches[0].path, "src/feature.ts");
   assert.equal(tasks[0].evidence.retrievedCommitPatches, 1);
+  assert.equal(tasks[0].evidence.reportedLineChanges.additions, 2);
+  assert.equal(tasks[0].evidence.reportedLineChanges.deletions, 1);
+  assert.equal(tasks[0].evidence.reportedLineChanges.total, 3);
+  assert.equal(tasks[0].evidence.reportedLineChanges.scope,
+    "github_file_counts_for_retained_text_patches");
   assert.equal(tasks[0].evidence.testExecution, "not_verified");
   assert.equal(tasks[0].evidence.testsPassed, "unknown");
   assert.equal(exportedData.analysis.patterns.length, 0,
@@ -503,6 +508,37 @@ test("recurrence requires distinct coding episodes with supporting evidence", ()
   assert.ok(analysis.tasks.every(x => x.evidence.testsPassed === "unknown"));
   assert.ok(!JSON.stringify(analysis).includes("+second"),
     "analysis should link to patches rather than duplicating their source content");
+});
+
+test("line-change totals exclude files without saved patches and duplicate references", () => {
+  const h = harness();
+  const sessionId = "session-line-totals";
+  const sha = HASH;
+  const events = [
+    { timestamp: "2026-11-02T11:00:00Z", sessionId, type: "github_commit_ref",
+      repository: "testerinopapa/gentle-control-room", commitSha: sha },
+    { timestamp: "2026-11-02T11:02:00Z", sessionId, type: "github_commit_ref",
+      repository: "testerinopapa/gentle-control-room", commitSha: sha }
+  ];
+  const commits = { ["testerinopapa/gentle-control-room@" + sha]: {
+    repository: "testerinopapa/gentle-control-room", sha, status: "retrieved",
+    changedFiles: 3,
+    files: [
+      { path: "src/a.ts", additions: 5, deletions: 2, patch: "@@ -1 +1 @@\\n-old\\n+new" },
+      { path: "src/b.ts", additions: 3, deletions: 1, patch: "@@ -1 +1 @@\\n-before\\n+after" },
+      { path: "src/excluded.ts", additions: 100, deletions: 50 }
+    ]
+  } };
+  const analysis = h.analyze({ events, commits });
+  assert.equal(analysis.tasks.length, 1);
+  const task = analysis.tasks[0];
+  assert.equal(task.commitReferences.length, 1);
+  assert.equal(task.evidence.capturedChangedFiles, 2);
+  assert.equal(task.evidence.reportedLineChanges.additions, 8);
+  assert.equal(task.evidence.reportedLineChanges.deletions, 3);
+  assert.equal(task.evidence.reportedLineChanges.total, 11);
+  assert.match(task.evidence.reportedLineChanges.note, /not work effort/);
+  assert.equal(analysis.patterns.length, 0);
 });
 
 test("one commit referenced twice is not evidence of recurring file edits", () => {
