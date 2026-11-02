@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace GentleControlRoom.ChatGPTHost;
 
@@ -40,6 +41,12 @@ internal static class Program
         {
           return 1;
         }
+        var commitRef = ParseEvent("""{"version":1,"event":"github_commit_ref","sessionId":"123e4567-e89b-42d3-a456-426614174000","repository":"testerinopapa/gentle-control-room","commitSha":"28de267f6353f99977c5185080f5573a45ab12de","prompt":"DO-NOT-COPY"}""");
+        if (commitRef?.Repository != "testerinopapa/gentle-control-room" ||
+            commitRef?.CommitSha != "28de267f6353f99977c5185080f5573a45ab12de" ||
+            JsonSerializer.Serialize(commitRef).Contains("DO-NOT-COPY", StringComparison.Ordinal) ||
+            ParseEvent("""{"version":1,"event":"github_commit_ref","sessionId":"123e4567-e89b-42d3-a456-426614174000","repository":"other/secret","commitSha":"nope"}""") is not null)
+          return 1;
         return 0;
       }
 
@@ -142,7 +149,7 @@ internal static class Program
 
   internal readonly record struct BrowserEvent(
     string EventType, string Session, int? VisibleUser, int? VisibleAssistant,
-    int? VisibleCodeBlocks, bool? CodingMarked, string? WorkflowStage);
+    int? VisibleCodeBlocks, bool? CodingMarked, string? WorkflowStage, string? Repository, string? CommitSha);
 
   internal static BrowserEvent? ParseEvent(string raw)
   {
@@ -156,7 +163,7 @@ internal static class Program
       if (!root.TryGetProperty("event", out var kind) || kind.ValueKind != JsonValueKind.String)
         return null;
       var name = kind.GetString();
-      if (name is not ("session_started" or "visible_counts" or "session_ended" or "coding_tag" or "workflow_stage")) return null;
+      if (name is not ("session_started" or "visible_counts" or "session_ended" or "coding_tag" or "workflow_stage" or "github_commit_ref")) return null;
       if (!root.TryGetProperty("sessionId", out var token) ||
           token.ValueKind != JsonValueKind.String ||
           !Guid.TryParseExact(token.GetString(), "D", out var session))
@@ -167,6 +174,8 @@ internal static class Program
       int? codeBlocks = null;
       bool? codingMarked = null;
       string? workflowStage = null;
+      string? repository = null;
+      string? commitSha = null;
       if (name == "visible_counts")
       {
         if (!root.TryGetProperty("visibleUser", out var userProp) ||
@@ -203,9 +212,23 @@ internal static class Program
             "debugging" or "testing" or "version_control" or "deployment"))
           return null;
       }
+      if (name == "github_commit_ref")
+      {
+        if (!root.TryGetProperty("repository", out var repo) || repo.ValueKind != JsonValueKind.String ||
+            !root.TryGetProperty("commitSha", out var sha) || sha.ValueKind != JsonValueKind.String)
+          return null;
+        repository = repo.GetString();
+        commitSha = sha.GetString();
+        if (repository is null || commitSha is null ||
+            !Regex.IsMatch(repository, @"^[a-z0-9-]{1,39}/[a-z0-9_.-]{1,100}$", RegexOptions.IgnoreCase) ||
+            !Regex.IsMatch(commitSha, @"^[a-f0-9]{40}$", RegexOptions.IgnoreCase))
+          return null;
+        repository = repository.ToLowerInvariant();
+        commitSha = commitSha.ToLowerInvariant();
+      }
       // Reconstruct from allowlisted fields only. Raw page text is discarded.
       return new BrowserEvent(name!, session.ToString("D"), user, assistant,
-        codeBlocks, codingMarked, workflowStage);
+        codeBlocks, codingMarked, workflowStage, repository, commitSha);
     }
     catch (Exception)
     {
@@ -231,7 +254,9 @@ internal static class Program
       visibleAssistant = record.VisibleAssistant,
       visibleCodeBlocks = record.VisibleCodeBlocks,
       codingMarked = record.CodingMarked,
-      workflowStage = record.WorkflowStage
+      workflowStage = record.WorkflowStage,
+      repository = record.Repository,
+      commitSha = record.CommitSha
     }) + "\n";
     var bytes = Encoding.UTF8.GetBytes(line);
     var index = 0;
