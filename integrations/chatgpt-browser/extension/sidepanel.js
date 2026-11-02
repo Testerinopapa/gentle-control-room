@@ -18,12 +18,7 @@ const taskSelect = document.getElementById("commit-task");
 const unresolvedNode = document.getElementById("unresolved-commits");
 const importStatus = document.getElementById("import-status");
 const codeCountNode = document.getElementById("code-count");
-const codingToggle = document.getElementById("coding-toggle");
-const codingHint = document.getElementById("coding-hint");
-const workflowToggle = document.getElementById("workflow-toggle");
-const workflowState = document.getElementById("workflow-state");
 let workflowEnabled = false;
-let codingMarked = false;
 
 let selectedTab = null;
 let busy = false;
@@ -71,29 +66,15 @@ async function refresh() {
     noteNode.textContent = !allowed
       ? (result.reason || "Open a ChatGPT conversation to enable collection.")
       : active
-        ? "This conversation is explicitly enabled. Stop whenever you like."
-        : "Not recording. Select Start to enable this conversation.";
+        ? "Recording coding-work metadata and analyzing workflow locally. Stop whenever you like."
+        : "Start recording to enable coding and workflow analysis together. Visible request text is classified locally; only labels and task boundaries are saved. Public GitHub commits may be fetched.";
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
     workflowEnabled = active && Boolean(result.workflowEnabled);
-    workflowToggle.disabled = busy || !active;
     importButton.disabled = busy || !workflowEnabled;
     importStatus.textContent = workflowEnabled
       ? "Paste a full GitHub commit URL to retrieve its public diff."
-      : "Requires recording and workflow analysis. Only public GitHub commits can be fetched.";
-    workflowToggle.textContent = workflowEnabled
-      ? "Disable workflow analysis" : "Enable workflow analysis";
-    workflowState.textContent = !active
-      ? "Off · start recording this conversation first."
-      : workflowEnabled
-        ? "On · " + (result.workflowStages || 0) + " categorized requests recorded locally."
-        : "Off · no message text is being inspected.";
-    codingMarked = active && Boolean(result.codingMarked);
-    codingToggle.disabled = busy || !active;
-    codingToggle.textContent = codingMarked ? "Remove coding tag" : "Mark as coding work";
-    codingHint.textContent = codingMarked
-      ? "Marked as coding work for local recurring patterns."
-      : "Mark this session if you use ChatGPT to work on code without displaying a code example.";
+      : "Requires recording. Only public GitHub commits can be fetched.";
     codeCountNode.textContent = active && Number.isInteger(result.visibleCodeBlocks)
       ? String(result.visibleCodeBlocks) : "—";
     userNode.textContent = active && Number.isInteger(result.visibleUser)
@@ -128,16 +109,9 @@ async function refresh() {
     noteNode.textContent = "The current browser tab could not be checked.";
     startButton.disabled = true;
     stopButton.disabled = true;
-    codingToggle.disabled = true;
-    workflowToggle.disabled = true;
     importButton.disabled = true;
     workflowEnabled = false;
-    workflowToggle.textContent = "Enable workflow analysis";
-    workflowState.textContent = "Unavailable.";
-    codingMarked = false;
-    codingToggle.textContent = "Mark as coding work";
     codeCountNode.textContent = "—";
-    codingHint.textContent = "Coding status unavailable.";
     userNode.textContent = "—";
     assistantNode.textContent = "—";
     evidenceCount.textContent = "Evidence count unavailable.";
@@ -222,53 +196,6 @@ async function clearEvidence() {
   finally { busy = false; clearButton.disabled = false; await refresh(); }
 }
 
-async function toggleCodingTag() {
-  if (busy || !Number.isInteger(selectedTab)) return;
-  busy = true;
-  codingToggle.disabled = true;
-  lastError = "";
-  try {
-    const tab = await activeTab();
-    if (!tab || tab.id !== selectedTab) {
-      throw new Error("The active tab changed. Select coding work again.");
-    }
-    const result = await chrome.runtime.sendMessage({
-      type: "setCodingTag", tabId: selectedTab,
-      codingMarked: !codingMarked
-    });
-    if (!result?.ok) throw new Error(result?.error || "Cannot save coding work tag.");
-  } catch (error) {
-    lastError = error?.message || "Cannot update coding work tag.";
-  } finally {
-    busy = false;
-    await refresh();
-  }
-}
-
-async function toggleWorkflow() {
-  if (busy || !Number.isInteger(selectedTab)) return;
-  busy = true;
-  workflowToggle.disabled = true;
-  lastError = "";
-  try {
-    const tab = await activeTab();
-    if (!tab || tab.id !== selectedTab)
-      throw new Error("Active tab changed. Choose workflow analysis again.");
-    const result = await chrome.runtime.sendMessage({
-      type: "setWorkflowAnalysis",
-      tabId: selectedTab,
-      enabled: !workflowEnabled
-    });
-    if (!result?.ok) throw new Error(result?.error || "Cannot change workflow analysis.");
-  } catch (error) {
-    lastError = error?.message || "Cannot change workflow analysis.";
-  } finally {
-    busy = false;
-    await refresh();
-  }
-}
-workflowToggle.addEventListener("click", () => void toggleWorkflow());
-codingToggle.addEventListener("click", () => void toggleCodingTag());
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
 importButton.addEventListener("click", () => void importCommit());
