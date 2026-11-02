@@ -4,6 +4,8 @@ const KEY = (tabId) => "gcrChatGPTTab:" + tabId;
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const DETECTORS = new Set(["current", "legacy", "waiting", "unsupported"]);
+const REPOSITORY = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}$/i;
+const COMMIT_SHA = /^[a-f0-9]{40}$/i;
 const WORKFLOW_STAGES = new Set([
   "investigation", "implementation", "debugging", "testing",
   "version_control", "deployment"
@@ -78,7 +80,7 @@ async function start(tabId) {
     [KEY(tabId)]: {
       id, page: new URL(tab.url).pathname,
       visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
-      codingMarked: false, workflowEnabled: false, workflowStages: 0,
+      codingMarked: false, workflowEnabled: false, workflowStages: 0, commitRefs: [],
       detector: null, lastObservedAt: null, lastCountAt: null
     }
   });
@@ -105,7 +107,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.type === "visibleCounts" ||
         message.type === "conversationChanged" ||
         message.type === "observerStatus" ||
-        message.type === "workflowStage") {
+        message.type === "workflowStage" ||
+        message.type === "githubCommitReference") {
       const tabId = sender.tab?.id;
       if (!Number.isInteger(tabId)) return { ok: false };
       const session = await getSession(tabId);
@@ -129,6 +132,30 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         if (current?.id === session.id && current.workflowEnabled) {
           await chrome.storage.session.set({
             [KEY(tabId)]: { ...current, workflowStages: (current.workflowStages ?? 0) + 1 }
+          });
+        }
+        return { ok: true };
+      }
+      if (message.type === "githubCommitReference") {
+        // Requires the separate explicit workflow opt-in for the source conversation.
+        if (!session.workflowEnabled || typeof message.repository !== "string" ||
+            typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
+            !COMMIT_SHA.test(message.sha)) return { ok: false };
+        const sourceTab = await chrome.tabs.get(tabId);
+        if (!eligible(sourceTab.url) || session.page !== new URL(sourceTab.url).pathname) {
+          await stop(tabId);
+          return { ok: false };
+        }
+        const repository = message.repository.toLowerCase();
+        const sha = message.sha.toLowerCase();
+        const key = repository + "@" + sha;
+        if ((session.commitRefs || []).includes(key)) return { ok: true, duplicate: true };
+        if ((session.commitRefs || []).length >= 30) return { ok: false };
+        await nativeEvent("github_commit_ref", session.id, { repository, commitSha: sha });
+        const current = await getSession(tabId);
+        if (current?.id === session.id && current.workflowEnabled) {
+          await chrome.storage.session.set({
+            [KEY(tabId)]: { ...current, commitRefs: [...(current.commitRefs || []), key] }
           });
         }
         return { ok: true };
