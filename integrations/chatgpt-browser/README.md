@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.6)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.7)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.6.0**. Reload the ChatGPT tab itself as well.
+   **0.7.0**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**.
 5. Choose **Enable workflow analysis** separately for local classification of
@@ -41,6 +41,44 @@ computer's filesystem is used.
   bounded, filtered patch data locally along with the link's session ID.
 - A downloadable `gentle-control-room-evidence.json` including recorded
   chronology, commit references and available exact patches.
+
+## Coding tasks and repeated-workflow analysis (v0.7)
+
+**Export evidence JSON** now includes a new top-level `analysis` object:
+`analysis.tasks`, `analysis.patterns`, `analysis.coverage` and
+`analysis.limitations`. The raw `events` and `commits` records remain
+unchanged and available for auditing. No new interface, external API key,
+DeepSeek request, or Windows software is required.
+
+The local, deterministic analysis groups consented coding-related events by
+**session ID** and splits an inferred coding episode after more than **45
+minutes without a meaningful coding event**. It uses `workflow_stage`,
+`github_commit_ref`, and an affirmative `coding_tag`. Passive message-count
+updates do not themselves create coding tasks. Episodes are **time-based
+clusters, not reliably identified user goals**; no raw chat text is saved.
+
+Each task includes a stable-within-export episode ID, first/last activity time,
+original event indices, observed stage sequence and counts, referenced
+GitHub commits, and paths/counts of retrieved patch files. Code itself
+remains in `commits`; it is not copied into each task. Outcomes, authorship,
+test execution, test passes and deployment are explicitly **unknown** unless
+verified by separate evidence.
+
+Patterns require observations in at least **two distinct coding episodes**:
+- repeated request classifications (e.g. `debugging`);
+- repeated order of adjacent request classes (e.g.
+  `implementation → testing`);
+- a file changed in **distinct GitHub commits** linked to different coding
+  episodes. Merely mentioning the same commit twice does not count as two edits.
+
+Every pattern includes supporting task IDs, observed frequency and, where
+applicable, commit references. Patterns describe the **user's observed
+workflow metadata**, not an executed behavior or demonstrated success.
+The detector is a local rules-based baseline for later evidence-reviewed
+DeepSeek analysis; it does **not** automatically call an AI model.
+
+Your first export may show one inferred task and **zero patterns**. This is
+correct until two separately observed coding episodes support recurrence.
 
 The extension does not inspect other tabs, cookies, session tokens,
 conversation titles/URLs or any arbitrary local Git repositories. It does not
@@ -93,6 +131,7 @@ Run the browser regression tests without building the Windows app:
 
 ```powershell
 node --check integrations/chatgpt-browser/extension/background.js
+node --check integrations/chatgpt-browser/extension/analysis.js
 node --check integrations/chatgpt-browser/extension/content.js
 node --check integrations/chatgpt-browser/extension/sidepanel.js
 node --test integrations/chatgpt-browser/tests/extension.test.mjs
