@@ -79,7 +79,14 @@ internal static class TaskService
     public static string Fingerprint(WorkState s, string id)
     {
         var t = s.Tasks.Single(t => t.Id == id);
-        return WorkJson.Hash(WorkJson.Serialize(new { t.Objective, t.Repository, t.Status, Evidence = Timeline(s, id) }));
+        var timeline = Timeline(s, id);
+        var ids = timeline.Select(e => e.Id).ToHashSet();
+        var changes = s.CodeChanges.Where(c => ids.Contains(c.Id)).ToArray();
+        // Preserve metadata-only fingerprints across the additive migration.
+        if (changes.Length == 0) return WorkJson.Hash(WorkJson.Serialize(new { t.Objective, t.Repository, t.Status, Evidence = timeline }));
+        var repos = changes.Select(c => c.RepositoryId).ToHashSet();
+        return WorkJson.Hash(WorkJson.Serialize(new { t.Objective, t.Repository, t.Status, Evidence = timeline, Changes = changes,
+            CodeConsent = s.Repositories.Where(r => repos.Contains(r.Id)).Select(r => new { r.Id, r.Approved, Epoch = WorkJson.Hash(r.ReceiptKey) }).ToArray() }));
     }
     public static bool IsCurrent(WorkState s, CodingTask t) => s.Analyses.TryGetValue(t.Id, out var a) && a.Fingerprint == Fingerprint(s, t.Id) && a.Model == s.Settings.Model;
     public static EvidencePackage Package(WorkState s, string id, IEnumerable<string>? selected = null)
@@ -93,12 +100,12 @@ internal static class TaskService
         var records = evidence.Select(e => new PackageEvidence(e.Id, e.Source,
             sessions.GetValueOrDefault(e.SessionKey, "Added context"), e.At, e.Kind, e.Category,
             Privacy.Minimize(e.Summary), e.Basis, e.Outcome,
-            e.Kind == "git_commit" && Regex.IsMatch(e.Reference, "^[0-9a-f]{40,64}$") ? e.Reference[..12] : "", e.FilesChanged)).ToArray();
+            e.Kind == "git_commit" && Regex.IsMatch(e.Reference, "^[0-9a-f]{40,64}$") ? e.Reference[..12] : "", e.FilesChanged, CodeTracking.Selected(s, e, chosen?.Contains(e.Id) == true), e.ExitCode)).ToArray();
         // Local hashes are replaced by package-local references. Model output is
         // bound to this exact package rather than exposing source identifiers.
         records = records.Select((e, i) => e with { Id = $"E{i + 1}" }).ToArray();
         return new(1, Privacy.Minimize(task.Objective), Privacy.Minimize(task.Repository), task.Status + " (user declared)", records,
-            new[] { "Legacy metadata contains no prompt contents, command output, file diffs, test exit codes, repository identity or verified completion.",
+            new[] { "Legacy metadata contains no code or results. Only explicit Change fields contain selected minimized diffs. Process exit records cover only user-designated commands, not task completion.",
                 "Tool categories indicate invocation, not success. Browser stages classify requests, not actions. User context is an unverified report.",
                 "Observations with equal timestamps have no established relative order; display ordering is not proof of a sequence.",
                 "Local commits prove recorded changes, not deployment, remote synchronization or tests. Missing evidence is not proof an activity did not happen.",

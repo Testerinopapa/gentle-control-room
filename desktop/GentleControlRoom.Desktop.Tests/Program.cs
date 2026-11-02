@@ -250,6 +250,7 @@ finally { Directory.Delete(browserRoot, true); }
 
 InsightTests.Run();
 await CodingWorkTests.Run();
+await CodeTrackingTests.Run();
 
 if (args.Contains("--local"))
 {

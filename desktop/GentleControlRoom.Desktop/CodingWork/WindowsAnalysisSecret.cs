@@ -14,7 +14,7 @@ internal sealed class WindowsAnalysisSecret(string root) : IAnalysisSecret
     [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CryptUnprotectData(ref Blob input, IntPtr description, IntPtr entropy, IntPtr reserved, IntPtr prompt, int flags, out Blob output);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr pointer);
-    private static byte[] Transform(byte[] bytes, bool protect)
+    internal static byte[] Transform(byte[] bytes, bool protect)
     {
         if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("API key storage requires Windows.");
         var input = new Blob { Length = bytes.Length, Data = Marshal.AllocHGlobal(bytes.Length) };

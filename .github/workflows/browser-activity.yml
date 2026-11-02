@@ -5,6 +5,7 @@ on:
     paths:
       - 'integrations/chatgpt-browser/**'
       - 'integrations/codex/**'
+      - 'integrations/code-changes/**'
       - 'desktop/GentleControlRoom.Desktop/**'
       - 'desktop/GentleControlRoom.Desktop.Tests/**'
       - '.github/workflows/browser-activity.yml'
@@ -12,6 +13,7 @@ on:
     paths:
       - 'integrations/chatgpt-browser/**'
       - 'integrations/codex/**'
+      - 'integrations/code-changes/**'
       - 'desktop/GentleControlRoom.Desktop/**'
       - 'desktop/GentleControlRoom.Desktop.Tests/**'
 
@@ -31,6 +33,8 @@ jobs:
           python-version: '3.12'
       - name: Codex collector regressions
         run: python -m unittest discover -s integrations/codex/tests -v
+      - name: User-invoked result recorder tests
+        run: python -m unittest discover -s integrations/code-changes/tests -v
       - name: Validate Edge extension syntax
         shell: pwsh
         run: |

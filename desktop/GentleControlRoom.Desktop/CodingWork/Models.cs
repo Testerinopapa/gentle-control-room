@@ -15,7 +15,7 @@ internal static class WorkJson
 
 internal sealed record Observation(string Id, string Source, string SessionKey, string ProjectKey,
     DateTimeOffset At, string Kind, string Category, string Summary, string Basis = "OBSERVED",
-    string Outcome = "unknown", string Reference = "", int? FilesChanged = null, string FileKey = "")
+    string Outcome = "unknown", string Reference = "", int? FilesChanged = null, string FileKey = "", [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ExitCode = null)
 {
     // Source identifiers stay in the local store. UI uses ordinal session names.
     public string Display => $"{At.ToLocalTime():MMM d HH:mm:ss} · {Source} · {Summary} [{Basis}]";
@@ -33,7 +33,7 @@ internal sealed record FileCursor(long Offset, long Length, long ModifiedTicks, 
 internal sealed record AssociationChange(DateTimeOffset At, string EvidenceId, string? FromTask, string? ToTask);
 internal sealed record Claim(string Section, string Text, string Basis, double Confidence, string[] EvidenceIds, string Pattern = "none");
 internal sealed record TaskAnalysis(string Objective, string Status, Claim[] Claims);
-internal sealed record SavedAnalysis(string TaskId, string Fingerprint, string Model, DateTimeOffset At, TaskAnalysis Result, EvidencePackage Package);
+internal sealed record SavedAnalysis(string TaskId, string Fingerprint, string Model, DateTimeOffset At, TaskAnalysis Result, EvidencePackage Package, string[]? SourceEvidenceIds = null);
 internal sealed record RecurringPattern(string Title, string[] TaskIds, string[] EvidenceIds, int Frequency,
     string Basis, double Confidence, string Recommendation);
 internal sealed class AnalysisSettings
@@ -55,7 +55,9 @@ internal sealed class AnalysisSettings
 }
 internal sealed class WorkState
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
+    public List<TrackedRepository> Repositories { get; set; } = new();
+    public List<CodeChange> CodeChanges { get; set; } = new();
     public bool LocalEnabled { get; set; }
     public List<Observation> Evidence { get; set; } = new();
     public List<CodingTask> Tasks { get; set; } = new();
@@ -70,7 +72,8 @@ internal sealed class WorkState
     public int TokensReserved { get; set; }
 }
 internal sealed record PackageEvidence(string Id, string Source, string Session, DateTimeOffset At,
-    string Kind, string Category, string Summary, string Basis, string Outcome, string Reference, int? FilesChanged);
+    string Kind, string Category, string Summary, string Basis, string Outcome, string Reference, int? FilesChanged, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SelectedChange? Change = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ExitCode = null);
 internal sealed record EvidencePackage(int Version, string Objective, string Repository, string DeclaredStatus,
     PackageEvidence[] Timeline, string[] Limitations);
 internal sealed record AnalysisPreview(string TaskId, string Fingerprint, string Payload, string PayloadHash,

@@ -26,3 +26,7 @@ Windows desktop packaging:
 Coding-work analysis (native Windows):
 - Task reconstruction, explicit DeepSeek payload approval, local persistence and verification walkthrough: [Phase 2 guide](docs/deepseek-coding-work.md).
 - This feature is separate from the legacy alert web dashboard and metadata statistics.
+
+### Approved code-change tracking
+
+See [code-change tracking](docs/code-change-tracking.md) for repository consent, the local diff viewer, optional user-invoked result recording, and explicitly approved DeepSeek payloads. Tracking is off by default.

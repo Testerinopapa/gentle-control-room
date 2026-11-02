@@ -35,6 +35,38 @@
   </Expander>
   <TextBlock Text="Selected coding task" FontWeight="SemiBold"/>
   <ComboBox x:Name="TaskChoice" DisplayMemberPath="Objective" SelectionChanged="Task_Changed" AutomationProperties.Name="Coding task"/>
+  <Expander Header="Code Changes" IsExpanded="True">
+   <StackPanel>
+    <TextBlock Text="Tracking is off until you approve a local repository. Exact diffs stay on this Windows account. No project commands run during observation." Foreground="#475569"/>
+    <Expander Header="Repository approval"><StackPanel>
+    <CheckBox x:Name="TrackUntracked" Margin="0,6"><TextBlock Text="Also approve untracked UTF-8 text files (up to 100 files; bounded sizes; exclusions still apply)"/></CheckBox>
+    <TextBlock Text="Additional excluded filename patterns, separated by commas"/>
+    <TextBox x:Name="CodeExclusions" Text="*.local,*.log" AutomationProperties.Name="Excluded filenames"/>
+    <Button Content="Choose and approve repository" Click="ApproveRepository_Click" HorizontalAlignment="Left"/>
+    </StackPanel></Expander>
+    <ComboBox x:Name="CodeRepositories" SelectionChanged="CodeRepository_Changed" AutomationProperties.Name="Approved repositories"/>
+    <TextBlock x:Name="CodeRepositoryStatus" Foreground="#475569"/>
+    <WrapPanel>
+     <Button Content="Check now" Click="CheckChanges_Click"/>
+     <Button Content="Pause / resume" Click="PauseTracking_Click"/>
+     <Button Content="Revoke approval" Click="RevokeTracking_Click"/>
+     <Button Content="Delete history" Click="DeleteChanges_Click"/>
+    </WrapPanel>
+    <TextBlock Text="Recent file snapshots" FontWeight="SemiBold"/>
+    <ComboBox x:Name="CodeChangeChoice" DisplayMemberPath="Display" SelectionChanged="CodeChange_Changed" AutomationProperties.Name="Recorded code changes"/>
+    <TextBlock x:Name="CodeRelatedText" Foreground="#475569"/>
+    <Expander Header="Exact local differences">
+     <TextBox x:Name="CodeDiffText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="16"
+              MaxHeight="300" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Exact local diff"/>
+    </Expander>
+    <TextBlock x:Name="CodeOutcomeText" Foreground="#475569"/>
+    <WrapPanel>
+     <Button Content="Assign change to selected task" Click="AssignChange_Click"/>
+     <Button Content="Review this change for analysis" Click="AnalyzeChange_Click"/>
+    </WrapPanel>
+    <TextBlock Text="To compare attempts, assign snapshots to a task, select their evidence rows below, then Analyze task. Only explicitly selected diffs enter the reviewed payload. Secret checks cannot catch every credential." Foreground="#64748B"/>
+   </StackPanel>
+  </Expander>
   <Expander Header="Create or update a task">
    <StackPanel>
     <TextBlock Text="Objective"/><TextBox x:Name="Objective" MaxLength="240" AutomationProperties.Name="Task objective"/>

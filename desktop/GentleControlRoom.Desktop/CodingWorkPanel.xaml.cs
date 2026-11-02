@@ -24,14 +24,14 @@ public partial class CodingWorkPanel : System.Windows.Controls.UserControl
     private static string Choice(System.Windows.Controls.ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
     private void Panel_Loaded(object sender, RoutedEventArgs e)
     {
-        if (_ready) return;
+        if (_ready) { _codeTimer.Start(); return; }
         var root = Path.Combine(_activityRoot, "CodingWork");
         _store = new(root); _secret = new(root);
         // Never follow redirects carrying Authorization to a different host.
         _analyzer = new(_store, new DeepSeekProvider(new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan }, _secret));
         _ready = true;
         Unloaded += (_, _) => { _cancel?.Cancel(); _analyzer.Discard(); };
-        Safe(() => { Render(); LoadSettings(); });
+        Safe(() => { Render(); LoadSettings(); InitializeCodeTracking(); });
     }
     private void Safe(Action action)
     {
@@ -63,7 +63,11 @@ public partial class CodingWorkPanel : System.Windows.Controls.UserControl
             DailyTokenBudget = int.Parse(BudgetLimit.Text), TimeoutSeconds = int.Parse(TimeoutLimit.Text), Retries = int.Parse(RetryLimit.Text) };
         settings.Validate();
         if (!string.IsNullOrEmpty(ApiKey.Password)) { _secret.Save(ApiKey.Password); ApiKey.Clear(); }
-        _store.Update(s => { s.LocalEnabled = LocalConsent.IsChecked == true; s.Settings = settings; return true; });
+        _store.Update(s => {
+            if (s.LocalEnabled && LocalConsent.IsChecked != true)
+                foreach (var repo in s.Repositories.Where(r => r.Approved)) repo.ReceiptKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            s.LocalEnabled = LocalConsent.IsChecked == true; s.Settings = settings; return true;
+        });
         _cancel?.Cancel(); CancelPreview(); Render(); WorkStatus.Text = "Settings saved. No data was sent.";
     });
     private void RemoveKey_Click(object sender, RoutedEventArgs e) => Safe(() => { _cancel?.Cancel(); _secret.Delete(); ApiKey.Clear(); CancelPreview(); WorkStatus.Text = "Saved API key removed."; });
@@ -112,9 +116,9 @@ public partial class CodingWorkPanel : System.Windows.Controls.UserControl
     private void EvidenceFilter_Changed(object sender, SelectionChangedEventArgs e) { if (_ready) { _page = 0; RenderEvidence(); } }
     private void Previous_Click(object sender, RoutedEventArgs e) { _page = Math.Max(0, _page - 1); RenderEvidence(); }
     private void Next_Click(object sender, RoutedEventArgs e) { _page++; RenderEvidence(); }
-    private void Render(string? selected = null)
+    private void Render(string? selected = null, WorkState? loaded = null)
     {
-        selected ??= TaskId; _state = _store.Read(); _state.Patterns = TaskService.FindPatterns(_state); _rendering = true;
+        selected ??= TaskId; _state = loaded ?? _store.Read(); _state.Patterns = TaskService.FindPatterns(_state); _rendering = true;
         TaskChoice.ItemsSource = _state.Tasks;
         TaskChoice.SelectedItem = _state.Tasks.FirstOrDefault(t => t.Id == selected) ?? _state.Tasks.FirstOrDefault();
         _rendering = false; FillEditor(); RenderEvidence();
@@ -131,6 +135,7 @@ public partial class CodingWorkPanel : System.Windows.Controls.UserControl
             return new { Title = t.Objective, Summary = $"{t.Repository} · {t.Status} (user declared) · {sessions.Length} sessions · {timeline.Length} observations",
                 Analysis = analysis, Timeline = string.Join("\n\n", timeline.Select(x => x.Display)) + supporting };
         }).ToArray();
+        RenderCodeChanges();
         WorkPatterns.ItemsSource = _state.Patterns.Count == 0 ? new[] { "No supported recurring pattern yet. Multiple tasks or repeated attempts within a task are required." } :
             _state.Patterns.Select(p => $"{p.Title} · {p.Basis} · {p.Confidence:P0}\nFrequency: {p.Frequency}; tasks: {string.Join(", ", _state.Tasks.Where(t => p.TaskIds.Contains(t.Id)).Select(t => t.Objective))}\n{p.Recommendation}\n" +
                 "Evidence: " + string.Join("; ", p.EvidenceIds.Take(12).Select(id => TaskService.PatternEvidence(_state, id))) + (p.EvidenceIds.Length > 12 ? " (first 12 shown; full timelines above)" : "")).ToArray();
