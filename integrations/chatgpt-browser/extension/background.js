@@ -1,8 +1,10 @@
 "use strict";
-const HOST = "org.gentlecontrolroom.chatgpt";
-const KEY = (tabId) => "gcrChatGPTTab:" + tabId;
+
+// Standalone Edge extension. No native host, Windows process, remote analysis
+// provider, or privileged filesystem access is required.
+const KEY = tabId => "gcrChatGPTTab:" + tabId;
+const LOCAL_KEY = "gcrEvidenceV1";
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
-const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const DETECTORS = new Set(["current", "legacy", "waiting", "unsupported"]);
 const REPOSITORY = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}$/i;
 const COMMIT_SHA = /^[a-f0-9]{40}$/i;
@@ -10,278 +12,255 @@ const WORKFLOW_STAGES = new Set([
   "investigation", "implementation", "debugging", "testing",
   "version_control", "deployment"
 ]);
+const MAX_EVENTS = 1500;
+const MAX_COMMITS = 30;
+const RETENTION_MS = 30 * 86400000;
+const MAX_PATCH_BYTES = 24000;
+const MAX_RESPONSE_BYTES = 512000;
+const MAX_EVIDENCE_BYTES = 3500000;
+const pendingCommits = new Set();
+let storageQueue = Promise.resolve();
 
-// Clicking the extension toolbar icon opens the persistent Edge side panel.
-// This does not start tracking: collection still requires an explicit Start click.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 function eligible(url) {
-  try {
-    const u = new URL(url);
-    return CHATGPT.has(u.origin) && u.protocol === "https:";
-  } catch {
-    return false;
-  }
+  try { const u = new URL(url); return u.protocol === "https:" && CHATGPT.has(u.origin); }
+  catch { return false; }
 }
 async function getSession(tabId) {
   const data = await chrome.storage.session.get(KEY(tabId));
   return data[KEY(tabId)] || null;
 }
-function nativeFailure(error) {
-  const message = String(error?.message || "").toLowerCase();
-  if (message.includes("not found") || message.includes("not registered") ||
-      message.includes("specified native messaging host")) {
-    return "Windows collector not installed or not registered. Run install-host.ps1 for this Edge extension ID.";
-  }
-  if (message.includes("forbidden") || message.includes("not allowed") ||
-      message.includes("access to the specified")) {
-    return "Edge rejected the collector. Reinstall it with the current extension ID from edge://extensions.";
-  }
-  if (message.includes("exited") || message.includes("communication") ||
-      message.includes("disconnected") || message.includes("broken pipe")) {
-    return "Windows collector started but could not respond. Rebuild it with install-host.ps1 and try again.";
-  }
-  return "Cannot reach the Windows collector. Verify its installation and Edge extension ID.";
+async function readEvidence() {
+  const found = await chrome.storage.local.get(LOCAL_KEY);
+  const data = found[LOCAL_KEY];
+  return data?.version === 1 && Array.isArray(data.events) && data.commits &&
+    typeof data.commits === "object" ? data : { version: 1, events: [], commits: {} };
 }
-async function sendToNative(message) {
+function bounded(data) {
+  const cutoff = Date.now() - RETENTION_MS;
+  data.events = data.events.filter(e => Number.isFinite(Date.parse(e.timestamp)) &&
+    Date.parse(e.timestamp) >= cutoff).slice(-MAX_EVENTS);
+  for (const [key, entry] of Object.entries(data.commits)) {
+    if (!entry || Date.parse(entry.savedAt) < cutoff) delete data.commits[key];
+  }
+  const keys = Object.keys(data.commits).sort((a, b) =>
+    Date.parse(data.commits[b].savedAt) - Date.parse(data.commits[a].savedAt));
+  for (const key of keys.slice(MAX_COMMITS)) delete data.commits[key];
+  // Storage has a hard ceiling. Drop oldest patches before removing chronology.
+  while (JSON.stringify(data).length > MAX_EVIDENCE_BYTES && Object.keys(data.commits).length) {
+    const oldest = Object.keys(data.commits).sort((a, b) =>
+      Date.parse(data.commits[a].savedAt) - Date.parse(data.commits[b].savedAt))[0];
+    delete data.commits[oldest];
+  }
+  while (JSON.stringify(data).length > MAX_EVIDENCE_BYTES && data.events.length)
+    data.events.shift();
+  return data;
+}
+function mutateEvidence(change) {
+  const job = storageQueue.then(async () => {
+    const data = await readEvidence();
+    const result = change(data);
+    await chrome.storage.local.set({ [LOCAL_KEY]: bounded(data) });
+    return result;
+  });
+  storageQueue = job.catch(() => {});
+  return job;
+}
+function event(sessionId, type, fields = {}) {
+  return mutateEvidence(data => {
+    data.events.push({
+      timestamp: new Date().toISOString(), source: "chatgpt_browser",
+      sessionId, type, ...fields
+    });
+    return true;
+  });
+}
+function secretPath(path) {
+  return typeof path !== "string" || path.length > 220 || path.includes("\0") ||
+    path.startsWith("/") || path.includes("\\") || path.split("/").some(p =>
+      !p || p === "." || p === ".." || /^\.env(?:\.|$)/i.test(p) ||
+      /^(?:node_modules|\.git|\.next|dist|build)$/i.test(p) ||
+      /^(?:id_rsa|id_ed25519|credentials|secrets|private\.key|\.npmrc|\.pypirc)$/i.test(p));
+}
+function patchLooksSensitive(patch) {
+  return /(?:-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----|gh[pousr]_[a-zA-Z0-9]{20,}|sk-[a-zA-Z0-9_-]{24,})/.test(patch);
+}
+async function fetchCommit(repository, sha) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    return await chrome.runtime.sendNativeMessage(HOST, message);
-  } catch (error) {
-    throw new Error(nativeFailure(error));
-  }
+    const response = await fetch("https://api.github.com/repos/" + repository + "/commits/" + sha,
+      { headers: { Accept: "application/vnd.github+json" }, signal: controller.signal,
+        redirect: "error", credentials: "omit" });
+    if (!response.ok) throw Error("GitHub returned HTTP " + response.status);
+    const length = Number(response.headers?.get?.("content-length") || 0);
+    if (length > MAX_RESPONSE_BYTES) throw Error("Commit response too large");
+    // Bound parsing work even if Content-Length is missing.
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) throw Error("Commit response too large");
+    const json = JSON.parse(text);
+    if (json.sha?.toLowerCase() !== sha || !Array.isArray(json.files) || json.files.length > 100)
+      throw Error("Commit data invalid or incomplete");
+    const files = [];
+    let total = 0;
+    for (const file of json.files) {
+      const path = file.filename;
+      const old = file.status === "renamed" ? file.previous_filename : path;
+      if (secretPath(path) || secretPath(old) || typeof file.patch !== "string") continue;
+      const patch = file.patch;
+      if (!patch.startsWith("@@ ") || patch.length > MAX_PATCH_BYTES || patchLooksSensitive(patch)) continue;
+      if (!Number.isInteger(file.additions) || !Number.isInteger(file.deletions)) continue;
+      total += patch.length;
+      if (total > 120000 || files.length >= 20) break;
+      files.push({ path, previousPath: old, status: file.status,
+        additions: file.additions, deletions: file.deletions, patch });
+    }
+    return { status: "retrieved", files, changedFiles: json.files.length,
+      note: "A commit link was seen in an assistant message. Authorship, tests and outcome are unverified." };
+  } finally { clearTimeout(timeout); }
 }
-async function nativeEvent(event, sessionId, counts = undefined) {
-  if (!UUID.test(sessionId)) throw new Error("Invalid session metadata.");
-  const message = { version: 1, event, sessionId, ...(counts || {}) };
-  const answer = await sendToNative(message);
-  if (!answer?.ok) throw new Error("The Windows collector rejected the event. Reinstall the latest host and try again.");
+async function collectCommit(repository, sha, sessionId) {
+  const key = repository + "@" + sha;
+  if (pendingCommits.has(key)) return;
+  pendingCommits.add(key);
+  try {
+    const existing = await readEvidence();
+    if (existing.commits[key]) return;
+    let result;
+    try { result = await fetchCommit(repository, sha); }
+    catch { result = { status: "unavailable", files: [],
+      note: "Public GitHub commit could not be retrieved. No code evidence verified." }; }
+    // Never retain patches after a session's consent has been revoked.
+    const active = await chrome.storage.session.get(null);
+    const consented = Object.values(active).some(session =>
+      session?.id === sessionId && session.workflowEnabled && (session.commitRefs || []).includes(key));
+    if (!consented) return;
+    await mutateEvidence(data => {
+      data.commits[key] = { repository, sha, sessionId,
+        savedAt: new Date().toISOString(), ...result };
+    });
+  } finally { pendingCommits.delete(key); }
 }
 async function stop(tabId) {
   const session = await getSession(tabId);
   if (!session) return;
-  // Revoke the browser's active collection state before any asynchronous work.
   await chrome.storage.session.remove(KEY(tabId));
   await chrome.action.setBadgeText({ tabId, text: "" }).catch(() => {});
   await chrome.tabs.sendMessage(tabId, { type: "gcrStop" }).catch(() => {});
-  await nativeEvent("session_ended", session.id).catch(() => {});
+  await event(session.id, "session_ended").catch(() => {});
 }
 async function start(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  if (!eligible(tab.url)) {
-    throw new Error(tab.url
-      ? "Open a ChatGPT conversation before starting recording."
-      : "Edge cannot identify this tab. Reload the extension and approve ChatGPT site access.");
-  }
+  if (!eligible(tab.url)) throw Error("Open a ChatGPT conversation before starting recording.");
   if (await getSession(tabId)) return;
   const id = crypto.randomUUID();
-  // Fail closed if the native host is not installed.
-  await nativeEvent("session_started", id);
-  await chrome.storage.session.set({
-    [KEY(tabId)]: {
-      id, page: new URL(tab.url).pathname,
-      visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
-      codingMarked: false, workflowEnabled: false, workflowStages: 0, commitRefs: [],
-      detector: null, lastObservedAt: null, lastCountAt: null
-    }
-  });
+  await event(id, "session_started");
+  await chrome.storage.session.set({ [KEY(tabId)]: {
+    id, page: new URL(tab.url).pathname,
+    visibleUser: null, visibleAssistant: null, visibleCodeBlocks: null,
+    codingMarked: false, workflowEnabled: false, workflowStages: 0, commitRefs: [],
+    detector: null, lastObservedAt: null, lastCountAt: null
+  } });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#166534" });
   await chrome.action.setBadgeText({ tabId, text: "ON" });
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-  } catch {
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }); }
+  catch {
     await stop(tabId);
-    throw new Error("Cannot observe this tab. Reload ChatGPT and enable again.");
+    throw Error("Cannot observe this tab. Reload ChatGPT and start again.");
   }
+}
+async function fromPage(message, sender) {
+  const tabId = sender.tab?.id;
+  if (!Number.isInteger(tabId)) return { ok: false };
+  const session = await getSession(tabId);
+  if (!session) return { ok: false };
+  if (message.type === "conversationChanged") {
+    await stop(tabId); return { ok: true };
+  }
+  const tab = await chrome.tabs.get(tabId);
+  if (!eligible(tab.url) || new URL(tab.url).pathname !== session.page) {
+    await stop(tabId); return { ok: false };
+  }
+  if (message.type === "observerStatus") {
+    if (!DETECTORS.has(message.detector)) return { ok: false };
+    await chrome.storage.session.set({ [KEY(tabId)]: {
+      ...session, detector: message.detector, lastObservedAt: Date.now()
+    } });
+    return { ok: true };
+  }
+  if (message.type === "workflowStage") {
+    if (!session.workflowEnabled || !WORKFLOW_STAGES.has(message.stage) ||
+        session.workflowStages >= 120) return { ok: false };
+    await event(session.id, "workflow_stage", { stage: message.stage });
+    const current = await getSession(tabId);
+    if (current?.id === session.id && current.workflowEnabled)
+      await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
+        workflowStages: current.workflowStages + 1 } });
+    return { ok: true };
+  }
+  if (message.type === "githubCommitReference") {
+    if (!session.workflowEnabled || typeof message.repository !== "string" ||
+        typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
+        !COMMIT_SHA.test(message.sha)) return { ok: false };
+    const repository = message.repository.toLowerCase(), sha = message.sha.toLowerCase();
+    const key = repository + "@" + sha;
+    if (session.commitRefs.includes(key)) return { ok: true, duplicate: true };
+    if (session.commitRefs.length >= 30) return { ok: false };
+    await event(session.id, "github_commit_ref", { repository, commitSha: sha });
+    const current = await getSession(tabId);
+    if (!current || current.id !== session.id || !current.workflowEnabled) return { ok: false };
+    await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
+      commitRefs: [...current.commitRefs, key] } });
+    await collectCommit(repository, sha, session.id);
+    return { ok: true };
+  }
+  if (message.type === "visibleCounts") {
+    if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
+        !Number.isInteger(message.assistant) || message.assistant < 0 || message.assistant > 10000 ||
+        (message.codeBlocks !== undefined &&
+          (!Number.isInteger(message.codeBlocks) || message.codeBlocks < 0 || message.codeBlocks > 10000)))
+      return { ok: false };
+    await event(session.id, "visible_counts", {
+      visibleUser: message.user, visibleAssistant: message.assistant,
+      ...(message.codeBlocks === undefined ? {} : { visibleCodeBlocks: message.codeBlocks })
+    });
+    const current = await getSession(tabId);
+    if (current?.id === session.id)
+      await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
+        visibleUser: message.user, visibleAssistant: message.assistant,
+        visibleCodeBlocks: message.codeBlocks ?? null, lastCountAt: Date.now() } });
+    return { ok: true };
+  }
+  return { ok: false };
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   (async () => {
-    if (!message || typeof message.type !== "string") throw new Error("Invalid request.");
-    if (message.type === "testConnection") {
-      // Read-only probe. No conversation/session is created.
-      const reply = await sendToNative({ version: 1, event: "health_check" });
-      if (!reply?.ok) {
-        return { ok: false, error: "Windows collector did not accept the health check. Reinstall the latest host." };
-      }
-      return { ok: true, connected: true };
+    if (!message || typeof message.type !== "string") throw Error("Invalid request");
+    if (["visibleCounts", "conversationChanged", "observerStatus",
+      "workflowStage", "githubCommitReference"].includes(message.type))
+      return fromPage(message, sender);
+    if (message.type === "exportEvidence") {
+      const data = await readEvidence();
+      return { ok: true, data: { ...bounded(data), exportedAt: new Date().toISOString(),
+        attribution: "Observed links are not proof of authorship, success, or deployment." } };
     }
-    if (message.type === "visibleCounts" ||
-        message.type === "conversationChanged" ||
-        message.type === "observerStatus" ||
-        message.type === "workflowStage" ||
-        message.type === "githubCommitReference") {
-      const tabId = sender.tab?.id;
-      if (!Number.isInteger(tabId)) return { ok: false };
-      const session = await getSession(tabId);
-      if (!session) return { ok: false };
-      if (message.type === "conversationChanged") {
-        await stop(tabId);
-        return { ok: true };
-      }
-      if (message.type === "workflowStage") {
-        // Explicit per-conversation consent, distinct from metadata recording.
-        if (!session.workflowEnabled || !WORKFLOW_STAGES.has(message.stage) ||
-            (session.workflowStages ?? 0) >= 120) return { ok: false };
-        const sourceTab = await chrome.tabs.get(tabId);
-        if (!eligible(sourceTab.url) ||
-            session.page !== new URL(sourceTab.url).pathname) {
-          await stop(tabId);
-          return { ok: false };
-        }
-        await nativeEvent("workflow_stage", session.id, { stage: message.stage });
-        const current = await getSession(tabId);
-        if (current?.id === session.id && current.workflowEnabled) {
-          await chrome.storage.session.set({
-            [KEY(tabId)]: { ...current, workflowStages: (current.workflowStages ?? 0) + 1 }
-          });
-        }
-        return { ok: true };
-      }
-      if (message.type === "githubCommitReference") {
-        // Requires the separate explicit workflow opt-in for the source conversation.
-        if (!session.workflowEnabled || typeof message.repository !== "string" ||
-            typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
-            !COMMIT_SHA.test(message.sha)) return { ok: false };
-        const sourceTab = await chrome.tabs.get(tabId);
-        if (!eligible(sourceTab.url) || session.page !== new URL(sourceTab.url).pathname) {
-          await stop(tabId);
-          return { ok: false };
-        }
-        const repository = message.repository.toLowerCase();
-        const sha = message.sha.toLowerCase();
-        const key = repository + "@" + sha;
-        if ((session.commitRefs || []).includes(key)) return { ok: true, duplicate: true };
-        if ((session.commitRefs || []).length >= 30) return { ok: false };
-        await nativeEvent("github_commit_ref", session.id, { repository, commitSha: sha });
-        const current = await getSession(tabId);
-        if (current?.id === session.id && current.workflowEnabled) {
-          await chrome.storage.session.set({
-            [KEY(tabId)]: { ...current, commitRefs: [...(current.commitRefs || []), key] }
-          });
-        }
-        return { ok: true };
-      }
-      if (message.type === "observerStatus") {
-        if (!DETECTORS.has(message.detector)) return { ok: false };
-        const tab = await chrome.tabs.get(tabId);
-        if (!eligible(tab.url) || session.page !== new URL(tab.url).pathname) {
-          await stop(tabId);
-          return { ok: false };
-        }
-        const current = await getSession(tabId);
-        if (!current || current.id !== session.id) return { ok: false };
-        await chrome.storage.session.set({
-          [KEY(tabId)]: {
-            ...current, detector: message.detector, lastObservedAt: Date.now()
-          }
-        });
-        return { ok: true };
-      }
-      if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
-          !Number.isInteger(message.assistant) || message.assistant < 0 || message.assistant > 10000 ||
-          (message.codeBlocks !== undefined &&
-           (!Number.isInteger(message.codeBlocks) || message.codeBlocks < 0 || message.codeBlocks > 10000))) {
-        return { ok: false };
-      }
-      // Only store visible marker counts for the previously approved tab.
-      // Messages from switched conversations must never enter this session.
-      const sourceTab = await chrome.tabs.get(tabId);
-      if (!eligible(sourceTab.url) || session.page !== new URL(sourceTab.url).pathname) {
-        await stop(tabId);
-        return { ok: false };
-      }
-      await nativeEvent("visible_counts", session.id, {
-        visibleUser: message.user, visibleAssistant: message.assistant,
-        ...(message.codeBlocks === undefined ? {} : { visibleCodeBlocks: message.codeBlocks })
-      });
-      // The sidebar displays safe counts for the tab that opted in.
-      // Never resurrect a session after Stop or navigation.
-      const current = await getSession(tabId);
-      if (current?.id === session.id) {
-        await chrome.storage.session.set({
-          [KEY(tabId)]: {
-            ...current, visibleUser: message.user,
-            visibleAssistant: message.assistant,
-            visibleCodeBlocks: message.codeBlocks ?? null,
-            lastCountAt: Date.now()
-          }
-        });
-      }
+    if (message.type === "clearEvidence") {
+      await mutateEvidence(data => { data.events = []; data.commits = {}; });
       return { ok: true };
     }
-
     const tabId = message.tabId;
-    if (!Number.isInteger(tabId)) throw new Error("No selected tab.");
+    if (!Number.isInteger(tabId)) throw Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
-    if (message.type === "setWorkflowAnalysis") {
-      if (typeof message.enabled !== "boolean") throw new Error("Invalid analysis setting.");
-      const session = await getSession(tabId);
-      if (!session || !eligible(tab.url) ||
-          session.page !== new URL(tab.url).pathname)
-        throw new Error("Start recording this conversation before enabling workflow analysis.");
-      if (message.enabled === Boolean(session.workflowEnabled)) return { ok: true };
-      if (!message.enabled) {
-        // Revoke permission before sending the stop command to the page.
-        await chrome.storage.session.set({
-          [KEY(tabId)]: { ...session, workflowEnabled: false }
-        });
-        await chrome.tabs.sendMessage(tabId, {
-          type: "gcrWorkflowMode", enabled: false
-        }).catch(() => {});
-        return { ok: true };
-      }
-      // Never authorize text inspection if the page observer cannot be reached.
-      const updated = { ...session, workflowEnabled: true };
-      await chrome.storage.session.set({ [KEY(tabId)]: updated });
-      try {
-        await chrome.tabs.sendMessage(tabId, {
-          type: "gcrWorkflowMode", enabled: true
-        });
-      } catch {
-        const current = await getSession(tabId);
-        if (current?.id === session.id) {
-          await chrome.storage.session.set({
-            [KEY(tabId)]: { ...current, workflowEnabled: false }
-          });
-        }
-        throw new Error("The page observer is unavailable. Reload ChatGPT, start recording and try again.");
-      }
-      return { ok: true };
-    }
-    if (message.type === "setCodingTag") {
-      if (typeof message.codingMarked !== "boolean") {
-        throw new Error("Invalid coding activity selection.");
-      }
-      const session = await getSession(tabId);
-      if (!session || !eligible(tab.url) ||
-          session.page !== new URL(tab.url).pathname) {
-        throw new Error("Start recording this ChatGPT conversation before marking coding activity.");
-      }
-      // Only the selected tab may be tagged; never collect text or infer edits.
-      await nativeEvent("coding_tag", session.id, {
-        codingMarked: message.codingMarked
-      });
-      const current = await getSession(tabId);
-      if (current?.id === session.id) {
-        await chrome.storage.session.set({
-          [KEY(tabId)]: { ...current, codingMarked: message.codingMarked }
-        });
-      }
-      return { ok: true };
-    }
     if (message.type === "getState") {
       const session = await getSession(tabId);
       const allowed = eligible(tab.url);
-      // A persistent side panel does not itself grant activeTab access. The
-      // manifest provides host permissions ONLY for the two ChatGPT origins.
-      // If URL access is unavailable, explain why the controls are disabled.
-      const reason = allowed ? null :
-        !tab.url ? "Edge cannot identify this tab. Reload the extension and approve its ChatGPT site access." :
-        "Open a conversation at chatgpt.com in the active Edge tab.";
-      // If a navigation escaped onUpdated, revoke consent before displaying it.
       const samePage = allowed && session?.page === new URL(tab.url).pathname;
       if (session && !samePage) await stop(tabId);
+      const local = await readEvidence();
       return {
-        ok: true, allowed, reason, active: Boolean(session && samePage),
+        ok: true, allowed, reason: allowed ? null : "Open ChatGPT in the active tab.",
+        active: Boolean(session && samePage),
         visibleUser: samePage ? session?.visibleUser ?? null : null,
         visibleAssistant: samePage ? session?.visibleAssistant ?? null : null,
         visibleCodeBlocks: samePage ? session?.visibleCodeBlocks ?? null : null,
@@ -290,22 +269,51 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         workflowStages: samePage ? session?.workflowStages ?? 0 : 0,
         detector: samePage ? session?.detector ?? null : null,
         lastObservedAt: samePage ? session?.lastObservedAt ?? null : null,
-        lastCountAt: samePage ? session?.lastCountAt ?? null : null
+        lastCountAt: samePage ? session?.lastCountAt ?? null : null,
+        recordedEvents: local.events.length,
+        recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length
       };
     }
-    if (message.type === "start") {
-      await start(tabId);
+    if (message.type === "start") { await start(tabId); return { ok: true }; }
+    if (message.type === "stop") { await stop(tabId); return { ok: true }; }
+    if (message.type === "setWorkflowAnalysis") {
+      if (typeof message.enabled !== "boolean") throw Error("Invalid workflow option.");
+      const session = await getSession(tabId);
+      if (!session || !eligible(tab.url) || session.page !== new URL(tab.url).pathname)
+        throw Error("Start recording this conversation first.");
+      if (message.enabled === Boolean(session.workflowEnabled)) return { ok: true };
+      await chrome.storage.session.set({ [KEY(tabId)]: {
+        ...session, workflowEnabled: message.enabled
+      } });
+      try { await chrome.tabs.sendMessage(tabId, {
+        type: "gcrWorkflowMode", enabled: message.enabled
+      }); }
+      catch {
+        if (message.enabled) {
+          const current = await getSession(tabId);
+          if (current?.id === session.id)
+            await chrome.storage.session.set({ [KEY(tabId)]: { ...current, workflowEnabled: false } });
+          throw Error("Page observer unavailable. Reload ChatGPT, start recording, and try again.");
+        }
+      }
       return { ok: true };
     }
-    if (message.type === "stop") {
-      await stop(tabId);
+    if (message.type === "setCodingTag") {
+      if (typeof message.codingMarked !== "boolean") throw Error("Invalid tag.");
+      const session = await getSession(tabId);
+      if (!session || !eligible(tab.url) || session.page !== new URL(tab.url).pathname)
+        throw Error("Start recording this conversation first.");
+      await event(session.id, "coding_tag", { codingMarked: message.codingMarked });
+      const current = await getSession(tabId);
+      if (current?.id === session.id)
+        await chrome.storage.session.set({ [KEY(tabId)]: { ...current, codingMarked: message.codingMarked } });
       return { ok: true };
     }
-    throw new Error("Unsupported operation.");
-  })().then(respond, (error) => respond({ ok: false, error: error?.message || "Unavailable" }));
+    throw Error("Unsupported operation.");
+  })().then(respond, () => respond({ ok: false, error: "Local extension operation failed." }));
   return true;
 });
-chrome.tabs.onRemoved.addListener((tabId) => { void stop(tabId); });
+chrome.tabs.onRemoved.addListener(tabId => { void stop(tabId); });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading" || changeInfo.url) void stop(tabId);
 });
