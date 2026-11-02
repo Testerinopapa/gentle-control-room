@@ -1,5 +1,8 @@
 "use strict";
 
+// Load deterministic evidence analysis locally in this classic MV3 worker.
+importScripts("analysis.js");
+
 // Standalone Edge extension. No native host, Windows process, remote analysis
 // provider, or privileged filesystem access is required.
 const KEY = tabId => "gcrChatGPTTab:" + tabId;
@@ -281,9 +284,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       return recordCommit(tabId, session, commit.repository, commit.sha, "manual");
     }
     if (message.type === "exportEvidence") {
-      const data = await readEvidence();
-      return { ok: true, data: { ...bounded(data), exportedAt: new Date().toISOString(),
-        attribution: "Observed links are not proof of authorship, success, or deployment." } };
+      const data = bounded(await readEvidence());
+      return { ok: true, data: {
+        ...data,
+        analysis: globalThis.GentleCodingAnalysis.analyze(data),
+        exportedAt: new Date().toISOString(),
+        attribution: "Observed links and request-stage labels are not proof of authorship, execution, success, or deployment."
+      } };
     }
     if (message.type === "clearEvidence") {
       await mutateEvidence(data => {
