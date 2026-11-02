@@ -26,8 +26,8 @@
   const pendingCommitLinks = new Set();
   const maxCommitLinks = 30;
 
-  // Only href attributes of GitHub commit links in assistant turns are examined.
-  // Never export assistant text, code, private conversation URLs, or arbitrary links.
+  // Read only explicit GitHub commit references from assistant turns after opt-in.
+  // Visible text is used transiently; never export text, code, conversation URLs, or arbitrary links.
   async function scanCommitLinks() {
     if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) return;
     const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
@@ -51,13 +51,22 @@
     for (const unit of Array.from(units).slice(-120)) {
       if (!workflowEnabled || stopped) break;
       if (typeof unit.querySelectorAll !== "function") continue;
+      const candidates = [];
       for (const anchor of Array.from(unit.querySelectorAll('a[href]')).slice(0, 30)) {
-        if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) break;
         const href = anchor.getAttribute?.("href");
-        if (typeof href !== "string" || href.length > 300) continue;
+        if (typeof href === "string" && href.length <= 300) candidates.push(href);
+      }
+      // ChatGPT sometimes displays plain commit URLs without <a href> links.
+      // Only while workflow consent is ON, examine a bounded amount of visible
+      // assistant text transiently. Save/send only owner/repository and full SHA.
+      const visible = typeof unit.innerText === "string" ? unit.innerText.slice(0, 12000) : "";
+      const mentions = visible.match(/https:\/\/github\.com\/[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}\/commit\/[a-f0-9]{40}\b/gi) || [];
+      candidates.push(...mentions.slice(0, 30));
+      for (const href of candidates.slice(0, 60)) {
+        if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) break;
         if (!/^https:\/\/github\.com\//i.test(href)) continue;
         let url;
-        try { url = new URL(href, "https://chatgpt.com"); } catch { continue; }
+        try { url = new URL(href); } catch { continue; }
         if (url.origin !== "https://github.com" || url.search || url.hash) continue;
         const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
         if (!match) continue;
