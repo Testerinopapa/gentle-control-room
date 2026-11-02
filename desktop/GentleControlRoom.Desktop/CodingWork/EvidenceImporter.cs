@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace GentleControlRoom.Desktop.CodingWork;
 
@@ -51,15 +52,28 @@ internal static class EvidenceImporter
             {
                 summary = type switch { "session_started" => "Approved browser recording started", "session_ended" => "Browser recording stopped",
                     "visible_counts" => "Visible message counts updated; content not collected", "coding_tag" => "Coding-work tag changed",
-                    "workflow_stage" => "Request classified locally; no action or outcome verified", _ => "" };
+                    "workflow_stage" => "Request classified locally; no action or outcome verified",
+                    "github_commit_ref" => "GitHub commit link observed in approved assistant message; authorship and resulting code not verified", _ => "" };
                 category = Get("workflowStage") switch { "investigation" => "Investigation", "implementation" => "Implementation",
                     "debugging" => "Debugging", "testing" => "Testing", "version_control" => "Version control", "deployment" => "Deployment", _ => "Unknown" };
             }
             if (summary == "") return null;
             var basis = source == "ChatGPT" && type == "workflow_stage" ? "INFERRED" : "OBSERVED";
+            var reference = "";
+            var evidenceKind = "metadata";
+            if (source == "ChatGPT" && type == "github_commit_ref")
+            {
+                var repository = Get("repository");
+                var sha = Get("commitSha");
+                if (!Regex.IsMatch(repository, @"^[a-z0-9-]{1,39}/[a-z0-9_.-]{1,100}$", RegexOptions.IgnoreCase) ||
+                    !Regex.IsMatch(sha, @"^[a-f0-9]{40}$", RegexOptions.IgnoreCase)) return null;
+                reference = repository.ToLowerInvariant() + "@" + sha.ToLowerInvariant();
+                evidenceKind = "github_commit_reference";
+                category = "Version control";
+            }
             return new(WorkJson.Hash(source + fileKey + offset + line), source, WorkJson.Hash(source + session),
                 source == "Codex" && Get("projectPseudonym") != "" ? WorkJson.Hash(Get("projectPseudonym")) : "",
-                at.ToUniversalTime(), "metadata", category, summary, basis, FileKey: fileKey);
+                at.ToUniversalTime(), evidenceKind, category, summary, basis, Reference: reference, FileKey: fileKey);
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { return null; }
     }
