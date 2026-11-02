@@ -80,6 +80,14 @@ analysis once supported association exists. Public patches are cached once per
 repository/SHA, even across sessions. A commit reference is not proof of creation,
 authorship, successful implementation, test execution or deployment.
 
+The JSON analysis now includes `captureDiagnostics`: counts of GitHub reference
+events by discovery (assistant/manual), attribution (automatic/manual/unattributed/
+historical/unknown), and unique nonhistorical commits by retrieval status
+(text patches/metadata only/unavailable/not cached). Historical references are
+reported separately because they are intentionally not fetched. This is an
+audit aid for determining whether capture and attribution actually succeeded;
+it does not establish commit authorship or whether a task worked.
+
 The export envelope remains version 1 with its existing `events` and `commits`.
 `analysis.version` is now 2. Existing task fields remain, with additive `taskId`,
 `requestId`, `responseIds`, `workflowStages`, `attribution`, `filesChanged`,
