@@ -64,7 +64,7 @@
       <div id="state" class="status" data-active="false" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span>
       </div>
-      <p id="note" class="hint">Recording starts only when you enable a conversation.</p>
+      <p id="note" class="hint">Starting a conversation records coding-work metadata and automatically enables local workflow classification. Detected public GitHub commit patches may be retrieved and stored locally; no chat text is saved.</p>
       <p id="error" class="error" role="alert" hidden></p>
       <div class="buttons">
         <button id="start" class="primary" disabled>Start for this conversation</button>
@@ -84,21 +84,6 @@
       <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
     </section>
 
-    <section aria-label="Coding work tag">
-      <h2 class="section-heading">Coding work</h2>
-      <p class="hint" id="coding-hint">For work done using ChatGPT tools without displayed code, mark this conversation as coding-related.</p>
-      <button id="coding-toggle" type="button" disabled>Mark as coding work</button>
-      <p class="hint">Only a yes/no tag is stored. No conversation text is saved.</p>
-    </section>
-
-    <section aria-label="Local coding workflow analysis">
-      <h2 class="section-heading">Coding workflow analysis</h2>
-      <p class="hint">Optional: locally examine visible user requests to classify debugging, implementation, testing and other workflow stages. Only category labels, local task boundaries and timestamps are saved.</p>
-      <p class="hint">No prompt or assistant message text is saved. When enabled, detected public GitHub commit links can be fetched for code diffs; these are stored locally.</p>
-      <button id="workflow-toggle" type="button" disabled>Enable workflow analysis</button>
-      <p id="workflow-state" class="hint" role="status" aria-live="polite">Off · enable after starting this conversation.</p>
-    </section>
-
     <section aria-label="Export local evidence">
       <h2 class="section-heading">Evidence</h2>
       <p id="evidence-count" class="hint" role="status">No local evidence yet.</p>
@@ -110,19 +95,18 @@
       <select id="commit-task" style="width:100%;padding:10px;font:inherit"><option value="">Unattributed</option></select>
       <p id="unresolved-commits" class="hint"></p>
       <button id="import-commit" type="button" disabled>Import commit evidence</button>
-      <p id="import-status" class="hint" role="status" aria-live="polite">Requires recording and workflow analysis. Only public GitHub commits can be fetched.</p>
+      <p id="import-status" class="hint" role="status" aria-live="polite">Requires recording. Only public GitHub commits can be fetched.</p>
       <button id="export-evidence" type="button">Export evidence JSON</button>
       <button id="clear-evidence" type="button">Delete stored evidence</button>
     </section>
     <p class="notice">
-      This panel follows the active Edge tab. Each conversation needs its own approval.
-      Switching conversations stops collection for the previous one.
+      Start recording is the single approval for coding tagging, local workflow classification and public GitHub commit retrieval in this conversation. Switching conversations stops collection for the previous one.
     </p>
   </main>
 
   <footer>
     <p><strong>Stored in Edge.</strong> No chat text, titles, conversation URLs, cookies or tokens are saved.</p>
-    <p class="muted">GitHub code diffs are fetched only when workflow analysis is enabled. Exports remain on your device.</p>
+    <p class="muted">Local workflow analysis starts with recording. Public GitHub commit diffs can be fetched while recording is on. Exports remain on your device.</p>
   </footer>
 </div>
 <script src="sidepanel.js"></script>
