@@ -558,3 +558,79 @@ test("sidebar exposes independent Windows connection diagnostics", () => {
   assert.ok(panelLogic.includes('type: "testConnection"'));
   assert.ok(panelLogic.includes('checkButton.addEventListener("click"'));
 });
+
+
+test("GitHub commit references require workflow consent and are deduplicated", async () => {
+  const h = harness();
+  const sender = { tab: { id: 9 } };
+  const commit = {
+    type: "githubCommitReference", repository: "Testerinopapa/gentle-control-room",
+    sha: "28de267f6353f99977c5185080f5573a45ab12de",
+    prompt: "PRIVATE TEXT", code: "PRIVATE SOURCE"
+  };
+  assert.equal((await h.send(commit, sender)).ok, false);
+  await h.send({ type: "start", tabId: 9 });
+  assert.equal((await h.send(commit, sender)).ok, false);
+  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: true });
+  assert.equal((await h.send(commit, sender)).ok, true);
+  assert.equal(h.native.at(-1).event, "github_commit_ref");
+  assert.equal(h.native.at(-1).repository, "testerinopapa/gentle-control-room");
+  assert.equal(h.native.at(-1).commitSha, commit.sha);
+  assert.ok(!JSON.stringify(h.native).includes("PRIVATE"));
+  const calls = h.native.length;
+  assert.equal((await h.send(commit, sender)).ok, true);
+  assert.equal(h.native.length, calls, "same commit must not be sent twice");
+  assert.equal((await h.send({ ...commit, repository: "github.com.evil.invalid/a/b" }, sender)).ok, false);
+  assert.equal((await h.send({ ...commit, sha: "not-a-sha" }, sender)).ok, false);
+  assert.equal(h.native.length, calls);
+  await h.send({ type: "setWorkflowAnalysis", tabId: 9, enabled: false });
+  assert.equal((await h.send(commit, sender)).ok, false);
+});
+
+test("assistant GitHub links are read only after explicit workflow opt-in", async () => {
+  const messages = [];
+  const valid = "https://github.com/Testerinopapa/gentle-control-room/commit/28de267f6353f99977c5185080f5573a45ab12de";
+  let hrefReads = 0;
+  const anchor = (href) => ({
+    getAttribute(name) {
+      assert.equal(name, "href");
+      hrefReads++;
+      return href;
+    }
+  });
+  const assistant = {
+    querySelectorAll(query) {
+      assert.equal(query, "a[href]");
+      return [anchor(valid), anchor("https://evil.invalid/a/b/commit/" +
+        "28de267f6353f99977c5185080f5573a45ab12de")];
+    }
+  };
+  const region = {
+    querySelectorAll(query) {
+      if (query.includes(":assistant")) return [assistant];
+      return [];
+    }
+  };
+  let onCommand;
+  vm.runInNewContext(contentLogic, {
+    document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/test" }, URL,
+    chrome: { runtime: {
+      async sendMessage(message) { messages.push(message); return { ok: true }; },
+      onMessage: { addListener(fn) { onCommand = fn; }, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval() { return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(hrefReads, 0, "normal recording must not inspect assistant links");
+  onCommand({ type: "gcrWorkflowMode", enabled: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(messages.filter(x => x.type === "githubCommitReference").length, 1);
+  assert.equal(messages.find(x => x.type === "githubCommitReference").repository,
+    "testerinopapa/gentle-control-room");
+  assert.ok(!JSON.stringify(messages).includes("evil.invalid"));
+  assert.ok(!JSON.stringify(messages).includes("/c/test"));
+});
