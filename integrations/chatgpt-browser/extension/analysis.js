@@ -73,6 +73,11 @@
       });
     }
     const repositories = [...new Set(references.map(ref => ref.repository))].sort();
+    // Count file-level GitHub additions/deletions only when a textual patch
+    // was retained. The same reference is already deduplicated per episode.
+    const capturedFiles = references.flatMap(ref => ref.filesWithCapturedPatches);
+    const reportedAdditions = capturedFiles.reduce((sum, file) => sum + file.additions, 0);
+    const reportedDeletions = capturedFiles.reduce((sum, file) => sum + file.deletions, 0);
     return {
       id: sessionId + ":" + segment,
       kind: "inferred_coding_episode",
@@ -89,7 +94,14 @@
       evidence: {
         observedCommitReferences: references.length,
         retrievedCommitPatches: references.filter(ref => ref.filesWithCapturedPatches.length).length,
-        capturedChangedFiles: references.reduce((sum, ref) => sum + ref.filesWithCapturedPatches.length, 0),
+        capturedChangedFiles: capturedFiles.length,
+        reportedLineChanges: {
+          additions: reportedAdditions,
+          deletions: reportedDeletions,
+          total: reportedAdditions + reportedDeletions,
+          scope: "github_file_counts_for_retained_text_patches",
+          note: "GitHub-reported file totals, not work effort or a verification of success."
+        },
         testExecution: "not_verified",
         testsPassed: "unknown",
         deployment: "unknown",
