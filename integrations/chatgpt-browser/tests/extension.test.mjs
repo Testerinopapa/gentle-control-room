@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import vm from "node:vm";
 
 const background = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
+const analysisSource = readFileSync(new URL("../extension/analysis.js", import.meta.url), "utf8");
 const content = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
 const panel = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
 const markup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
@@ -63,17 +64,23 @@ function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse
       text: async () => JSON.stringify(record)
     };
   };
-  vm.runInNewContext(background, {
+  const context = vm.createContext({
     chrome, URL, crypto: { randomUUID }, Date, JSON, fetch,
     setTimeout, clearTimeout, console, AbortController
-  }, { filename: "background.js" });
+  });
+  context.importScripts = filename => {
+    assert.equal(filename, "analysis.js");
+    vm.runInContext(analysisSource, context, { filename });
+  };
+  vm.runInContext(background, context, { filename: "background.js" });
   async function send(message, sender = {}) {
     return await new Promise(resolve => listener(message, sender, resolve));
   }
   return {
     send, local, sessions, badge, requests, pageCommands,
     navigate(next) { currentUrl = next; tabUpdated(9, { url: next }); },
-    tabRemoved
+    tabRemoved,
+    analyze: data => context.GentleCodingAnalysis.analyze(data)
   };
 }
 const origin = { tab: { id: 9 } };
@@ -424,4 +431,116 @@ test("binary-only GitHub commits export metadata without claiming a code diff", 
   assert.match(record.note, /no safe textual patches/);
   assert.equal(data.events.at(-1).type, "github_commit_ref");
   assert.equal((await h.send({ type: "getState", tabId: 9 })).recordedCommits, 0);
+});
+
+test("JSON export groups stage/commit evidence into a session-scoped coding episode", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "workflowStage", stage: "implementation" }, origin);
+  await h.send({ type: "githubCommitReference",
+    repository: "testerinopapa/gentle-control-room", sha: HASH }, origin);
+  await h.send({ type: "workflowStage", stage: "testing" }, origin);
+  const exportedData = await exported(h);
+  assert.equal(exportedData.analysis.version, 1);
+  assert.equal(exportedData.analysis.method, "deterministic_local_evidence_rules");
+  const tasks = exportedData.analysis.tasks;
+  assert.equal(tasks.length, 1);
+  assert.deepEqual(Array.from(tasks[0].stages), ["implementation", "testing"]);
+  assert.equal(tasks[0].commitReferences.length, 1);
+  assert.equal(tasks[0].commitReferences[0].retrieval, "retrieved");
+  assert.equal(tasks[0].commitReferences[0].filesWithCapturedPatches[0].path, "src/feature.ts");
+  assert.equal(tasks[0].evidence.retrievedCommitPatches, 1);
+  assert.equal(tasks[0].evidence.testExecution, "not_verified");
+  assert.equal(tasks[0].evidence.testsPassed, "unknown");
+  assert.equal(exportedData.analysis.patterns.length, 0,
+    "one coding episode must never imply a recurring habit");
+  assert.equal(exportedData.analysis.coverage.inferredCodingEpisodes, 1);
+});
+
+test("recurrence requires distinct coding episodes with supporting evidence", () => {
+  const h = harness();
+  const shaA = HASH;
+  const shaB = "a".repeat(40);
+  const sessionA = "123e4567-e89b-42d3-a456-426614174000";
+  const sessionB = "123e4567-e89b-42d3-a456-426614174001";
+  const t = (date, sessionId, type, fields = {}) => ({
+    timestamp: date, sessionId, type, ...fields
+  });
+  const events = [
+    t("2026-11-01T10:00:00Z", sessionA, "session_started"),
+    t("2026-11-01T10:01:00Z", sessionA, "workflow_stage", { stage: "debugging" }),
+    t("2026-11-01T10:02:00Z", sessionA, "workflow_stage", { stage: "implementation" }),
+    t("2026-11-01T10:03:00Z", sessionA, "github_commit_ref", {
+      repository: "testerinopapa/gentle-control-room", commitSha: shaA, discovery: "assistant" }),
+    t("2026-11-01T10:04:00Z", sessionA, "workflow_stage", { stage: "testing" }),
+    t("2026-11-02T10:00:00Z", sessionB, "workflow_stage", { stage: "debugging" }),
+    t("2026-11-02T10:01:00Z", sessionB, "workflow_stage", { stage: "implementation" }),
+    t("2026-11-02T10:02:00Z", sessionB, "github_commit_ref", {
+      repository: "testerinopapa/gentle-control-room", commitSha: shaB, discovery: "assistant" }),
+    t("2026-11-02T10:03:00Z", sessionB, "workflow_stage", { stage: "testing" })
+  ];
+  const commits = {
+    ["testerinopapa/gentle-control-room@" + shaA]: {
+      repository: "testerinopapa/gentle-control-room", sha: shaA, status: "retrieved",
+      changedFiles: 1, files: [{ path: "src/shared.ts", additions: 1, deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+first" }]
+    },
+    ["testerinopapa/gentle-control-room@" + shaB]: {
+      repository: "testerinopapa/gentle-control-room", sha: shaB, status: "retrieved",
+      changedFiles: 1, files: [{ path: "src/shared.ts", additions: 1, deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+second" }]
+    }
+  };
+  const analysis = h.analyze({ events, commits });
+  assert.equal(analysis.coverage.inferredCodingEpisodes, 2);
+  assert.equal(analysis.patterns.find(p => p.id === "transition:debugging->implementation").distinctTasks, 2);
+  assert.equal(analysis.patterns.find(p => p.id === "transition:implementation->testing").distinctTasks, 2);
+  const file = analysis.patterns.find(p =>
+    p.id === "file:testerinopapa/gentle-control-room/src/shared.ts");
+  assert.equal(file.distinctTasks, 2);
+  assert.equal(file.supportingCommitRefs.length, 2);
+  assert.ok(file.supportingTaskIds.every(x => typeof x === "string"));
+  assert.ok(analysis.tasks.every(x => x.evidence.testsPassed === "unknown"));
+  assert.ok(!JSON.stringify(analysis).includes("+second"),
+    "analysis should link to patches rather than duplicating their source content");
+});
+
+test("one commit referenced twice is not evidence of recurring file edits", () => {
+  const h = harness();
+  const events = [
+    { timestamp: "2026-11-01T10:00:00Z", sessionId: "session-a", type: "github_commit_ref",
+      repository: "testerinopapa/gentle-control-room", commitSha: HASH },
+    { timestamp: "2026-11-01T11:00:00Z", sessionId: "session-b", type: "github_commit_ref",
+      repository: "testerinopapa/gentle-control-room", commitSha: HASH }
+  ];
+  const commits = { ["testerinopapa/gentle-control-room@" + HASH]: {
+    repository: "testerinopapa/gentle-control-room", sha: HASH, status: "retrieved",
+    files: [{ path: "src/once.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]
+  } };
+  const result = h.analyze({ events, commits });
+  assert.equal(result.tasks.length, 2);
+  assert.equal(result.patterns.some(p => p.type === "same_file_in_distinct_commits"), false);
+});
+
+test("separates long gaps and ignores count-only sessions and unrecognized stages", () => {
+  const h = harness();
+  const session = "session-long";
+  const events = [
+    { timestamp: "2026-11-01T08:00:00Z", sessionId: "session-counts",
+      type: "session_started" },
+    { timestamp: "2026-11-01T08:05:00Z", sessionId: "session-counts",
+      type: "visible_counts", visibleUser: 3, visibleAssistant: 2 },
+    { timestamp: "2026-11-01T08:10:00Z", sessionId: session,
+      type: "workflow_stage", stage: "implementation" },
+    { timestamp: "2026-11-01T08:20:00Z", sessionId: session,
+      type: "workflow_stage", stage: "invented_action" },
+    { timestamp: "2026-11-01T10:00:00Z", sessionId: session,
+      type: "workflow_stage", stage: "testing" }
+  ];
+  const result = h.analyze({ events, commits: {} });
+  assert.equal(result.tasks.length, 2);
+  assert.equal(result.tasks[0].sessionId, session);
+  assert.equal(result.tasks[0].eventIndices.length, 1);
+  assert.equal(result.patterns.length, 0);
+  assert.ok(result.limitations.some(x => x.includes("heuristic time segments")));
 });
