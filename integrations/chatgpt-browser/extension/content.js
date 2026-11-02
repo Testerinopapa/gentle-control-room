@@ -22,6 +22,45 @@
   const seenMessages = new WeakSet();
   let workflowSent = 0;
   const maxWorkflowStages = 120;
+  const seenCommitLinks = new Set();
+  const pendingCommitLinks = new Set();
+  const maxCommitLinks = 30;
+
+  // Only href attributes of GitHub commit links in assistant turns are examined.
+  // Never export assistant text, code, private conversation URLs, or arbitrary links.
+  async function scanCommitLinks() {
+    if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) return;
+    const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
+    const units = region
+      ? region.querySelectorAll('[data-content-search-unit-key$=":assistant"]')
+      : document.querySelectorAll('[data-message-author-role="assistant"]');
+    for (const unit of Array.from(units).slice(-120)) {
+      if (!workflowEnabled || stopped) break;
+      if (typeof unit.querySelectorAll !== "function") continue;
+      for (const anchor of Array.from(unit.querySelectorAll('a[href]')).slice(0, 30)) {
+        if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) break;
+        const href = anchor.getAttribute?.("href");
+        if (typeof href !== "string" || href.length > 300) continue;
+        let url;
+        try { url = new URL(href, "https://chatgpt.com"); } catch { continue; }
+        if (url.origin !== "https://github.com" || url.search || url.hash) continue;
+        const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
+        if (!match) continue;
+        const repository = (match[1] + "/" + match[2]).toLowerCase();
+        const sha = match[3].toLowerCase();
+        const key = repository + "@" + sha;
+        if (seenCommitLinks.has(key) || pendingCommitLinks.has(key)) continue;
+        pendingCommitLinks.add(key);
+        try {
+          const result = await chrome.runtime.sendMessage({ type: "githubCommitReference", repository, sha });
+          if (result?.ok && workflowEnabled && !stopped) seenCommitLinks.add(key);
+        } catch {
+          // Failed deliveries remain retryable; never send original href or page content.
+        } finally { pendingCommitLinks.delete(key); }
+      }
+    }
+  }
+
   const workflowCategories = Object.freeze([
     ["debugging", /\b(?:debug|bug|exception|stack\s*trace|traceback|broken|error|errors|fail(?:ed|ing|ure|s)?|not\s+working|doesn.t\s+work|fix\s+(?:the\s+)?(?:issue|problem|error|bug))\b/i],
     ["version_control", /\b(?:git|commit|pull\s+request|merge|rebase|cherry.pick|branch|push\s+to\s+(?:main|remote)|sync\s+(?:local|remote))\b/i],
@@ -178,7 +217,7 @@
     void reportStatus(counts.detector);
     if (counts.detector === "current" || counts.detector === "legacy") {
       void reportCounts(counts);
-      if (workflowEnabled) void scanWorkflow();
+      if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
     }
   }
 
@@ -198,7 +237,7 @@
     if (message?.type === "gcrStop") stop();
     if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
       workflowEnabled = message.enabled;
-      if (workflowEnabled) void scanWorkflow();
+      if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
     }
   }
 
