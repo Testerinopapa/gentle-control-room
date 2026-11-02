@@ -59,6 +59,7 @@ internal sealed class WorkState
     public List<TrackedRepository> Repositories { get; set; } = new();
     public List<CodeChange> CodeChanges { get; set; } = new();
     public HashSet<string> ImportedGitHubCommits { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, DateTimeOffset> GitHubRetryAfter { get; set; } = new(StringComparer.Ordinal);
     public bool LocalEnabled { get; set; }
     public List<Observation> Evidence { get; set; } = new();
     public List<CodingTask> Tasks { get; set; } = new();
