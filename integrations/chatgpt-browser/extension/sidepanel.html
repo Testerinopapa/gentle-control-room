@@ -70,11 +70,7 @@
         <button id="start" class="primary" disabled>Start for this conversation</button>
         <button id="stop" disabled>Stop recording</button>
       </div>
-      <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0;">
-        <h3 class="section-heading" style="margin-bottom: 6px;">Windows connection</h3>
-        <p class="hint" id="connection-state" role="status" aria-live="polite">Not tested yet.</p>
-        <button id="check-connection" type="button">Test Windows connection</button>
-      </div>
+      
     </section>
 
     <section aria-label="Visible message counts">
@@ -92,17 +88,23 @@
       <h2 class="section-heading">Coding work</h2>
       <p class="hint" id="coding-hint">For work done using ChatGPT tools without displayed code, mark this conversation as coding-related.</p>
       <button id="coding-toggle" type="button" disabled>Mark as coding work</button>
-      <p class="hint">Only a yes/no tag is saved. No code or conversation text is recorded.</p>
+      <p class="hint">Only a yes/no tag is stored. No conversation text is saved.</p>
     </section>
 
     <section aria-label="Local coding workflow analysis">
       <h2 class="section-heading">Coding workflow analysis</h2>
       <p class="hint">Optional: locally examine visible user requests to classify debugging, implementation, testing and other workflow stages. Only category labels and timestamps are saved.</p>
-      <p class="hint"><strong>No prompt text, code, message IDs or URLs leave this tab.</strong> This is separate from ordinary recording and starts off.</p>
+      <p class="hint">No prompt or assistant message text is saved. When enabled, detected public GitHub commit links can be fetched for code diffs; these are stored locally.</p>
       <button id="workflow-toggle" type="button" disabled>Enable workflow analysis</button>
       <p id="workflow-state" class="hint" role="status" aria-live="polite">Off · enable after starting this conversation.</p>
     </section>
 
+    <section aria-label="Export local evidence">
+      <h2 class="section-heading">Evidence</h2>
+      <p id="evidence-count" class="hint" role="status">No local evidence yet.</p>
+      <button id="export-evidence" type="button">Export evidence JSON</button>
+      <button id="clear-evidence" type="button">Delete stored evidence</button>
+    </section>
     <p class="notice">
       This panel follows the active Edge tab. Each conversation needs its own approval.
       Switching conversations stops collection for the previous one.
@@ -110,8 +112,8 @@
   </main>
 
   <footer>
-    <p><strong>Local only.</strong> No chat text, conversation titles, URLs, cookies, or tokens are saved.</p>
-    <p class="muted">Your activity summary appears in the Gentle Control Room Windows app.</p>
+    <p><strong>Stored in Edge.</strong> No chat text, titles, conversation URLs, cookies or tokens are saved.</p>
+    <p class="muted">GitHub code diffs are fetched only when workflow analysis is enabled. Exports remain on your device.</p>
   </footer>
 </div>
 <script src="sidepanel.js"></script>
