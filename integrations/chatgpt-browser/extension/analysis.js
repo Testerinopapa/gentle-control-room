@@ -122,6 +122,53 @@
     };
   }
 
+  // Provide explicit capture diagnostics in the JSON export. Counts describe
+  // recorded evidence, not work performed or verified GitHub authorship.
+  function captureDiagnostics(events, commits) {
+    const refs = events.filter(e => e && e.type === "github_commit_ref" &&
+      typeof e.repository === "string" && typeof e.commitSha === "string" &&
+      COMMIT_RE.test(e.repository.toLowerCase() + "@" + e.commitSha.toLowerCase()));
+    const discovery = { assistant: 0, manual: 0, unknown: 0 };
+    const attribution = { automatic: 0, manual: 0, unattributed: 0, historical: 0, unknown: 0 };
+    const eligibleKeys = new Set();
+    const historicalKeys = new Set();
+
+    for (const ref of refs) {
+      const origin = ref.discovery === "assistant" || ref.discovery === "manual"
+        ? ref.discovery : "unknown";
+      discovery[origin]++;
+      const state = ref.attribution?.state;
+      attribution[Object.hasOwn(attribution, state) ? state : "unknown"]++;
+      const key = ref.repository.toLowerCase() + "@" + ref.commitSha.toLowerCase();
+      if (state === "historical") historicalKeys.add(key);
+      else eligibleKeys.add(key);
+    }
+
+    let retrievedWithPatches = 0;
+    let metadataOnly = 0;
+    let unavailable = 0;
+    let notCached = 0;
+    for (const key of eligibleKeys) {
+      const record = commits[key];
+      if (!record || typeof record !== "object") { notCached++; continue; }
+      if (record.status === "unavailable") { unavailable++; continue; }
+      if (record.status !== "retrieved" || !Array.isArray(record.files) ||
+          !record.files.some(f => f && typeof f.patch === "string" && f.patch.length > 0)) {
+        metadataOnly++; continue;
+      }
+      retrievedWithPatches++;
+    }
+    return {
+      observedReferenceEvents: refs.length,
+      distinctNonhistoricalReferencedCommits: eligibleKeys.size,
+      distinctHistoricalReferencedCommits: historicalKeys.size,
+      discovery,
+      attribution,
+      retrieval: { withTextPatches: retrievedWithPatches, metadataOnly, unavailable, notCached },
+      note: "Diagnostics summarize recorded references and available public code patches. Manual import and assistant references do not prove a commit was created for the task."
+    };
+  }
+
   function analyze(evidence) {
     const rawEvents = Array.isArray(evidence?.events) ? evidence.events : [];
     const events = rawEvents.map(e => e?.attribution ? { ...e, attribution: { ...e.attribution,
@@ -280,6 +327,7 @@
 
     return {
       version: 2,
+      captureDiagnostics: captureDiagnostics(events, commits),
       method: "deterministic_local_evidence_rules",
       input: "bounded_exported_browser_events_and_public_commit_metadata",
       coverage: {
