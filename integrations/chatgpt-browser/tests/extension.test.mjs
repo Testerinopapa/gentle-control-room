@@ -753,3 +753,46 @@ test("analysis export diagnoses automatic versus manual capture and patch availa
   assert.ok(!JSON.stringify(diagnostic).includes("src/test.ts"),
     "diagnostics must not duplicate code or paths");
 });
+
+
+test("capture diagnostics reject mismatched cached commit identities", () => {
+  const h = harness();
+  const repository = "testerinopapa/gentle-control-room";
+  const alternate = ["a", "b", "c"].map(letter => letter.repeat(40));
+  const event = sha => ({
+    type: "github_commit_ref", sessionId: "session-cache-identity",
+    timestamp: "2026-11-02T20:00:00Z",
+    repository, commitSha: sha, discovery: "assistant",
+    attribution: { state: "automatic" }
+  });
+  const data = h.analyze({
+    events: [event(HASH), ...alternate.map(event)],
+    commits: {
+      [repository + "@" + HASH]: {
+        repository, sha: alternate[0], status: "retrieved",
+        files: [{ path: "src/wrong.ts", patch: "@@ -1 +1 @@\\n-a\\n+b" }]
+      },
+      [repository + "@" + alternate[0]]: {
+        repository: "different/repository", sha: alternate[0], status: "retrieved",
+        files: [{ path: "src/mismatch.ts", patch: "@@ -1 +1 @@\\n-x\\n+y" }]
+      },
+      [repository + "@" + alternate[1]]: {
+        repository, sha: alternate[1], status: "queued", files: []
+      },
+      [repository + "@" + alternate[2]]: {
+        repository, sha: alternate[2], status: "retrieved",
+        files: [{ path: "src/correct.ts", patch: "@@ -1 +1 @@\\n-a\\n+b" }]
+      }
+    }
+  });
+  const d = data.captureDiagnostics;
+  assert.equal(d.distinctNonhistoricalReferencedCommits, 4);
+  assert.equal(d.retrieval.identityMismatch, 2);
+  assert.equal(d.retrieval.unknownStatus, 1);
+  assert.equal(d.retrieval.withTextPatches, 1);
+  assert.equal(d.retrieval.metadataOnly, 0);
+  assert.equal(d.retrieval.unavailable, 0);
+  assert.equal(d.retrieval.notCached, 0);
+  assert.ok(!JSON.stringify(d).includes("src/wrong.ts"),
+    "diagnostics should never copy filenames or patch content");
+});
