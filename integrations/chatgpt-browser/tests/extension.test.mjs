@@ -268,35 +268,39 @@ test("a navigation away ends approval and rejects further page events", async ()
   assert.equal(h.sessions.size, 0);
 });
 
-test("content observer reports only categories and GitHub commit identifiers", async () => {
-  const seen = [], message = { innerText: "Fix the issue, then test it." };
-  const link = { getAttribute: () => COMMIT };
-  const assistant = { querySelectorAll: () => [link] };
-  let command;
+test("content observer captures only new categories and GitHub commit identifiers after opt-in", async () => {
+  const seen = [];
+  const oldUser = { innerText: "Fix the issue, then test it." };
+  const users = [oldUser], links = [];
+  const assistant = { querySelectorAll() { return links; } };
+  let command, poll;
   const region = {
     querySelectorAll(selector) {
-      if (selector.includes("data-user-message-bubble")) return [message];
+      if (selector.includes("data-user-message-bubble")) return users;
       if (selector.includes(":assistant")) return [assistant];
       if (selector.includes(":user")) return [];
-      if (selector === "pre") return [];
       return [];
     }
   };
-  const chrome = { runtime: {
-    async sendMessage(m) { seen.push(m); return { ok: true }; },
-    onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
-  } };
   vm.runInNewContext(content, {
     URL, document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/test" }, chrome,
+    location: { pathname: "/c/test" },
+    chrome: { runtime: {
+      async sendMessage(m) { seen.push(m); return { ok: true }; },
+      onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
+    } },
     MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; }, clearInterval() {},
+    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
     setTimeout() { return 1; }, clearTimeout() {},
     Date: { now: () => 10000 }
   });
   await tick();
-  assert.equal(seen.some(e => e.type === "githubCommitReference"), false);
   command({ type: "gcrWorkflowMode", enabled: true });
+  await tick();
+  assert.equal(seen.some(e => e.type === "workflowStage"), false, "pre-existing prompts are historical");
+  users.push({ innerText: "Fix the issue" });
+  links.push({ getAttribute: () => COMMIT });
+  poll();
   await tick();
   assert.equal(seen.find(e => e.type === "workflowStage").stage, "debugging");
   assert.equal(seen.find(e => e.type === "githubCommitReference").sha, HASH);
@@ -304,18 +308,17 @@ test("content observer reports only categories and GitHub commit identifiers", a
   assert.ok(!JSON.stringify(seen).includes("/c/test"));
 });
 
-
 test("GitHub capture does not require recognized message-count markup", async () => {
   const sent = [];
-  let enable;
+  let enable, poll;
+  const links = [], users = [{ innerText: "Fix the issue" }];
   const assistant = { querySelectorAll(selector) {
-    return selector === "a[href]" ? [{ getAttribute: () => COMMIT }] : [];
+    return selector === "a[href]" ? links : [];
   } };
-  const user = { innerText: "Fix the issue" };
   const region = {
     querySelectorAll(selector) {
       if (selector === '[data-message-author-role="assistant"]') return [assistant];
-      if (selector === '[data-message-author-role="user"]') return [user];
+      if (selector === '[data-message-author-role="user"]') return users;
       return [];
     }
   };
@@ -327,7 +330,7 @@ test("GitHub capture does not require recognized message-count markup", async ()
       onMessage: { addListener(fn) { enable = fn; }, removeListener() {} }
     } },
     MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; }, clearInterval() {},
+    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
     setTimeout() { return 1; }, clearTimeout() {},
     Date: { now: () => 10000 }
   }, { filename: "content.js" });
@@ -335,15 +338,17 @@ test("GitHub capture does not require recognized message-count markup", async ()
   assert.equal(sent.find(m => m.type === "observerStatus").detector, "waiting");
   enable({ type: "gcrWorkflowMode", enabled: true });
   await tick();
+  users.push({ innerText: "Fix the issue" });
+  links.push({ getAttribute: () => COMMIT });
+  poll();
+  await tick();
   assert.equal(sent.find(m => m.type === "githubCommitReference").sha, HASH);
   assert.equal(sent.find(m => m.type === "workflowStage").stage, "debugging");
 });
 
-
-test("consented assistant plain-text commit URL works when no HTML anchor exists", async () => {
-  const messages = [];
-  const assistant = {
-    innerText: "Implemented in " + COMMIT + " (see commit).",
+test("consented assistant plain-text commit URL appearing after opt-in is recorded", async () => {
+  const messages = [], assistant = {
+    innerText: "",
     querySelectorAll(selector) {
       assert.equal(selector, "a[href]");
       return [];
@@ -355,7 +360,7 @@ test("consented assistant plain-text commit URL works when no HTML anchor exists
       return [];
     }
   };
-  let command;
+  let command, poll;
   vm.runInNewContext(content, {
     URL, document: { documentElement: {}, querySelector() { return region; } },
     location: { pathname: "/c/safe" },
@@ -364,13 +369,16 @@ test("consented assistant plain-text commit URL works when no HTML anchor exists
       onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
     } },
     MutationObserver: class { observe() {} disconnect() {} },
-    setInterval() { return 1; }, clearInterval() {},
+    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
     setTimeout() { return 1; }, clearTimeout() {},
     Date: { now: () => 10000 }
   }, { filename: "content.js" });
   await tick();
-  assert.equal(messages.filter(m => m.type === "githubCommitReference").length, 0);
   command({ type: "gcrWorkflowMode", enabled: true });
+  await tick();
+  assert.equal(messages.filter(m => m.type === "githubCommitReference").length, 0);
+  assistant.innerText = "Implemented in " + COMMIT + " (see commit).";
+  poll();
   await tick();
   const refs = messages.filter(m => m.type === "githubCommitReference");
   assert.equal(refs.length, 1);
@@ -378,6 +386,47 @@ test("consented assistant plain-text commit URL works when no HTML anchor exists
   assert.equal(refs[0].repository, "testerinopapa/gentle-control-room");
   assert.ok(!JSON.stringify(messages).includes("Implemented in"));
   assert.ok(!JSON.stringify(messages).includes("/c/safe"));
+});
+
+test("historical assistant commits at opt-in are ignored even after re-rendering", async () => {
+  const sent = [];
+  const newSha = "b".repeat(40);
+  const newUrl = "https://github.com/Testerinopapa/gentle-control-room/commit/" + newSha;
+  const links = [{ getAttribute: () => COMMIT }];
+  const assistant = { querySelectorAll(selector) {
+    return selector === "a[href]" ? links : [];
+  } };
+  const region = { querySelectorAll(selector) {
+    return selector === '[data-message-author-role="assistant"]' ? [assistant] : [];
+  } };
+  let onCommand, poll;
+  vm.runInNewContext(content, {
+    URL, document: { documentElement: {}, querySelector() { return region; } },
+    location: { pathname: "/c/approved" },
+    chrome: { runtime: {
+      async sendMessage(message) { sent.push(message); return { ok: true }; },
+      onMessage: { addListener(fn) { onCommand = fn; }, removeListener() {} }
+    } },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
+    setTimeout() { return 1; }, clearTimeout() {},
+    Date: { now: () => 10000 }
+  }, { filename: "content.js" });
+  await tick();
+  onCommand({ type: "gcrWorkflowMode", enabled: true });
+  await tick();
+  assert.equal(sent.filter(e => e.type === "githubCommitReference").length, 0);
+  links.unshift({ getAttribute: () => newUrl });
+  poll();
+  await tick();
+  let refs = sent.filter(e => e.type === "githubCommitReference");
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].sha, newSha);
+  links.splice(0, 2, { getAttribute: () => COMMIT });
+  poll();
+  await tick();
+  refs = sent.filter(e => e.type === "githubCommitReference");
+  assert.equal(refs.length, 1, "the old visible commit must not re-enter evidence");
 });
 
 test("sidepanel manual commit fallback requires active workflow consent and strict GitHub URL", async () => {
