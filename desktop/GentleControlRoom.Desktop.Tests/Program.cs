@@ -251,6 +251,7 @@ finally { Directory.Delete(browserRoot, true); }
 InsightTests.Run();
 await CodingWorkTests.Run();
 await CodeTrackingTests.Run();
+await GitHubCommitTests.Run();
 
 if (args.Contains("--local"))
 {
