@@ -148,11 +148,23 @@
     let metadataOnly = 0;
     let unavailable = 0;
     let notCached = 0;
+    let identityMismatch = 0;
+    let unknownStatus = 0;
     for (const key of eligibleKeys) {
       const record = commits[key];
       if (!record || typeof record !== "object") { notCached++; continue; }
+      // A mismatched cache entry must not be presented as evidence of this
+      // commit. Legacy fixtures lacking identity fields remain readable.
+      if ((typeof record.repository === "string" &&
+           record.repository.toLowerCase() !== key.split("@")[0]) ||
+          (typeof record.sha === "string" &&
+           record.sha.toLowerCase() !== key.split("@")[1])) {
+        identityMismatch++; continue;
+      }
       if (record.status === "unavailable") { unavailable++; continue; }
-      if (record.status !== "retrieved" || !Array.isArray(record.files) ||
+      if (record.status === "metadata_only") { metadataOnly++; continue; }
+      if (record.status !== "retrieved") { unknownStatus++; continue; }
+      if (!Array.isArray(record.files) ||
           !record.files.some(f => f && typeof f.patch === "string" && f.patch.length > 0)) {
         metadataOnly++; continue;
       }
@@ -164,8 +176,9 @@
       distinctHistoricalReferencedCommits: historicalKeys.size,
       discovery,
       attribution,
-      retrieval: { withTextPatches: retrievedWithPatches, metadataOnly, unavailable, notCached },
-      note: "Diagnostics summarize recorded references and available public code patches. Manual import and assistant references do not prove a commit was created for the task."
+      retrieval: { withTextPatches: retrievedWithPatches, metadataOnly, unavailable,
+        notCached, identityMismatch, unknownStatus },
+      note: "Diagnostics summarize recorded references and available public code patches. A mismatched cache identity cannot confirm code retrieval; manual imports and assistant references do not prove authorship."
     };
   }
 
