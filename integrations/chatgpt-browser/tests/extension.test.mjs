@@ -139,7 +139,7 @@ test("counts and tags remain metadata only, with optional workflow categorizatio
   assert.equal((await h.send({ type: "workflowStage", stage: "debugging", prompt: "SECRET" }, origin)).ok, true);
   assert.equal((await h.send({ type: "workflowStage", stage: "arbitrary" }, origin)).ok, false);
   const data = await exported(h);
-  assert.deepEqual(data.events.map(x => x.type), ["session_started", "visible_counts", "coding_tag", "workflow_stage"]);
+  assert.deepEqual(Array.from(data.events, x => x.type), ["session_started", "visible_counts", "coding_tag", "workflow_stage"]);
   assert.equal(data.events.at(-1).stage, "debugging");
   assert.equal(JSON.stringify(data).includes("PRIVATE"), false);
   assert.equal(JSON.stringify(data).includes("SECRET"), false);
@@ -199,7 +199,7 @@ test("renamed secrets, private keys and risky patches are never retained", async
     repository: "testerinopapa/gentle-control-room", sha: HASH }, origin);
   const data = await exported(h);
   const files = data.commits["testerinopapa/gentle-control-room@" + HASH].files;
-  assert.deepEqual(files.map(f => f.path), ["src/ok.ts"]);
+  assert.deepEqual(Array.from(files, f => f.path), ["src/ok.ts"]);
 });
 
 test("end recording, page switch, and explicit evidence deletion work without native host", async () => {
@@ -228,7 +228,7 @@ test("a navigation away ends approval and rejects further page events", async ()
 });
 
 test("content observer reports only categories and GitHub commit identifiers", async () => {
-  const seen = [], message = { innerText: "Fix this issue, then test it." };
+  const seen = [], message = { innerText: "Fix the issue, then test it." };
   const link = { getAttribute: () => COMMIT };
   const assistant = { querySelectorAll: () => [link] };
   let command;
@@ -259,6 +259,6 @@ test("content observer reports only categories and GitHub commit identifiers", a
   await tick();
   assert.equal(seen.find(e => e.type === "workflowStage").stage, "debugging");
   assert.equal(seen.find(e => e.type === "githubCommitReference").sha, HASH);
-  assert.ok(!JSON.stringify(seen).includes("Fix this issue"));
+  assert.ok(!JSON.stringify(seen).includes("Fix the issue"));
   assert.ok(!JSON.stringify(seen).includes("/c/test"));
 });
