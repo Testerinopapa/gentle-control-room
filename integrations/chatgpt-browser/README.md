@@ -17,8 +17,12 @@ browsers with side-panel support). It keeps activity evidence in
    **Start for this conversation**.
 5. Choose **Enable workflow analysis** separately for local classification of
    visible user requests and GitHub commit evidence capture.
-6. After a ChatGPT reply contains a rendered GitHub commit link, use
-   **Export evidence JSON** in the extension panel. No Windows steps required.
+6. The extension recognizes complete GitHub commit URLs in assistant HTML
+   links **or visible plain text**. If ChatGPT renders only a link label
+   with no accessible URL, paste the complete GitHub commit URL in the
+   **Evidence → GitHub commit URL** field and click **Import commit evidence**.
+   This is a manual fallback, not automatic access to hidden ChatGPT tool calls.
+7. Use **Export evidence JSON** in the extension panel. No Windows steps required.
 
 The extension's host permissions are restricted to ChatGPT and
 `https://api.github.com/*`; no blanket access to GitHub webpages or the
