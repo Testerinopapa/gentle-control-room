@@ -93,7 +93,7 @@
 
     <section aria-label="Local coding workflow analysis">
       <h2 class="section-heading">Coding workflow analysis</h2>
-      <p class="hint">Optional: locally examine visible user requests to classify debugging, implementation, testing and other workflow stages. Only category labels and timestamps are saved.</p>
+      <p class="hint">Optional: locally examine visible user requests to classify debugging, implementation, testing and other workflow stages. Only category labels, local task boundaries and timestamps are saved.</p>
       <p class="hint">No prompt or assistant message text is saved. When enabled, detected public GitHub commit links can be fetched for code diffs; these are stored locally.</p>
       <button id="workflow-toggle" type="button" disabled>Enable workflow analysis</button>
       <p id="workflow-state" class="hint" role="status" aria-live="polite">Off · enable after starting this conversation.</p>
@@ -106,6 +106,9 @@
       <input id="commit-url" type="url" autocomplete="off" spellcheck="false"
         placeholder="https://github.com/owner/repo/commit/..." 
         style="width:100%; min-width:0; padding:11px; border:1px solid #cbd5e1; border-radius:9px; font:inherit; margin-top:6px;" />
+      <label for="commit-task" class="hint">Associate with task (optional)</label>
+      <select id="commit-task" style="width:100%;padding:10px;font:inherit"><option value="">Unattributed</option></select>
+      <p id="unresolved-commits" class="hint"></p>
       <button id="import-commit" type="button" disabled>Import commit evidence</button>
       <p id="import-status" class="hint" role="status" aria-live="polite">Requires recording and workflow analysis. Only public GitHub commits can be fetched.</p>
       <button id="export-evidence" type="button">Export evidence JSON</button>

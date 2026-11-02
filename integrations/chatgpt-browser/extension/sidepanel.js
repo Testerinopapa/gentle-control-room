@@ -14,6 +14,8 @@ const exportButton = document.getElementById("export-evidence");
 const clearButton = document.getElementById("clear-evidence");
 const commitInput = document.getElementById("commit-url");
 const importButton = document.getElementById("import-commit");
+const taskSelect = document.getElementById("commit-task");
+const unresolvedNode = document.getElementById("unresolved-commits");
 const importStatus = document.getElementById("import-status");
 const codeCountNode = document.getElementById("code-count");
 const codingToggle = document.getElementById("coding-toggle");
@@ -53,6 +55,15 @@ async function refresh() {
     });
     if (!result?.ok) throw new Error(result?.error || "Unable to read the current tab.");
 
+    const selection = taskSelect.value;
+    taskSelect.replaceChildren(new Option("Unattributed", ""));
+    for (const task of result.attributionTasks || [])
+      taskSelect.add(new Option(new Date(task.startedAt).toLocaleString() + " - " +
+        (task.stages.join(" > ") || "Request") + " - " + task.taskId.slice(-8), task.taskId));
+    taskSelect.value = selection;
+    const unresolved = (result.unresolvedCommits || []).filter(ref => !ref.resolved);
+    unresolvedNode.textContent = unresolved.length + " unresolved references. To associate later, paste the commit URL and select its task. " +
+      [...new Set(unresolved.map(ref => ref.key + " (" + ref.state + ")"))].slice(0, 10).join("; ");
     const allowed = Boolean(result.allowed);
     const active = Boolean(result.active);
     stateNode.dataset.active = String(active);
@@ -166,13 +177,14 @@ async function importCommit() {
     const tab = await activeTab();
     if (!tab || tab.id !== selectedTab) throw Error("Active tab changed; select the ChatGPT conversation.");
     const response = await chrome.runtime.sendMessage({
-      type: "importCommitUrl", tabId: selectedTab, url: commitInput.value.trim()
+      type: "importCommitUrl", tabId: selectedTab, url: commitInput.value.trim(), taskId: taskSelect.value || null
     });
     if (!response?.ok) throw Error(response?.error || "Commit import failed.");
     importStatus.textContent = response.duplicate
       ? "This commit was already recorded for this conversation."
       : "Commit reference recorded. Export JSON to inspect the public patch or retrieval status.";
     commitInput.value = "";
+    taskSelect.value = "";
   } catch (error) {
     lastError = error?.message || "Commit import failed.";
     importStatus.textContent = "Commit not imported.";

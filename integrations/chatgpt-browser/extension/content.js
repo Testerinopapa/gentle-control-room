@@ -19,79 +19,150 @@
   // Deeper analysis is a separate explicit opt-in and is never enabled by
   // ordinary Start. Text is inspected inside the webpage process only.
   let workflowEnabled = false;
-  const seenMessages = new WeakSet();
   let workflowSent = 0;
   const maxWorkflowStages = 120;
   const seenCommitLinks = new Set();
-  // Distinguish historical commits already visible when opt-in begins from
-  // references appearing afterward. Historical links never become task evidence.
   const baselineCommitLinks = new Set();
-  const pendingCommitLinks = new Set();
   const maxCommitLinks = 30;
+  let newCommitLinks = 0, historicalCommitLinks = 0;
+  const identities = new Map();
+  let nodes = new WeakMap();
+  let workflowEpoch = 0;
+  const prefix = "m-" + Math.random().toString(36).slice(2, 12);
+  let serial = 0, scanning = false, scanAgain = false;
+  let baselinePending = false, frontier = null;
+  const roleSelectors = role => [
+    `[data-content-search-unit-key$=":${role}"]`,
+    `[data-message-author-role="${role}"]`, `article[data-turn="${role}"]`,
+    `[data-role="${role}"]`, `[data-message-author="${role}"]`,
+    ...(role === "user" ? ['[data-user-message-bubble="true"]'] : [])
+  ].join(",");
 
-  // Read only explicit GitHub commit references from assistant turns after opt-in.
-  // Visible text is used transiently; never export text, code, conversation URLs, or arbitrary links.
-  async function scanCommitLinks(baseline = false) {
-    if (!workflowEnabled || stopped || (!baseline && seenCommitLinks.size >= maxCommitLinks)) return;
-    const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
-    const root = region || document;
-    // ChatGPT can render its modern timeline without content-search-unit keys.
-    // Try known assistant wrappers in order, always scoped to the active timeline
-    // when present. Never inspect user-authored links.
-    const assistantSelectors = [
-      '[data-content-search-unit-key$=":assistant"]',
-      '[data-message-author-role="assistant"]',
-      'article[data-turn="assistant"]',
-      '[data-role="assistant"]',
-      '[data-message-author="assistant"]'
-    ];
-    // Multiple wrapper families may coexist. Do not stop after the first
-    // non-empty selector if that wrapper omits link elements.
-    const units = new Set();
-    for (const selector of assistantSelectors)
-      for (const unit of Array.from(root.querySelectorAll(selector)).slice(-120))
-        units.add(unit);
-    for (const unit of Array.from(units).slice(-120)) {
-      if (!workflowEnabled || stopped) break;
-      if (typeof unit.querySelectorAll !== "function") continue;
-      const candidates = [];
-      for (const anchor of Array.from(unit.querySelectorAll('a[href]')).slice(0, 30)) {
-        const href = anchor.getAttribute?.("href");
-        if (typeof href === "string" && href.length <= 300) candidates.push(href);
+  function units() {
+    const root = document.querySelector('[data-app-action-timeline-scroll][role="region"]') || document;
+    const selector = roleSelectors("user") + "," + roleSelectors("assistant");
+    // Innermost role wrappers avoid nested duplicate turns and mixed-role ancestors.
+    return Array.from(root.querySelectorAll(selector)).filter(node =>
+      !node.querySelector(selector)).slice(-240);
+  }
+  function identity(node, role) {
+    if (nodes.has(node)) return nodes.get(node);
+    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-turn-id], article[id]');
+    const raw = wrapper && ["data-message-id", "data-content-search-unit-key", "data-turn-id", "id"]
+      .map(name => wrapper.getAttribute(name)).find(Boolean);
+    // Raw page identifiers never leave this ephemeral map or enter storage.
+    let fingerprint = 2166136261;
+    const text = role === "user" ? String(node.innerText ?? node.textContent ?? "").slice(0, 2400) : "";
+    for (const char of text) fingerprint = Math.imul(fingerprint ^ char.charCodeAt(0), 16777619);
+    const key = raw ? role + ":" + raw : text ? role + ":fallback:" + (fingerprint >>> 0) : null;
+    let record = key && identities.get(key);
+    if (!record) {
+      record = { id: prefix + "-" + (++serial), stable: Boolean(raw), role,
+        historical: baselinePending, sent: false, stages: new Set(), taskId: null };
+      if (key && identities.size < 1000) identities.set(key, record);
+    }
+    nodes.set(node, record);
+    return record;
+  }
+  function commitIdentifiers(node) {
+    const references = [];
+    const candidates = Array.from(node.querySelectorAll('a[href]')).slice(0, 30)
+      .map(anchor => anchor.getAttribute("href"));
+    const visible = String(node.innerText ?? node.textContent ?? "").slice(0, 12000);
+    candidates.push(...(visible.match(/https:\/\/github\.com\/[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}\/commit\/[a-f0-9]{40}\b/gi) || []).slice(0, 30));
+    for (const href of candidates) {
+      let url;
+      try { url = new URL(href); } catch { continue; }
+      if (url.origin !== "https://github.com" || url.search || url.hash) continue;
+      const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
+      if (!match) continue;
+      const repository = (match[1] + "/" + match[2]).toLowerCase(), sha = match[3].toLowerCase();
+      references.push({ repository, sha });
+    }
+    return references;
+  }
+  function validPage() { return !stopped && workflowEnabled && location.pathname === pathname; }
+  async function scanEvidence() {
+    if (!validPage()) return;
+    if (scanning) { scanAgain = true; return; }
+    scanning = true;
+    const epoch = workflowEpoch;
+    const active = () => validPage() && epoch === workflowEpoch;
+    try {
+      const entries = units().map(node => {
+        const role = node.matches(roleSelectors("user")) ? "user" : "assistant";
+        return { node, record: identity(node, role) };
+      });
+      for (const { record } of entries) record.newlySupported = false;
+      const isBaseline = baselinePending;
+      if (isBaseline) for (const { node, record } of entries) {
+        if (record.role !== "assistant") continue;
+        for (const ref of commitIdentifiers(node))
+          if (baselineCommitLinks.size < 2000) baselineCommitLinks.add(ref.repository + "@" + ref.sha);
       }
-      // ChatGPT sometimes displays plain commit URLs without <a href> links.
-      // Only while workflow consent is ON, examine a bounded amount of visible
-      // assistant text transiently. Save/send only owner/repository and full SHA.
-      const visible = typeof unit.innerText === "string" ? unit.innerText.slice(0, 12000) : "";
-      const mentions = visible.match(/https:\/\/github\.com\/[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}\/commit\/[a-f0-9]{40}\b/gi) || [];
-      candidates.push(...mentions.slice(0, 30));
-      for (const href of candidates.slice(0, 60)) {
-        if (!workflowEnabled || stopped || seenCommitLinks.size >= maxCommitLinks) break;
-        if (!/^https:\/\/github\.com\//i.test(href)) continue;
-        let url;
-        try { url = new URL(href); } catch { continue; }
-        if (url.origin !== "https://github.com" || url.search || url.hash) continue;
-        const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
-        if (!match) continue;
-        const repository = (match[1] + "/" + match[2]).toLowerCase();
-        const sha = match[3].toLowerCase();
-        const key = repository + "@" + sha;
-        if (baseline) {
-          // This reference predates consent. Keep only its identifier in
-          // volatile tab memory so scrolling cannot import it later.
-          if (baselineCommitLinks.size < 2000) baselineCommitLinks.add(key);
-          continue;
+      baselinePending = false;
+      let previous = null, lastRequest = null;
+      for (const { node, record } of entries) {
+        if (!active()) break;
+        if (record.role === "user") {
+          if (!record.sent && !record.historical && workflowSent < maxWorkflowStages) {
+            // A request appended after an already observed turn is a supported
+            // boundary. Newly mounted history and identifier-free replacements
+            // remain uncertain. No message text is persisted.
+            const supported = record.stable && previous?.record.stable &&
+              (previous.record.id === frontier || previous.record.newlySupported === true);
+            record.newlySupported = supported;
+            record.taskId = record.id;
+            const reply = await chrome.runtime.sendMessage({ type: "requestBoundary",
+              requestId: record.id, confidence: supported ? "supported" : "uncertain" });
+            if (!active()) break;
+            if (reply?.ok) { record.sent = true; workflowSent++; }
+          }
+          if (record.sent && !record.historical) {
+            const text = String(node.innerText ?? node.textContent ?? "").slice(0, 2400);
+            const stages = workflowCategories.flatMap(([stage, pattern]) =>
+              Array.from(text.matchAll(new RegExp(pattern.source, "gi")), match => ({ stage, index: match.index })))
+              .sort((a, b) => a.index - b.index).filter((match, index, matches) => !index || match.stage !== matches[index - 1].stage)
+              .slice(0, 20);
+            for (const [ordinal, { stage }] of stages.entries()) {
+              const key = ordinal + ":" + stage;
+              if (!active() || record.stages.has(key)) continue;
+              const reply = await chrome.runtime.sendMessage({ type: "workflowStage", stage, ordinal, requestId: record.id });
+              if (reply?.ok) record.stages.add(key);
+            }
+          }
+        } else {
+          if (!record.sent) {
+            const request = lastRequest;
+            record.taskId = !record.historical && record.stable && request?.role === "user" &&
+              !request.historical && request.sent ? request.taskId : null;
+            const reply = await chrome.runtime.sendMessage({ type: "assistantBoundary",
+              responseId: record.id, requestId: record.taskId,
+              historical: record.historical });
+            if (reply?.ok) record.sent = true;
+          }
+          for (const { repository, sha } of commitIdentifiers(node)) {
+            const historical = baselineCommitLinks.has(repository + "@" + sha);
+            if (!active() || (historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) break;
+            const key = record.id + ":" + repository + "@" + sha;
+            if (seenCommitLinks.has(key)) continue;
+            const reply = await chrome.runtime.sendMessage({ type: "githubCommitReference", repository, sha,
+              responseId: record.id, historical });
+            if (reply?.ok) {
+              seenCommitLinks.add(key);
+              if (historical) historicalCommitLinks++; else newCommitLinks++;
+            }
+          }
         }
-        if (baselineCommitLinks.has(key) ||
-            seenCommitLinks.has(key) || pendingCommitLinks.has(key)) continue;
-        pendingCommitLinks.add(key);
-        try {
-          const result = await chrome.runtime.sendMessage({ type: "githubCommitReference", repository, sha });
-          if (result?.ok && workflowEnabled && !stopped) seenCommitLinks.add(key);
-        } catch {
-          // Failed deliveries remain retryable; never send original href or page content.
-        } finally { pendingCommitLinks.delete(key); }
+        if (isBaseline || record.historical) record.sent = true;
+        if (record.role === "user") lastRequest = record;
+        previous = { node, record };
       }
+      if (active()) frontier = entries.at(-1)?.record.id || frontier;
+    } catch { /* A changing DOM or unavailable worker is retried without logging text. */ }
+    finally {
+      scanning = false;
+      if (scanAgain) { scanAgain = false; void scanEvidence(); }
     }
   }
 
@@ -103,54 +174,6 @@
     ["implementation", /\b(?:implement|implementation|add|create|build|modify|edit|refactor|remove|integrate|wire|develop|write|update|configure|set\s*up|replace|change)\b/i],
     ["investigation", /\b(?:inspect|investigate|analy[sz]e|review|explain|understand|diagnos[ei]|look\s+into|find\s+out|what\s+causes|why\s+(?:does|is|are))\b/i]
   ]);
-
-  function categorize(text) {
-    const excerpt = text.slice(0, 2400);
-    for (const [category, pattern] of workflowCategories) {
-      if (pattern.test(excerpt)) return category;
-    }
-    return null;
-  }
-
-  function userMessages() {
-    const region = document.querySelector('[data-app-action-timeline-scroll][role="region"]');
-    const root = region || document;
-    // The modern timeline sometimes uses role markers without bubble markers.
-    for (const selector of [
-      '[data-user-message-bubble="true"]',
-      '[data-content-search-unit-key$=":user"]',
-      '[data-message-author-role="user"]',
-      'article[data-turn="user"]',
-      '[data-role="user"]',
-      '[data-message-author="user"]'
-    ]) {
-      const units = root.querySelectorAll(selector);
-      if (units.length) return units;
-    }
-    return [];
-  }
-
-  async function scanWorkflow() {
-    if (!workflowEnabled || stopped || workflowSent >= maxWorkflowStages) return;
-    // Bound the scan; only the 120 most recent mounted user messages are read.
-    const units = Array.from(userMessages()).slice(-120);
-    for (const unit of units) {
-      if (!workflowEnabled || stopped || workflowSent >= maxWorkflowStages) break;
-      if (seenMessages.has(unit)) continue;
-      seenMessages.add(unit);
-      // Read only visible user-message text, transiently, and only while the
-      // user enabled workflow analysis for this specific conversation.
-      const stage = categorize(String(unit.innerText ?? unit.textContent ?? ""));
-      if (!stage) continue;
-      try {
-        const result = await chrome.runtime.sendMessage({ type: "workflowStage", stage });
-        if (result?.ok) workflowSent++;
-        // Failed delivery is not retried for a message to avoid duplicate writes.
-      } catch {
-        // No message text, exceptions or DOM identifiers leave this content script.
-      }
-    }
-  }
 
   // ChatGPT changed its DOM in 2026. Current conversations place messages
   // inside a visible timeline region, with user/assistant units as siblings.
@@ -237,8 +260,7 @@
         assistant: counts.assistant,
         codeBlocks: counts.codeBlocks
       });
-      // Do not mark an update as delivered until the native host confirms it.
-      // Transient native errors are retried on the next timer tick.
+      // Retry transient worker delivery errors on the next timer tick.
       if (reply?.ok && !stopped) lastAcknowledged = signature;
     } catch {
       // Never output or transmit page content when the collector is unavailable.
@@ -261,7 +283,7 @@
       void reportCounts(counts);
     // Do not block consented workflow/commit evidence because a cosmetic
     // message-count detector failed to recognize ChatGPT's latest DOM.
-    if (workflowEnabled) { void scanWorkflow(); void scanCommitLinks(); }
+    if (workflowEnabled) { void scanEvidence(); }
   }
 
   function stop() {
@@ -279,18 +301,14 @@
   function onCommand(message) {
     if (message?.type === "gcrStop") stop();
     if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
-      if (message.enabled && !workflowEnabled) {
-        workflowEnabled = true;
-        // Consent begins NOW, not when the conversation was first opened.
-        // Do not label previously visible prompts or GitHub links as new work.
-        for (const unit of Array.from(userMessages()).slice(-120))
-          seenMessages.add(unit);
-        // The baseline branch does not await or send network messages.
-        // Therefore it finishes marking historical references synchronously.
-        void scanCommitLinks(true);
-      } else if (!message.enabled) {
-        workflowEnabled = false;
+      if (message.enabled === workflowEnabled) return;
+      workflowEpoch++;
+      if (message.enabled) {
+        baselinePending = true; frontier = null;
+        identities.clear(); nodes = new WeakMap();
       }
+      workflowEnabled = message.enabled;
+      if (workflowEnabled) { void scanEvidence(); }
     }
   }
 
@@ -300,10 +318,10 @@
     debounce = setTimeout(poll, 250);
   });
   observer.observe(document.documentElement, {
-    childList: true, subtree: true,
+    childList: true, subtree: true, characterData: true,
     attributes: true,
     attributeFilter: [
-      "data-message-author-role", "data-turn",
+      "href", "data-message-id", "data-role", "data-message-author", "data-message-author-role", "data-turn",
       "data-user-message-bubble", "data-content-search-unit-key",
       "role", "data-app-action-timeline-scroll"
     ]

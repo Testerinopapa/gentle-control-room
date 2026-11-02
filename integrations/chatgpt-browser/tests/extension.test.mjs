@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import vm from "node:vm";
+import { JSDOM } from "jsdom";
 
 const background = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
 const analysisSource = readFileSync(new URL("../extension/analysis.js", import.meta.url), "utf8");
@@ -268,165 +269,74 @@ test("a navigation away ends approval and rejects further page events", async ()
   assert.equal(h.sessions.size, 0);
 });
 
-test("content observer captures only new categories and GitHub commit identifiers after opt-in", async () => {
-  const seen = [];
-  const oldUser = { innerText: "Fix the issue, then test it." };
-  const users = [oldUser], links = [];
-  const assistant = { querySelectorAll() { return links; } };
-  let command, poll;
-  const region = {
-    querySelectorAll(selector) {
-      if (selector.includes("data-user-message-bubble")) return users;
-      if (selector.includes(":assistant")) return [assistant];
-      if (selector.includes(":user")) return [];
-      return [];
-    }
-  };
+function domHarness(h = null, html = '<article data-turn="assistant" data-turn-id="old">Earlier reply</article>') {
+  const dom = new JSDOM('<main data-app-action-timeline-scroll role="region">' + html + '</main>');
+  const sent = [];
+  let command, poll, mutation;
+  const location = { pathname: "/c/test-conversation" };
   vm.runInNewContext(content, {
-    URL, document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/test" },
+    URL, document: dom.window.document, location,
     chrome: { runtime: {
-      async sendMessage(m) { seen.push(m); return { ok: true }; },
+      async sendMessage(message) { sent.push(message); return h ? h.send(message, origin) : { ok: true }; },
       onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
     } },
-    MutationObserver: class { observe() {} disconnect() {} },
+    MutationObserver: class { observe() {} disconnect() {} constructor(fn) { mutation = fn; } },
     setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
+    setTimeout(fn) { queueMicrotask(fn); return 1; }, clearTimeout() {}, Date
   });
-  await tick();
-  command({ type: "gcrWorkflowMode", enabled: true });
-  await tick();
-  assert.equal(seen.some(e => e.type === "workflowStage"), false, "pre-existing prompts are historical");
-  users.push({ innerText: "Fix the issue" });
-  links.push({ getAttribute: () => COMMIT });
-  poll();
-  await tick();
-  assert.equal(seen.find(e => e.type === "workflowStage").stage, "debugging");
-  assert.equal(seen.find(e => e.type === "githubCommitReference").sha, HASH);
-  assert.ok(!JSON.stringify(seen).includes("Fix the issue"));
-  assert.ok(!JSON.stringify(seen).includes("/c/test"));
+  const root = dom.window.document.querySelector('main');
+  const flush = async () => { for (let i = 0; i < 35; i++) await tick(); };
+  return { sent, root, location, flush, async enable() { command({ type: "gcrWorkflowMode", enabled: true }); await flush(); },
+    async change(html) { root.insertAdjacentHTML('beforeend', html); mutation(); await flush(); },
+    async scan() { poll(); await flush(); }, command };
+}
+const userTurn = (id, text) => `<article data-turn="user" data-turn-id="${id}"><div data-message-author-role="user">${text}</div></article>`;
+const assistantTurn = (id, text) => `<article data-turn="assistant" data-turn-id="${id}"><div data-message-author-role="assistant">${text}</div></article>`;
+
+test("content observer reports only categories and local identities; historical references never fetch", async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h, userTurn('old-u', 'PRIVATE old request') + assistantTurn('old-a', `<a href="${COMMIT}">old</a>`));
+  await d.enable();
+  assert.equal(h.requests.length, 0);
+  assert.equal((await exported(h)).analysis.unattributedCommits[0].state, 'historical');
+  await d.change(userTurn('new-u', 'Inspect PRIVATE issue then implement and test'));
+  await d.change(assistantTurn('new-a', `Done ${COMMIT.replace(HASH, "b".repeat(40))}`));
+  const data = await exported(h);
+  assert.equal(h.requests.length, 1);
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences[0].attribution.state, 'automatic');
+  assert.ok(!JSON.stringify(data).includes('PRIVATE'));
+  assert.ok(!JSON.stringify(data).includes('new-u'));
 });
 
-test("GitHub capture does not require recognized message-count markup", async () => {
-  const sent = [];
-  let enable, poll;
-  const links = [], users = [{ innerText: "Fix the issue" }];
-  const assistant = { querySelectorAll(selector) {
-    return selector === "a[href]" ? links : [];
-  } };
-  const region = {
-    querySelectorAll(selector) {
-      if (selector === '[data-message-author-role="assistant"]') return [assistant];
-      if (selector === '[data-message-author-role="user"]') return users;
-      return [];
-    }
-  };
-  vm.runInNewContext(content, {
-    URL, document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/approved" },
-    chrome: { runtime: {
-      async sendMessage(message) { sent.push(message); return { ok: true }; },
-      onMessage: { addListener(fn) { enable = fn; }, removeListener() {} }
-    } },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await tick();
-  assert.equal(sent.find(m => m.type === "observerStatus").detector, "waiting");
-  enable({ type: "gcrWorkflowMode", enabled: true });
-  await tick();
-  users.push({ innerText: "Fix the issue" });
-  links.push({ getAttribute: () => COMMIT });
-  poll();
-  await tick();
-  assert.equal(sent.find(m => m.type === "githubCommitReference").sha, HASH);
-  assert.equal(sent.find(m => m.type === "workflowStage").stage, "debugging");
+test("GitHub capture works without message counts, with streamed text and rerendered nested wrappers", async () => {
+  const h = harness(); await enable(h); const d = domHarness(h); await d.enable();
+  assert.equal(d.sent.find(m => m.type === 'observerStatus').detector, 'waiting');
+  await d.change(userTurn('u1', 'Debug then modify then test'));
+  await d.change(assistantTurn('a1', 'Streaming...'));
+  d.root.lastElementChild.querySelector('div').textContent = 'Finished ' + COMMIT;
+  await d.scan();
+  const before = await exported(h);
+  d.root.innerHTML = d.root.innerHTML;
+  await d.scan();
+  const after = await exported(h);
+  assert.equal(after.analysis.tasks.length, 1);
+  assert.equal(after.analysis.tasks[0].taskId, before.analysis.tasks[0].taskId);
+  assert.equal(after.events.filter(e => e.type === 'github_commit_ref').length, 1);
+  assert.equal(h.requests.length, 1);
 });
 
-test("consented assistant plain-text commit URL appearing after opt-in is recorded", async () => {
-  const messages = [], assistant = {
-    innerText: "",
-    querySelectorAll(selector) {
-      assert.equal(selector, "a[href]");
-      return [];
-    }
-  };
-  const region = {
-    querySelectorAll(selector) {
-      if (selector === '[data-message-author-role="assistant"]') return [assistant];
-      return [];
-    }
-  };
-  let command, poll;
-  vm.runInNewContext(content, {
-    URL, document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/safe" },
-    chrome: { runtime: {
-      async sendMessage(m) { messages.push(m); return { ok: true }; },
-      onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
-    } },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await tick();
-  command({ type: "gcrWorkflowMode", enabled: true });
-  await tick();
-  assert.equal(messages.filter(m => m.type === "githubCommitReference").length, 0);
-  assistant.innerText = "Implemented in " + COMMIT + " (see commit).";
-  poll();
-  await tick();
-  const refs = messages.filter(m => m.type === "githubCommitReference");
-  assert.equal(refs.length, 1);
-  assert.equal(refs[0].sha, HASH);
-  assert.equal(refs[0].repository, "testerinopapa/gentle-control-room");
-  assert.ok(!JSON.stringify(messages).includes("Implemented in"));
-  assert.ok(!JSON.stringify(messages).includes("/c/safe"));
-});
-
-test("historical assistant commits at opt-in are ignored even after re-rendering", async () => {
-  const sent = [];
-  const newSha = "b".repeat(40);
-  const newUrl = "https://github.com/Testerinopapa/gentle-control-room/commit/" + newSha;
-  const links = [{ getAttribute: () => COMMIT }];
-  const assistant = { querySelectorAll(selector) {
-    return selector === "a[href]" ? links : [];
-  } };
-  const region = { querySelectorAll(selector) {
-    return selector === '[data-message-author-role="assistant"]' ? [assistant] : [];
-  } };
-  let onCommand, poll;
-  vm.runInNewContext(content, {
-    URL, document: { documentElement: {}, querySelector() { return region; } },
-    location: { pathname: "/c/approved" },
-    chrome: { runtime: {
-      async sendMessage(message) { sent.push(message); return { ok: true }; },
-      onMessage: { addListener(fn) { onCommand = fn; }, removeListener() {} }
-    } },
-    MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
-    setTimeout() { return 1; }, clearTimeout() {},
-    Date: { now: () => 10000 }
-  }, { filename: "content.js" });
-  await tick();
-  onCommand({ type: "gcrWorkflowMode", enabled: true });
-  await tick();
-  assert.equal(sent.filter(e => e.type === "githubCommitReference").length, 0);
-  links.unshift({ getAttribute: () => newUrl });
-  poll();
-  await tick();
-  let refs = sent.filter(e => e.type === "githubCommitReference");
-  assert.equal(refs.length, 1);
-  assert.equal(refs[0].sha, newSha);
-  links.splice(0, 2, { getAttribute: () => COMMIT });
-  poll();
-  await tick();
-  refs = sent.filter(e => e.type === "githubCommitReference");
-  assert.equal(refs.length, 1, "the old visible commit must not re-enter evidence");
+test("plain-text and delayed href capture excludes user links and stops on navigation", async () => {
+  const d = domHarness(); await d.enable();
+  await d.change(userTurn('u1', 'Implement ' + COMMIT));
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 0);
+  await d.change(assistantTurn('a1', '<a>Commit</a>'));
+  d.root.querySelector('a').setAttribute('href', COMMIT);
+  await d.scan();
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 1);
+  d.location.pathname = '/c/elsewhere';
+  await d.change(assistantTurn('a2', COMMIT));
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 1);
 });
 
 test("sidepanel manual commit fallback requires active workflow consent and strict GitHub URL", async () => {
@@ -485,12 +395,14 @@ test("binary-only GitHub commits export metadata without claiming a code diff", 
 test("JSON export groups stage/commit evidence into a session-scoped coding episode", async () => {
   const h = harness();
   await enable(h);
-  await h.send({ type: "workflowStage", stage: "implementation" }, origin);
-  await h.send({ type: "githubCommitReference",
+  await h.send({ type: "requestBoundary", requestId: "m-test-1", confidence: "supported" }, origin);
+  await h.send({ type: "workflowStage", stage: "implementation", requestId: "m-test-1" }, origin);
+  await h.send({ type: "assistantBoundary", responseId: "m-test-2", requestId: "m-test-1" }, origin);
+  await h.send({ type: "githubCommitReference", responseId: "m-test-2",
     repository: "testerinopapa/gentle-control-room", sha: HASH }, origin);
-  await h.send({ type: "workflowStage", stage: "testing" }, origin);
+  await h.send({ type: "workflowStage", stage: "testing", requestId: "m-test-1" }, origin);
   const exportedData = await exported(h);
-  assert.equal(exportedData.analysis.version, 1);
+  assert.equal(exportedData.analysis.version, 2);
   assert.equal(exportedData.analysis.method, "deterministic_local_evidence_rules");
   const tasks = exportedData.analysis.tasks;
   assert.equal(tasks.length, 1);
@@ -545,6 +457,13 @@ test("recurrence requires distinct coding episodes with supporting evidence", ()
         patch: "@@ -0,0 +1 @@\n+second" }]
     }
   };
+  for (const event of events) {
+    event.taskId = event.sessionId + ":request";
+    if (event.type === "github_commit_ref") event.attribution = { state: "automatic" };
+  }
+  for (const sessionId of new Set(events.map(e => e.sessionId)))
+    events.unshift({ timestamp: events.find(e => e.sessionId === sessionId).timestamp, sessionId,
+      type: "request_boundary", requestId: "m-test-1", taskId: sessionId + ":request", confidence: "supported" });
   const analysis = h.analyze({ events, commits });
   assert.equal(analysis.coverage.inferredCodingEpisodes, 2);
   assert.equal(analysis.patterns.find(p => p.id === "transition:debugging->implementation").distinctTasks, 2);
@@ -578,6 +497,13 @@ test("line-change totals exclude files without saved patches and duplicate refer
       { path: "src/excluded.ts", additions: 100, deletions: 50 }
     ]
   } };
+  for (const event of events) {
+    event.taskId = event.sessionId + ":request";
+    if (event.type === "github_commit_ref") event.attribution = { state: "automatic" };
+  }
+  for (const sessionId of new Set(events.map(e => e.sessionId)))
+    events.unshift({ timestamp: events.find(e => e.sessionId === sessionId).timestamp, sessionId,
+      type: "request_boundary", requestId: "m-test-1", taskId: sessionId + ":request", confidence: "supported" });
   const analysis = h.analyze({ events, commits });
   assert.equal(analysis.tasks.length, 1);
   const task = analysis.tasks[0];
@@ -603,7 +529,8 @@ test("one commit referenced twice is not evidence of recurring file edits", () =
     files: [{ path: "src/once.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]
   } };
   const result = h.analyze({ events, commits });
-  assert.equal(result.tasks.length, 2);
+  assert.equal(result.tasks.length, 0);
+  assert.equal(result.unattributedCommits.length, 2);
   assert.equal(result.patterns.some(p => p.type === "same_file_in_distinct_commits"), false);
 });
 
@@ -628,4 +555,155 @@ test("separates long gaps and ignores count-only sessions and unrecognized stage
   assert.equal(result.tasks[0].eventIndices.length, 1);
   assert.equal(result.patterns.length, 0);
   assert.ok(result.limitations.some(x => x.includes("heuristic time segments")));
+});
+
+test('multiple requests and commits reconstruct deterministically after JSON export', async () => {
+  const h = harness(); await enable(h); const d = domHarness(h); await d.enable();
+  await d.change(userTurn('u1', 'Investigate then implement then test'));
+  await d.change(assistantTurn('a1', COMMIT + ' https://github.com/testerinopapa/gentle-control-room/commit/' + 'b'.repeat(40)));
+  await d.change(userTurn('u2', 'Investigate then implement then test another feature'));
+  await d.change(assistantTurn('a2', 'https://github.com/testerinopapa/gentle-control-room/commit/' + 'c'.repeat(40)));
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 2);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(data.analysis.tasks[1].commitReferences.length, 1);
+  assert.equal(data.analysis.patterns.find(p => p.id === 'sequence:investigation->implementation->testing').distinctTasks, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.analyze(JSON.parse(JSON.stringify(data))))), JSON.parse(JSON.stringify(data.analysis)));
+});
+
+test('manual imports stay unattributed until explicit task selection, including later association', async () => {
+  const h = harness(); await enable(h);
+  await h.send({ type: 'requestBoundary', requestId: 'm-test-1', confidence: 'supported' }, origin);
+  await h.send({ type: 'importCommitUrl', tabId: 9, url: COMMIT });
+  let data = await exported(h);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 0);
+  assert.equal(data.analysis.unattributedCommits[0].state, 'unattributed');
+  const taskId = data.analysis.tasks[0].taskId;
+  assert.equal((await h.send({ type: 'importCommitUrl', tabId: 9, url: COMMIT, taskId: 'invented' })).ok, false);
+  assert.equal((await h.send({ type: 'importCommitUrl', tabId: 9, url: COMMIT, taskId })).ok, true);
+  data = await exported(h);
+  assert.equal(data.analysis.tasks[0].commitReferences[0].attribution.state, 'manual');
+  assert.equal(data.analysis.unattributedCommits[0].resolved, true);
+  assert.equal(h.requests.length, 1);
+});
+
+test('same commit in separate sessions shares cached patch and does not imply repeated edits', async () => {
+  const h = harness();
+  for (let i = 0; i < 2; i++) {
+    await enable(h);
+    await h.send({ type: 'requestBoundary', requestId: 'm-test-1', confidence: 'supported' }, origin);
+    await h.send({ type: 'assistantBoundary', responseId: 'm-test-2', requestId: 'm-test-1' }, origin);
+    await h.send({ type: 'githubCommitReference', responseId: 'm-test-2', repository: 'testerinopapa/gentle-control-room', sha: HASH }, origin);
+    await h.send({ type: 'stop', tabId: 9 });
+  }
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 2);
+  assert.equal(Object.keys(data.commits).length, 1);
+  assert.equal(h.requests.length, 1);
+  assert.ok(!data.analysis.patterns.some(p => p.type === 'same_file_in_distinct_commits'));
+});
+
+test('delayed history, prepended history, and missing stable identities remain uncertain', async () => {
+  const h = harness(); await enable(h); const d = domHarness(h, ''); await d.enable();
+  await d.change(userTurn('delayed-u', 'Implement historical request') + assistantTurn('delayed-a', COMMIT));
+  let data = await exported(h);
+  assert.equal(data.analysis.tasks[0].attribution.confidence, 'uncertain');
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 0);
+  d.root.insertAdjacentHTML('afterbegin', userTurn('older-u', 'Fix older bug'));
+  await d.scan();
+  await d.change('<div data-role="user">Implement missing stable id</div><div data-role="assistant">' + COMMIT + '</div>');
+  data = await exported(h);
+  const count = data.analysis.tasks.length;
+  d.root.innerHTML = d.root.innerHTML;
+  await d.scan();
+  data = await exported(h);
+  assert.equal(data.analysis.tasks.length, count);
+  assert.ok(data.analysis.tasks.every(t => t.attribution.confidence === 'uncertain'));
+});
+
+test('consent off and on cannot revive an earlier pending fetch', async () => {
+  let release;
+  const h = harness(undefined, null, () => new Promise(resolve => { release = resolve; }));
+  await enable(h);
+  const pending = h.send({ type: 'importCommitUrl', tabId: 9, url: COMMIT });
+  for (let i = 0; i < 30 && !release; i++) await tick();
+  await h.send({ type: 'setWorkflowAnalysis', tabId: 9, enabled: false });
+  await h.send({ type: 'setWorkflowAnalysis', tabId: 9, enabled: true });
+  release({ ok: true, headers: { get: () => null }, text: async () => JSON.stringify({ sha: HASH, files: [] }) });
+  await pending;
+  assert.equal(Object.keys((await exported(h)).commits).length, 0);
+});
+
+test('concurrent duplicate deliveries produce one reference and one API fetch', async () => {
+  const h = harness(); await enable(h);
+  await Promise.all(Array.from({ length: 5 }, () => h.send({ type: 'importCommitUrl', tabId: 9, url: COMMIT })));
+  const data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === 'github_commit_ref').length, 1);
+  assert.equal(h.requests.length, 1);
+});
+
+test('return to debugging is an observed request sequence across separate tasks', async () => {
+  const h = harness(); await enable(h); const d = domHarness(h); await d.enable();
+  for (let i = 1; i <= 2; i++) {
+    await d.change(userTurn('loop-' + i, 'Debug, implement, test, then debug again'));
+    await d.change(assistantTurn('reply-' + i, 'Response'));
+  }
+  const data = await exported(h);
+  assert.deepEqual(Array.from(data.analysis.tasks[0].stages), ['debugging', 'implementation', 'testing', 'debugging']);
+  const pattern = data.analysis.patterns.find(p => p.id === 'sequence:implementation->testing->debugging');
+  assert.equal(pattern.distinctTasks, 2);
+  assert.equal(pattern.verifiedOutcome, false);
+});
+
+test('historical references do not consume the new-commit capture quota', async () => {
+  const h = harness(); await enable(h);
+  const old = Array.from({ length: 30 }, (_, i) => assistantTurn('old-' + i,
+    'https://github.com/example/repo/commit/' + i.toString(16).padStart(40, '0'))).join('');
+  const d = domHarness(h, old); await d.enable();
+  await d.change(userTurn('new-task', 'Implement a feature'));
+  await d.change(assistantTurn('new-response', COMMIT));
+  assert.equal(h.requests.length, 1);
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 1);
+});
+
+test('supporting event indices are recomputed after retained chronology changes', async () => {
+  const h = harness(); await enable(h);
+  await h.send({ type: 'requestBoundary', requestId: 'm-test-1', confidence: 'supported' }, origin);
+  await h.send({ type: 'assistantBoundary', requestId: 'm-test-1', responseId: 'm-test-2' }, origin);
+  await h.send({ type: 'githubCommitReference', repository: 'testerinopapa/gentle-control-room', sha: HASH, responseId: 'm-test-2' }, origin);
+  const data = JSON.parse(JSON.stringify(await exported(h)));
+  data.events.shift();
+  const analysis = h.analyze(data);
+  const ref = analysis.tasks[0].commitReferences[0];
+  assert.deepEqual(Array.from(ref.attribution.evidenceEventIndices), [0, 1]);
+  assert.equal(analysis.tasks[0].taskId, data.analysis.tasks[0].taskId);
+});
+
+
+test('historical links survive rerender while new links in old responses remain unattributed', async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h, assistantTurn('historical', COMMIT)); await d.enable();
+  d.root.innerHTML = d.root.innerHTML;
+  await d.scan();
+  d.root.lastElementChild.querySelector('div').textContent += ' https://github.com/example/repo/commit/' + 'b'.repeat(40);
+  await d.scan();
+  const data = await exported(h);
+  assert.equal(h.requests.length, 1);
+  assert.equal(data.analysis.tasks.length, 0);
+  assert.equal(data.events.filter(e => e.type === 'github_commit_ref').length, 2);
+  assert.deepEqual(Array.from(data.analysis.unattributedCommits, ref => ref.state), ['historical', 'unattributed']);
+});
+
+
+test('a previously visible commit repeated in a new response cannot become automatic task evidence', async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h, assistantTurn('old', COMMIT)); await d.enable();
+  await d.change(userTurn('new', 'Implement a different feature'));
+  await d.change(assistantTurn('new-reply', COMMIT));
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 0);
+  assert.ok(data.analysis.unattributedCommits.every(ref => ref.state === 'historical'));
+  assert.equal(h.requests.length, 0);
 });

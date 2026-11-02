@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.7.1)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.8)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.7.1**. Reload the ChatGPT tab itself as well.
+   **0.8.0**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**.
 5. Choose **Enable workflow analysis** separately for local classification of
@@ -42,7 +42,7 @@ computer's filesystem is used.
 - A downloadable `gentle-control-room-evidence.json` including recorded
   chronology, commit references and available exact patches.
 
-## Coding tasks and repeated-workflow analysis (v0.7)
+## Coding tasks and repeated-workflow analysis (v0.8)
 
 **Export evidence JSON** now includes a new top-level `analysis` object:
 `analysis.tasks`, `analysis.patterns`, `analysis.coverage` and
@@ -50,51 +50,57 @@ computer's filesystem is used.
 unchanged and available for auditing. No new interface, external API key,
 DeepSeek request, or Windows software is required.
 
-The local, deterministic analysis groups consented coding-related events by
-**session ID** and splits an inferred coding episode after more than **45
-minutes without a meaningful coding event**. It uses `workflow_stage`,
-`github_commit_ref`, and an affirmative `coding_tag`. Passive message-count
-updates do not themselves create coding tasks. Episodes are **time-based
-clusters, not reliably identified user goals**; no raw chat text is saved.
+The local analysis now uses **observed user-request boundaries** first. A new
+request appended after an observed turn gets a local task ID; subsequent assistant
+responses and commit references carry that relationship. Multiple requests in one
+conversation produce separate conservative tasks. These boundaries do not claim to
+identify a semantic goal spanning several follow-up requests. Stage sequences can
+include several categories observed in one request, in textual order. They are
+request classifications, not verified actions.
 
-Each task includes a stable-within-export episode ID, first/last activity time,
-original event indices, observed stage sequence and counts, referenced
-GitHub commits, and paths/counts of retrieved patch files. Code itself
-remains in `commits`; it is not copied into each task. Outcomes, authorship,
-test execution, test passes and deployment are explicitly **unknown** unless
-verified by separate evidence.
+Messages mounted when workflow analysis is enabled are baselined. Their existing commit
+references are **historical** and do not trigger GitHub retrieval, even when repeated
+in a later response. A new link streamed into an old response can be captured as
+unattributed, since that response has no supported new-task boundary. Streaming text,
+delayed link attributes and rerenders with stable message identities are observed
+without requiring a working count detector. Raw DOM IDs stay in memory; only local
+opaque IDs are saved. Missing identities, initially empty timelines and prepended
+history produce **uncertain** boundaries rather than confident associations.
 
-Patterns require observations in at least **two distinct coding episodes**:
-- repeated request classifications (e.g. `debugging`);
-- repeated order of adjacent request classes (e.g.
-  `implementation → testing`);
-- a file changed in **distinct GitHub commits** linked to different coding
-  episodes. Merely mentioning the same commit twice does not count as two edits.
+Each commit-reference event has one of four `attribution.state` values:
+- `automatic`: a new assistant response is linked to a supported request boundary;
+- `manual`: the user explicitly selected a task in the Evidence task selector;
+- `unattributed`: no supported relationship exists (the default for manual imports);
+- `historical`: the commit reference was already visible at workflow opt-in.
 
-Every pattern includes supporting task IDs, observed frequency and, where
-applicable, commit references. Patterns describe the **user's observed
-workflow metadata**, not an executed behavior or demonstrated success.
-The detector is a local rules-based baseline for later evidence-reviewed
-DeepSeek analysis; it does **not** automatically call an AI model.
+Unresolved references appear in `analysis.unattributedCommits` and in the Evidence
+section. To associate one later, paste its full commit URL, select a task with an observed request boundary, and import
+again. Legacy time-only episodes cannot be selected as explicit tasks. The original observation remains in chronology, with `resolved: true` in
+analysis once supported association exists. Public patches are cached once per
+repository/SHA, even across sessions. A commit reference is not proof of creation,
+authorship, successful implementation, test execution or deployment.
+
+The export envelope remains version 1 with its existing `events` and `commits`.
+`analysis.version` is now 2. Existing task fields remain, with additive `taskId`,
+`requestId`, `responseIds`, `workflowStages`, `attribution`, `filesChanged`,
+`lineChanges`, `completedAt` and `verification`. Completion and verification remain
+unknown. Supporting event indices are computed against the current export, while
+stored local request/response IDs preserve relationships through retention changes.
+Patches remain solely in `commits`, never duplicated in task or pattern output.
+
+Legacy stage/tag events still use the **45-minute inactivity fallback**, explicitly
+marked uncertain. Legacy commits without an explicit relationship are exported as
+unattributed, including old manual imports; time proximity alone does not attach them.
+
+Patterns need **two distinct tasks** and list their supporting task IDs and commit
+references where available. They include ordered request sequences, repository and
+file-category recurrence, changes referenced after test-related requests, and files
+changed in distinct commits. Code-change patterns require distinct commit SHAs;
+repeated references to one commit never constitute repeated modifications. None of
+these patterns verifies execution or success. No external AI service is contacted.
 
 Your first export may show one inferred task and **zero patterns**. This is
 correct until two separately observed coding episodes support recurrence.
-
-### Fresh-activity attribution
-
-Since v0.7.1, enabling **workflow analysis** establishes a baseline: user
-prompts and GitHub commit references **already rendered on the page at the
-moment of opt-in** are treated as historical and are not recorded as new
-activity. Only messages/references appearing after you enable the toggle are
-collected automatically. Start recording and enable workflow analysis
-**before submitting the next coding prompt**; do not expect old chat messages
-to be imported into a new session. Manual commit import remains available
-for explicitly selected older commits, and is labeled `discovery: "manual"`.
-
-This limits misleading task attribution on restart, but does not guarantee
-perfect task identity: the ChatGPT page can virtualize/hide old messages, so
-an old reference not rendered at the time of opt-in may still appear later.
-A future task-level reconciliation step is needed to fully resolve this.
 
 The extension does not inspect other tabs, cookies, session tokens,
 conversation titles/URLs or any arbitrary local Git repositories. It does not
@@ -143,7 +149,8 @@ user message. In the exported JSON, `commits` entries describe available
 GitHub patches or `status: unavailable` if the public API fetch failed.
 Reload both the extension and ChatGPT after updating the source.
 
-Run the browser regression tests without building the Windows app:
+Install test dependencies with `npm ci --ignore-scripts`, then run the browser
+regression tests without building the Windows app:
 
 ```powershell
 node --check integrations/chatgpt-browser/extension/background.js
@@ -152,3 +159,24 @@ node --check integrations/chatgpt-browser/extension/content.js
 node --check integrations/chatgpt-browser/extension/sidepanel.js
 node --test integrations/chatgpt-browser/tests/extension.test.mjs
 ```
+
+## Verify v0.8 in Edge
+
+1. Reload the unpacked extension and ChatGPT. Open a conversation with an existing
+   assistant commit link. Start recording, then enable workflow analysis.
+2. Export: that reference should be historical, with no new GitHub patch retrieval.
+3. Submit a new coding request. When a subsequent assistant reply displays a full
+   public commit URL, export again. Check its request/response IDs, task ID, automatic
+   attribution, and retrieval status. Streaming or plain-text URLs also work.
+4. Submit a separate coding request in the same chat. Check that it has another task
+   ID. Multiple links in one assistant response should stay on the first task.
+5. Import a public commit with the selector set to Unattributed. Verify it is absent
+   from task commit lists. Select its intended task and import again to associate it.
+6. Repeat a request sequence in another task; inspect supporting task IDs in patterns.
+7. Stop recording or navigate away. No further evidence should arrive. For a slow
+   retrieval, delete evidence while it is pending; the patch must not reappear.
+
+Limitations: a newly mounted message is not necessarily newly authored. Unsupported
+or virtualized markup may leave evidence uncertain, and unseen history cannot be
+recovered. Identical requests without stable DOM IDs are conservatively deduplicated.
+Each request is a candidate task, so semantic multi-request task merging is not claimed.

@@ -22,7 +22,9 @@ const MAX_PATCH_BYTES = 24000;
 const MAX_RESPONSE_BYTES = 512000;
 const MAX_EVIDENCE_BYTES = 3500000;
 const pendingCommits = new Set();
+const MESSAGE_ID = /^m-[a-z0-9]{1,16}-[0-9]{1,6}$/;
 let storageQueue = Promise.resolve();
+let operationQueue = Promise.resolve();
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
@@ -63,7 +65,7 @@ function bounded(data) {
 function mutateEvidence(change) {
   const job = storageQueue.then(async () => {
     const data = await readEvidence();
-    const result = change(data);
+    const result = await change(data);
     await chrome.storage.local.set({ [LOCAL_KEY]: bounded(data) });
     return result;
   });
@@ -127,12 +129,24 @@ async function fetchCommit(repository, sha) {
       files,
       changedFiles: json.files.length,
       note: files.length
-        ? "A commit link was seen in an assistant message. Authorship, tests and outcome are unverified."
+        ? "A public commit reference was recorded. Authorship, tests and outcome are unverified."
         : "Commit metadata was retrieved, but no safe textual patches were available. Authorship, tests and outcome are unverified."
     };
   } finally { clearTimeout(timeout); }
 }
-async function collectCommit(repository, sha, sessionId, clearGeneration) {
+async function hasCommitConsent(sessionId, consentEpoch, key) {
+  const active = await chrome.storage.session.get(null);
+  for (const [storageKey, session] of Object.entries(active)) {
+    if (session?.id !== sessionId || !session.workflowEnabled ||
+        (session.consentEpoch || 0) !== consentEpoch || !(session.commitRefs || []).includes(key)) continue;
+    try {
+      const tab = await chrome.tabs.get(Number(storageKey.slice("gcrChatGPTTab:".length)));
+      if (eligible(tab.url) && new URL(tab.url).pathname === session.page) return true;
+    } catch { /* Closed tabs no longer consent to collection. */ }
+  }
+  return false;
+}
+async function collectCommit(repository, sha, sessionId, clearGeneration, consentEpoch) {
   const key = repository + "@" + sha;
   if (pendingCommits.has(key)) return;
   pendingCommits.add(key);
@@ -144,11 +158,9 @@ async function collectCommit(repository, sha, sessionId, clearGeneration) {
     catch { result = { status: "unavailable", files: [],
       note: "Public GitHub commit could not be retrieved. No code evidence verified." }; }
     // Never retain patches after a session's consent has been revoked.
-    const active = await chrome.storage.session.get(null);
-    const consented = Object.values(active).some(session =>
-      session?.id === sessionId && session.workflowEnabled && (session.commitRefs || []).includes(key));
-    if (!consented) return;
-    await mutateEvidence(data => {
+    if (!await hasCommitConsent(sessionId, consentEpoch, key)) return;
+    await mutateEvidence(async data => {
+      if (!await hasCommitConsent(sessionId, consentEpoch, key)) return;
       // Delete stored evidence must also win against a GitHub fetch that was
       // already in flight. Otherwise, a cleared patch could reappear later.
       if ((data.clearGeneration || 0) !== clearGeneration) return;
@@ -185,21 +197,49 @@ async function start(tabId) {
     throw Error("Cannot observe this tab. Reload ChatGPT and start again.");
   }
 }
-async function recordCommit(tabId, session, repository, sha, discovery) {
+async function recordCommit(tabId, session, repository, sha, discovery, details = {}) {
   const key = repository + "@" + sha;
-  if ((session.commitRefs || []).includes(key)) return { ok: true, duplicate: true };
-  if ((session.commitRefs || []).length >= 30) return { ok: false };
+
   const current = await getSession(tabId);
   if (!current || current.id !== session.id || !current.workflowEnabled) return { ok: false };
   // Capture deletion generation before an asynchronous GitHub request.
   const clearGeneration = (await readEvidence()).clearGeneration || 0;
-  await event(session.id, "github_commit_ref", { repository, commitSha: sha, discovery });
+  const data = await readEvidence();
+  const response = data.events.find(e => e.sessionId === session.id &&
+    e.type === "assistant_response" && e.responseId === details.responseId);
+  const request = data.events.find(e => e.sessionId === session.id &&
+    e.type === "request_boundary" && e.taskId === response?.taskId);
+  const manualTask = details.taskId && globalThis.GentleCodingAnalysis.analyze(data).tasks
+    .find(task => task.taskId === details.taskId && task.requestId);
+  if (details.taskId && !manualTask) return { ok: false };
+  const state = discovery === "manual" ? (manualTask ? "manual" : "unattributed") :
+    details.historical === true ? "historical" :
+      request?.confidence === "supported" ? "automatic" : "unattributed";
+  if (state !== "historical" && !(session.commitRefs || []).includes(key) &&
+      (session.commitRefs || []).length >= MAX_COMMITS) return { ok: false };
+  const taskId = state === "manual" ? manualTask.taskId : state === "automatic" ? request.taskId : null;
+  const association = { state, method: discovery === "manual" ? "user_selection" : "assistant_response",
+    confidence: taskId ? "supported" : "uncertain",
+    requestId: state === "automatic" ? request.requestId : null,
+    responseId: response?.responseId || null,
+    supportingTaskId: taskId };
+  const inserted = await mutateEvidence(currentData => {
+    if ((currentData.clearGeneration || 0) !== clearGeneration) return false;
+    if (currentData.events.some(e => e.sessionId === session.id && e.type === "github_commit_ref" &&
+        e.repository === repository && e.commitSha === sha && e.taskId === taskId &&
+        e.attribution?.state === state && e.attribution?.responseId === association.responseId)) return false;
+    currentData.events.push({ timestamp: new Date().toISOString(), source: "chatgpt_browser",
+      sessionId: session.id, type: "github_commit_ref", repository, commitSha: sha, discovery,
+      taskId, attribution: association });
+    return true;
+  });
+  if (!inserted) return { ok: true, duplicate: true };
   const next = await getSession(tabId);
   if (!next || next.id !== session.id || !next.workflowEnabled) return { ok: false };
   await chrome.storage.session.set({ [KEY(tabId)]: { ...next,
-    commitRefs: [...(next.commitRefs || []), key] } });
-  await collectCommit(repository, sha, session.id, clearGeneration);
-  return { ok: true };
+    commitRefs: state === "historical" ? (next.commitRefs || []) : [...new Set([...(next.commitRefs || []), key])] } });
+  return { ok: true, retrieval: state !== "historical"
+    ? collectCommit(repository, sha, session.id, clearGeneration, session.consentEpoch || 0) : null };
 }
 function parseCommitUrl(input) {
   if (typeof input !== "string" || input.length > 300) return null;
@@ -228,10 +268,39 @@ async function fromPage(message, sender) {
     } });
     return { ok: true };
   }
+  if (["requestBoundary", "assistantBoundary"].includes(message.type)) {
+    if (!session.workflowEnabled) return { ok: false };
+    const isRequest = message.type === "requestBoundary";
+    const id = isRequest ? message.requestId : message.responseId;
+    if (!MESSAGE_ID.test(id || "")) return { ok: false };
+    return mutateEvidence(data => {
+      const type = isRequest ? "request_boundary" : "assistant_response";
+      const field = isRequest ? "requestId" : "responseId";
+      if (data.events.some(e => e.sessionId === session.id && e.type === type && e[field] === id))
+        return { ok: true, duplicate: true };
+      if (data.events.filter(e => e.sessionId === session.id && e.type === type).length >= 240)
+        return { ok: false };
+      const request = !isRequest && data.events.find(e => e.sessionId === session.id &&
+        e.type === "request_boundary" && e.requestId === message.requestId);
+      data.events.push({ timestamp: new Date().toISOString(), source: "chatgpt_browser", sessionId: session.id,
+        type, [field]: id, taskId: isRequest ? session.id + ":" + id : request?.taskId || null,
+        ...(isRequest ? { confidence: message.confidence === "supported" ? "supported" : "uncertain" } :
+          { requestId: request?.requestId || null, historical: message.historical === true }) });
+      return { ok: true };
+    });
+  }
   if (message.type === "workflowStage") {
     if (!session.workflowEnabled || !WORKFLOW_STAGES.has(message.stage) ||
         session.workflowStages >= 120) return { ok: false };
-    await event(session.id, "workflow_stage", { stage: message.stage });
+    if (message.ordinal !== undefined && (!Number.isInteger(message.ordinal) || message.ordinal < 0 || message.ordinal >= 20)) return { ok: false };
+    const data = await readEvidence();
+    const request = data.events.find(e => e.sessionId === session.id &&
+      e.type === "request_boundary" && e.requestId === message.requestId);
+    if (message.requestId && !request) return { ok: false };
+    if (request && data.events.some(e => e.sessionId === session.id && e.type === "workflow_stage" &&
+        e.requestId === request.requestId && e.stage === message.stage && e.ordinal === message.ordinal)) return { ok: true, duplicate: true };
+    await event(session.id, "workflow_stage", { stage: message.stage,
+      ...(request ? { taskId: request.taskId, requestId: request.requestId, ...(message.ordinal === undefined ? {} : { ordinal: message.ordinal }) } : {}) });
     const current = await getSession(tabId);
     if (current?.id === session.id && current.workflowEnabled)
       await chrome.storage.session.set({ [KEY(tabId)]: { ...current,
@@ -243,7 +312,7 @@ async function fromPage(message, sender) {
         typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
         !COMMIT_SHA.test(message.sha)) return { ok: false };
     const repository = message.repository.toLowerCase(), sha = message.sha.toLowerCase();
-    return recordCommit(tabId, session, repository, sha, "assistant");
+    return recordCommit(tabId, session, repository, sha, "assistant", { responseId: message.responseId, historical: message.historical === true });
   }
   if (message.type === "visibleCounts") {
     if (!Number.isInteger(message.user) || message.user < 0 || message.user > 10000 ||
@@ -265,10 +334,10 @@ async function fromPage(message, sender) {
   return { ok: false };
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  (async () => {
+  const operation = operationQueue.then(async () => {
     if (!message || typeof message.type !== "string") throw Error("Invalid request");
     if (["visibleCounts", "conversationChanged", "observerStatus",
-      "workflowStage", "githubCommitReference"].includes(message.type))
+      "workflowStage", "githubCommitReference", "requestBoundary", "assistantBoundary"].includes(message.type))
       return fromPage(message, sender);
     if (message.type === "importCommitUrl") {
       // Only the extension's own side panel may invoke manual import.
@@ -281,7 +350,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           session.page !== new URL(tab.url).pathname) return { ok: false };
       const commit = parseCommitUrl(message.url);
       if (!commit) return { ok: false, error: "Provide a full GitHub commit URL containing a 40-character SHA." };
-      return recordCommit(tabId, session, commit.repository, commit.sha, "manual");
+      return recordCommit(tabId, session, commit.repository, commit.sha, "manual", { taskId: message.taskId });
     }
     if (message.type === "exportEvidence") {
       const data = bounded(await readEvidence());
@@ -309,6 +378,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const samePage = allowed && session?.page === new URL(tab.url).pathname;
       if (session && !samePage) await stop(tabId);
       const local = await readEvidence();
+      const analysis = globalThis.GentleCodingAnalysis.analyze(local);
       return {
         ok: true, allowed, reason: allowed ? null : "Open ChatGPT in the active tab.",
         active: Boolean(session && samePage),
@@ -321,6 +391,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         detector: samePage ? session?.detector ?? null : null,
         lastObservedAt: samePage ? session?.lastObservedAt ?? null : null,
         lastCountAt: samePage ? session?.lastCountAt ?? null : null,
+        attributionTasks: analysis.tasks.filter(task => task.requestId).map(task => ({
+          taskId: task.taskId, startedAt: task.startedAt, stages: task.stages })),
+        unresolvedCommits: analysis.unattributedCommits,
         recordedEvents: local.events.length,
         recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length
       };
@@ -334,7 +407,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         throw Error("Start recording this conversation first.");
       if (message.enabled === Boolean(session.workflowEnabled)) return { ok: true };
       await chrome.storage.session.set({ [KEY(tabId)]: {
-        ...session, workflowEnabled: message.enabled
+        ...session, workflowEnabled: message.enabled, consentEpoch: (session.consentEpoch || 0) + 1
       } });
       try { await chrome.tabs.sendMessage(tabId, {
         type: "gcrWorkflowMode", enabled: message.enabled
@@ -361,10 +434,19 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       return { ok: true };
     }
     throw Error("Unsupported operation.");
-  })().then(respond, () => respond({ ok: false, error: "Local extension operation failed." }));
+  });
+  operationQueue = operation.catch(() => {});
+  operation.then(async result => {
+    if (result?.retrieval) await result.retrieval;
+    if (result) delete result.retrieval;
+    respond(result);
+  }).catch(() => respond({ ok: false, error: "Local extension operation failed." }));
   return true;
 });
-chrome.tabs.onRemoved.addListener(tabId => { void stop(tabId); });
+function queueStop(tabId) {
+  operationQueue = operationQueue.then(() => stop(tabId)).catch(() => {});
+}
+chrome.tabs.onRemoved.addListener(queueStop);
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading" || changeInfo.url) void stop(tabId);
+  if (changeInfo.status === "loading" || changeInfo.url) queueStop(tabId);
 });
