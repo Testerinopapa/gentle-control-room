@@ -13,7 +13,10 @@ const example = () => ({
   events: [{ type: "assistant_response", prompt: "SECRET CHAT CONTENT" }],
   cookies: "SECRET COOKIE",
   analysis: {
-    tasks: [{ taskId: "task-1", commitReferences: [{ sha: "a".repeat(40) }] }],
+    tasks: [{ taskId: "task-1", commitReferences: [{
+      key: "example/repo@" + "a".repeat(40), repository: "example/repo",
+      sha: "a".repeat(40)
+    }] }],
     patterns: [{ label: "Repeated test updates", supportingTaskIds: ["task-1"] }],
     coverage: { episodesWithActualDiffPatches: 1 },
     limitations: ["Tests are not verified."]
@@ -44,6 +47,28 @@ test("Codex review includes actual patches and patterns but excludes raw session
     assert.ok(!data.json.includes(secret));
   assert.equal(parsed.events, undefined);
   assert.equal(parsed.cookies, undefined);
+});
+
+test("Codex review excludes cached patches that have no task attribution", () => {
+  const evidence = example();
+  const orphanKey = "example/repo@" + "c".repeat(40);
+  evidence.commits[orphanKey] = {
+    status: "retrieved", repository: "example/repo", sha: "c".repeat(40),
+    files: [{ path: "src/unrelated.js", status: "modified",
+      additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+unrelated();" }]
+  };
+  const reviewed = build(evidence);
+  assert.equal(reviewed.commitCount, 1);
+  assert.ok(!reviewed.json.includes("src/unrelated.js"));
+  assert.ok(!Object.hasOwn(JSON.parse(reviewed.json).commits, orphanKey));
+  // A later task can explicitly reference the cached commit.
+  evidence.analysis.tasks.push({
+    taskId: "task-2",
+    commitReferences: [{ key: orphanKey, repository: "example/repo", sha: "c".repeat(40) }]
+  });
+  const withTask = build(evidence);
+  assert.equal(withTask.commitCount, 2);
+  assert.equal(JSON.parse(withTask.json).commits[orphanKey].files[0].path, "src/unrelated.js");
 });
 
 test("Codex review refuses absent tasks and oversized payloads rather than silently truncating", () => {
