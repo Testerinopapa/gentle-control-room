@@ -107,8 +107,8 @@ async function waitForStoredCommit(h, key) {
   assert.fail("Timed out waiting for retrieved commit evidence: " + key);
 }
 
-test("extension requires no Windows host and uses only approved page + public GitHub API permissions", () => {
-  assert.equal(manifest.permissions.includes("nativeMessaging"), false);
+test("recording remains standalone while approved Codex analysis has optional native messaging", () => {
+  assert.equal(manifest.permissions.includes("nativeMessaging"), true);
   assert.ok(manifest.permissions.includes("storage"));
   assert.ok(manifest.host_permissions.includes("https://api.github.com/*"));
   assert.ok(manifest.host_permissions.includes("https://chatgpt.com/*"));
