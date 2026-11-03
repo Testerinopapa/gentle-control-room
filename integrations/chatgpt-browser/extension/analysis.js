@@ -89,6 +89,12 @@
       observedCodeBlocks: responseSummaries.reduce((sum, e) => sum + finite(e.observedCodeBlocks), 0),
       observedCommitLinks: responseSummaries.reduce((sum, e) => sum + finite(e.observedCommitLinks), 0),
       maxObservedResponseCharacters: Math.max(0, ...responseSummaries.map(e => finite(e.observedCharacters))),
+      mentionedStages: [...new Set(responseSummaries.flatMap(e =>
+        Array.isArray(e.mentionedStages) ? e.mentionedStages.filter(s => STAGES.has(s)) : []))].sort(),
+      commandFamilies: [...new Set(responseSummaries.flatMap(e =>
+        Array.isArray(e.commandFamilies) ? e.commandFamilies.filter(s =>
+          ["git", "npm", "npx", "pnpm", "yarn", "node", "python",
+            "pytest", "docker", "dotnet", "powershell"].includes(s)) : []))].sort(),
       scope: "rendered_assistant_metadata_not_execution_proof"
     };
     return {
