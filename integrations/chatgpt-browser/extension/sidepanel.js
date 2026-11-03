@@ -19,6 +19,16 @@ const unresolvedNode = document.getElementById("unresolved-commits");
 const importStatus = document.getElementById("import-status");
 const patternsNode = document.getElementById("code-patterns");
 const codeCountNode = document.getElementById("code-count");
+const codexPrepare = document.getElementById("prepare-codex");
+const codexReview = document.getElementById("codex-review");
+const codexPreview = document.getElementById("codex-preview");
+const codexApproval = document.getElementById("codex-approval");
+const codexAnalyze = document.getElementById("analyze-codex");
+const codexStatus = document.getElementById("codex-status");
+const codexOutput = document.getElementById("codex-output");
+const CODEX_HOST = "org.gentlecontrolroom.chatgpt";
+const CODEX_INSIGHTS_KEY = "gcrCodexInsightsV1";
+let reviewedEvidence = null;
 let workflowEnabled = false;
 
 let selectedTab = null;
@@ -218,9 +228,106 @@ async function clearEvidence() {
   try {
     const response = await chrome.runtime.sendMessage({ type: "clearEvidence" });
     if (!response?.ok) throw Error("Unable to delete local evidence.");
+    await chrome.storage.local.remove(CODEX_INSIGHTS_KEY);
+    reviewedEvidence = null;
+    codexReview.hidden = true;
+    codexOutput.hidden = true;
+    codexOutput.textContent = "";
+    codexStatus.textContent = "No Codex insights yet.";
   } catch (error) { lastError = error?.message || "Could not delete evidence."; }
   finally { busy = false; clearButton.disabled = false; await refresh(); }
 }
+
+
+async function reviewCodexEvidence() {
+  if (busy) return;
+  busy = true;
+  codexPrepare.disabled = true;
+  codexStatus.textContent = "Preparing evidence review…";
+  reviewedEvidence = null;
+  codexReview.hidden = true;
+  codexApproval.checked = false;
+  codexAnalyze.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "exportEvidence" });
+    if (!response?.ok || !response.data) throw new Error("Unable to read recorded evidence.");
+    reviewedEvidence = GcrCodexEvidence.build(response.data);
+    codexPreview.value = reviewedEvidence.json;
+    codexReview.hidden = false;
+    codexStatus.textContent = reviewedEvidence.taskCount + " tasks · " +
+      reviewedEvidence.commitCount + " retrieved commits · " +
+      reviewedEvidence.patternCount + " patterns. Review the JSON before approving.";
+  } catch (error) {
+    codexStatus.textContent = error?.message || "Unable to prepare evidence.";
+  } finally {
+    busy = false;
+    codexPrepare.disabled = false;
+  }
+}
+
+function runNativeCodex(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(CODEX_HOST, message, result => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(
+        "Codex bridge unavailable. Install/reinstall the native host with install-host.ps1 and check Codex CLI login."
+      ));
+      else resolve(result);
+    });
+  });
+}
+
+async function analyzeWithCodex() {
+  if (busy || !reviewedEvidence || !codexApproval.checked) return;
+  busy = true;
+  codexAnalyze.disabled = true;
+  codexPrepare.disabled = true;
+  codexStatus.textContent = "Codex is analyzing the approved evidence…";
+  try {
+    const result = await runNativeCodex({
+      type: "codex_analyze",
+      version: 1,
+      approved: true,
+      evidence: reviewedEvidence.json
+    });
+    if (!result?.ok || typeof result.output !== "string")
+      throw new Error(result?.error || "Codex could not analyze the evidence.");
+    codexOutput.textContent = result.output;
+    codexOutput.hidden = false;
+    await chrome.storage.local.set({
+      [CODEX_INSIGHTS_KEY]: { output: result.output, analyzedAt: new Date().toISOString() }
+    });
+    codexStatus.textContent = "Codex analysis complete. Saved locally in Edge.";
+    reviewedEvidence = null;
+    codexReview.hidden = true;
+    codexApproval.checked = false;
+  } catch (error) {
+    codexStatus.textContent = error?.message || "Codex analysis failed.";
+  } finally {
+    busy = false;
+    codexPrepare.disabled = false;
+    codexAnalyze.disabled = !reviewedEvidence || !codexApproval.checked;
+  }
+}
+
+async function restoreCodexInsights() {
+  try {
+    const saved = (await chrome.storage.local.get(CODEX_INSIGHTS_KEY))[CODEX_INSIGHTS_KEY];
+    if (!saved || typeof saved.output !== "string") return;
+    codexOutput.textContent = saved.output;
+    codexOutput.hidden = false;
+    codexStatus.textContent = "Last Codex analysis saved " +
+      new Date(saved.analyzedAt).toLocaleString() + ". Review new evidence to analyze again.";
+  } catch {
+    // Recording works normally even if insight storage is unavailable.
+  }
+}
+
+codexPrepare.addEventListener("click", () => void reviewCodexEvidence());
+codexApproval.addEventListener("change", () => {
+  codexAnalyze.disabled = !reviewedEvidence || !codexApproval.checked || busy;
+});
+codexAnalyze.addEventListener("click", () => void analyzeWithCodex());
 
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
@@ -236,3 +343,4 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
 });
 setInterval(() => void refresh(), 2500);
 void refresh();
+void restoreCodexInsights();
