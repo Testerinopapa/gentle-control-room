@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.8.1)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.8.2)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.8.1**. Reload the ChatGPT tab itself as well.
+   **0.8.2**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -36,8 +36,14 @@ computer's filesystem is used.
 - An automatic coding-work tag when you start recording, plus locally classified
   workflow stages. User text is inspected transiently only while recording is ON
   and is never saved.
-- Exact **public GitHub commit URL references** observed as links inside
-  assistant messages, reduced to `owner/repo` plus the 40-character SHA.
+- The **complete currently rendered assistant response** is inspected
+  transiently for GitHub links and code-block structure, including links outside
+  nested text wrappers, late-streamed content, and URLs beyond 12,000 characters.
+  GitHub references are reduced to `owner/repo` plus the 40-character SHA.
+- Per-response `assistant_evidence` contains **only counts**:
+  `observedCharacters`, `observedCodeBlocks`, `observedCommitLinks`,
+  and the opaque response/task IDs. A single snapshot is updated during streaming;
+  raw assistant response text or code is never saved by this scanner.
 - While recording is ON, the extension can fetch a matching public
   commit's changed file patch hunks directly from GitHub's public API. It stores
   bounded, filtered patch data locally along with the link's session ID.
@@ -51,6 +57,13 @@ computer's filesystem is used.
 `analysis.limitations`. The raw `events` and `commits` records remain
 unchanged and available for auditing. No new interface, external API key,
 DeepSeek request, or Windows software is required.
+
+The analysis includes `tasks[].responseMetadata`, summarizing code-block
+counts, observed commit-link counts, and the maximum rendered response length.
+These are **observations of ChatGPT output, not evidence that tests ran, code
+was edited, or deployment succeeded**. Raw response text, commands, code blocks,
+and non-GitHub links are not copied into the event log. GitHub patch capture
+continues to use the existing filtered public-commit retrieval mechanism.
 
 The local analysis now uses **observed user-request boundaries** first. A new
 request appended after an observed turn gets a local task ID; subsequent assistant
@@ -163,9 +176,11 @@ conversation for analysis after reviewing its contents.
 
 If an export has `session_started` events but no `workflow_stage` events,
 confirm that recording is ON and the ChatGPT page observer is connected.
-If `github_commit_ref` is missing, confirm a complete GitHub commit link is
-visibly rendered **inside an assistant reply**, not just plain text in a
-user message. In the exported JSON, `commits` entries describe available
+If `github_commit_ref` is missing, confirm a complete 40-character
+GitHub commit link appears **after recording begins** inside an assistant reply,
+not just in a user message or in a historical assistant response. The scanner
+does not recover links hidden behind inaccessible client-side actions or messages
+that ChatGPT has unmounted from the DOM. In the exported JSON, `commits` entries describe available
 GitHub patches or `status: unavailable` if the public API fetch failed.
 Reload both the extension and ChatGPT after updating the source.
 
