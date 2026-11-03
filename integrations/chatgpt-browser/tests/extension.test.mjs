@@ -1384,7 +1384,7 @@ test("commit patches and recurring patterns survive recording Stop and Start", a
     text: async () => JSON.stringify({
       sha: url.split("/").at(-1),
       files: [{ filename: "src/persistent.ts", status: "modified",
-        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+export const persisted = true;" }]
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+export const persisted = true;" }]
     })
   }));
 
