@@ -8,9 +8,16 @@ globalThis.GcrCodexEvidence = Object.freeze({
         !Array.isArray(exported.analysis.patterns) || !exported.commits ||
         typeof exported.commits !== "object")
       throw new Error("No valid coding analysis evidence is available.");
+    // Only forward patches linked to a recorded task. An unrelated cached
+    // commit must not be included just because it was retrieved previously.
+    const taskCommits = new Set(exported.analysis.tasks.flatMap(task =>
+      Array.isArray(task?.commitReferences)
+        ? task.commitReferences.map(ref => ref?.key).filter(Boolean)
+        : []));
     const commits = {};
     for (const [key, commit] of Object.entries(exported.commits)) {
-      if (commit?.status !== "retrieved" || !Array.isArray(commit.files)) continue;
+      if (!taskCommits.has(key) || commit?.status !== "retrieved" ||
+          !Array.isArray(commit.files)) continue;
       commits[key] = {
         repository: commit.repository, sha: commit.sha,
         files: commit.files.map(file => ({
