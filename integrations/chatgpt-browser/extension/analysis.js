@@ -81,6 +81,16 @@
     const reportedDeletions = capturedFiles.reduce((sum, file) => sum + file.deletions, 0);
     const boundary = items.find(item => item.event.type === "request_boundary");
     const taskId = boundary?.event.taskId || sessionId + ":" + segment;
+    const responseEvidence = items.filter(item => item.event.type === "assistant_evidence" &&
+      typeof item.event.responseId === "string").map(item => item.event);
+    const responseSummaries = [...new Map(responseEvidence.map(e => [e.responseId, e])).values()];
+    const responseMetadata = {
+      observedResponses: responseSummaries.length,
+      observedCodeBlocks: responseSummaries.reduce((sum, e) => sum + finite(e.observedCodeBlocks), 0),
+      observedCommitLinks: responseSummaries.reduce((sum, e) => sum + finite(e.observedCommitLinks), 0),
+      maxObservedResponseCharacters: Math.max(0, ...responseSummaries.map(e => finite(e.observedCharacters))),
+      scope: "rendered_assistant_metadata_not_execution_proof"
+    };
     return {
       id: taskId, taskId,
       completedAt: null,
@@ -90,6 +100,7 @@
       requestId: boundary?.event.requestId || null,
       responseIds: [...new Set(items.filter(item => item.event.type === "assistant_response").map(item => item.event.responseId))],
       filesChanged: [...new Set(capturedFiles.map(file => file.path))],
+      responseMetadata,
       lineChanges: { additions: reportedAdditions, deletions: reportedDeletions },
       verification: { testsExecuted: "unknown", testsPassed: "unknown", deployment: "unknown" },
       kind: "inferred_coding_episode",
@@ -248,7 +259,7 @@
       const relevant = (event.type === "workflow_stage" && STAGES.has(event.stage)) ||
         (event.type === "coding_tag" && event.codingMarked === true &&
           event.method !== "automatic_on_start") ||
-        ["github_commit_ref", "request_boundary", "assistant_response"].includes(event.type);
+        ["github_commit_ref", "request_boundary", "assistant_response", "assistant_evidence"].includes(event.type);
       if (!relevant) continue;
       if (!sessions.has(event.sessionId)) sessions.set(event.sessionId, []);
       sessions.get(event.sessionId).push({ event, index, time });
