@@ -97,6 +97,16 @@ async function exported(h) {
   return result.data;
 }
 
+// Commit collection runs asynchronously after a reference is acknowledged.
+async function waitForStoredCommit(h, key) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const evidence = await exported(h);
+    if (evidence.commits[key]) return evidence.commits[key];
+    await tick();
+  }
+  assert.fail("Timed out waiting for retrieved commit evidence: " + key);
+}
+
 test("extension requires no Windows host and uses only approved page + public GitHub API permissions", () => {
   assert.equal(manifest.permissions.includes("nativeMessaging"), false);
   assert.ok(manifest.permissions.includes("storage"));
@@ -1400,6 +1410,7 @@ test("commit patches and recurring patterns survive recording Stop and Start", a
       { repository, sha: HASH, historical: false }
     ] }, origin)).accepted[0], true);
 
+  await waitForStoredCommit(h, repository + "@" + HASH);
   const before = await exported(h);
   assert.equal(before.commits[repository + "@" + HASH].status, "retrieved");
   assert.equal(before.analysis.tasks.length, 1);
@@ -1425,6 +1436,7 @@ test("commit patches and recurring patterns survive recording Stop and Start", a
       { repository, sha: otherSha, historical: false }
     ] }, origin)).accepted[0], true);
 
+  await waitForStoredCommit(h, repository + "@" + otherSha);
   const after = await exported(h);
   assert.equal(Object.keys(after.commits).length, 2);
   assert.equal(h.requests.length, 2);
@@ -1457,6 +1469,7 @@ test("switching conversations keeps previously collected patches available", asy
   assert.equal((await h.send({
     type: "githubCommitReference", repository, sha: HASH
   }, origin)).ok, true);
+  await waitForStoredCommit(h, repository + "@" + HASH);
   const original = await exported(h);
   assert.equal(original.commits[repository + "@" + HASH].status, "retrieved");
 
@@ -1471,6 +1484,7 @@ test("switching conversations keeps previously collected patches available", asy
   assert.equal((await h.send({
     type: "githubCommitReference", repository, sha: nextSha
   }, origin)).ok, true);
+  await waitForStoredCommit(h, repository + "@" + nextSha);
   const after = await exported(h);
   assert.equal(after.events.filter(event => event.type === "session_started").length, 2);
   assert.equal(after.commits[repository + "@" + HASH].status, "retrieved");
