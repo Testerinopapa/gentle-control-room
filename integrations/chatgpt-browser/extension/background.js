@@ -15,6 +15,10 @@ const WORKFLOW_STAGES = new Set([
   "investigation", "implementation", "debugging", "testing",
   "version_control", "deployment"
 ]);
+const COMMAND_FAMILIES = new Set([
+  "git", "npm", "npx", "pnpm", "yarn", "node", "python", "pytest",
+  "docker", "dotnet", "powershell"
+]);
 const MAX_EVENTS = 1500;
 const MAX_COMMITS = 30;
 const RETENTION_MS = 30 * 86400000;
@@ -307,6 +311,11 @@ async function fromPage(message, sender) {
         message.observedCodeBlocks > 1000 ||
         !Number.isInteger(message.observedCommitLinks) || message.observedCommitLinks < 0 ||
         message.observedCommitLinks > MAX_COMMITS) return { ok: false };
+    const stages = message.mentionedStages ?? [], commands = message.commandFamilies ?? [];
+    if (!Array.isArray(stages) || stages.length > WORKFLOW_STAGES.size ||
+        stages.some(stage => !WORKFLOW_STAGES.has(stage)) ||
+        !Array.isArray(commands) || commands.length > COMMAND_FAMILIES.size ||
+        commands.some(command => !COMMAND_FAMILIES.has(command))) return { ok: false };
     return mutateEvidence(data => {
       const response = data.events.find(e => e.sessionId === session.id &&
         e.type === "assistant_response" && e.responseId === message.responseId &&
@@ -318,6 +327,8 @@ async function fromPage(message, sender) {
         observedCharacters: message.observedCharacters,
         observedCodeBlocks: message.observedCodeBlocks,
         observedCommitLinks: message.observedCommitLinks,
+        mentionedStages: [...new Set(stages)].sort(),
+        commandFamilies: [...new Set(commands)].sort(),
         coverage: "rendered_at_observation"
       };
       if (current) {
