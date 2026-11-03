@@ -66,7 +66,8 @@
     if (!record) {
       record = { id: prefix + "-" + (++serial), stable: Boolean(raw), role,
         historical: baselinePending, sent: false, stages: new Set(), taskId: null,
-        lastEvidenceSignature: null, lastEvidenceAt: 0 };
+        lastEvidenceSignature: null, lastEvidenceAt: 0,
+        observedCommitKeys: new Set() };
       if (key && identities.size < 1000) identities.set(key, record);
     }
     nodes.set(node, record);
@@ -88,9 +89,10 @@
       const repository = (match[1] + "/" + match[2]).toLowerCase(), sha = match[3].toLowerCase();
       references.set(repository + "@" + sha, { repository, sha });
     };
-    for (const anchor of node.querySelectorAll("a[href], a[data-href]")) {
+    for (const anchor of node.querySelectorAll("a[href], [data-href], [data-url]")) {
       add(anchor.getAttribute("href"));
       add(anchor.getAttribute("data-href"));
+      add(anchor.getAttribute("data-url"));
       if (references.size >= maxCommitLinks) break;
     }
     const visible = String(node.innerText ?? node.textContent ?? "");
@@ -197,20 +199,44 @@
             if (reply?.ok) record.sent = true;
           }
           const commitRefs = commitIdentifiers(node);
+          // Keep a bounded union across streaming updates: a link may appear
+          // before ChatGPT rerenders the response with a different DOM shape.
           for (const { repository, sha } of commitRefs) {
+            if (record.observedCommitKeys.size < maxCommitLinks)
+              record.observedCommitKeys.add(repository + "@" + sha);
+          }
+          const pending = [];
+          for (const { repository, sha } of commitRefs) {
+            if (!active()) break;
             const historical = baselineCommitLinks.has(repository + "@" + sha);
-            if (!active() || (historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) break;
+            // Exhausting one quota must not starve valid links in the other.
+            if ((historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) continue;
             const key = record.id + ":" + repository + "@" + sha;
-            if (seenCommitLinks.has(key)) continue;
-            const reply = await chrome.runtime.sendMessage({ type: "githubCommitReference", repository, sha,
-              responseId: record.id, historical });
-            if (reply?.ok) {
-              seenCommitLinks.add(key);
-              if (historical) historicalCommitLinks++; else newCommitLinks++;
+            if (!seenCommitLinks.has(key))
+              pending.push({ repository, sha, historical, key });
+          }
+          if (pending.length && active()) {
+            try {
+              const reply = await chrome.runtime.sendMessage({
+                type: "githubCommitReferences", responseId: record.id,
+                links: pending.map(({ repository, sha, historical }) =>
+                  ({ repository, sha, historical }))
+              });
+              if (reply?.ok && active() && Array.isArray(reply.accepted)) {
+                for (const [index, accepted] of reply.accepted.entries()) {
+                  if (accepted !== true || !pending[index]) continue;
+                  const item = pending[index];
+                  seenCommitLinks.add(item.key);
+                  if (item.historical) historicalCommitLinks++; else newCommitLinks++;
+                }
+              }
+            } catch {
+              // A failed batch is retried on the next scan, without dropping
+              // later links or accidentally marking an unacknowledged link seen.
             }
           }
           if (!record.historical && record.sent) {
-            const metadata = assistantMetadata(node, commitRefs.length);
+            const metadata = assistantMetadata(node, record.observedCommitKeys.size);
             const signature = Object.values(metadata).join(":");
             const now = Date.now();
             // Update a single stored snapshot per response during streaming;
