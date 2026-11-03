@@ -89,10 +89,24 @@
       const repository = (match[1] + "/" + match[2]).toLowerCase(), sha = match[3].toLowerCase();
       references.set(repository + "@" + sha, { repository, sha });
     };
-    for (const anchor of node.querySelectorAll("a[href], [data-href], [data-url]")) {
-      add(anchor.getAttribute("href"));
-      add(anchor.getAttribute("data-href"));
-      add(anchor.getAttribute("data-url"));
+    // Some ChatGPT link controls expose their target through accessible
+    // attributes rather than an <a href>. Inspect only link-like elements,
+    // and retain only validated public GitHub owner/repo/SHA references.
+    for (const link of node.querySelectorAll(
+      'a, [role="link"], [data-href], [data-url], [data-clipboard-text]'
+    )) {
+      for (const attribute of ["href", "data-href", "data-url",
+        "data-clipboard-text", "aria-label", "title"]) {
+        const value = link.getAttribute(attribute);
+        if (!value) continue;
+        add(value);
+        // Labels often contain surrounding text rather than just a URL.
+        for (const match of value.matchAll(COMMIT_URL)) {
+          add(match[0]);
+          if (references.size >= maxCommitLinks) break;
+        }
+        if (references.size >= maxCommitLinks) break;
+      }
       if (references.size >= maxCommitLinks) break;
     }
     const visible = String(node.innerText ?? node.textContent ?? "");
