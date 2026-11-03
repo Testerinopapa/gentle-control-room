@@ -1159,3 +1159,40 @@ test("batch capture accepts remaining links when one reference is rejected", asy
   assert.equal(data.analysis.tasks[0].commitReferences.length, 2);
   assert.equal(h.requests.length, 2);
 });
+
+
+test("one temporarily rejected commit retries without losing the other link", async () => {
+  const second = "d".repeat(40);
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/retry.js", status: "modified", additions: 1,
+        deletions: 0, patch: "@@ -0,0 +1 @@\\n+retry" }]
+    })
+  }));
+  await enable(h);
+  let firstBatch = true;
+  const proxy = { send: async (message, sender) => {
+    if (message.type === "githubCommitReferences" && firstBatch) {
+      firstBatch = false;
+      const accepted = await h.send({ ...message, links: [message.links[1]] }, sender);
+      return { ok: true, accepted: [false, accepted.accepted[0]] };
+    }
+    return h.send(message, sender);
+  } };
+  const d = domHarness(proxy);
+  await d.enable();
+  await d.change(userTurn("retry-u", "Implement two updates"));
+  await d.change(assistantTurn("retry-a", '<a href="' + COMMIT + '">First</a>' +
+    '<a href="https://github.com/testerinopapa/gentle-control-room/commit/' + second + '">Second</a>'));
+  let data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  await d.scan();
+  data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 2);
+  assert.equal(data.analysis.captureDiagnostics.linkDelivery.responsesWithMissingCommitReferences, 0);
+  assert.equal(data.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(h.requests.length, 2);
+});
