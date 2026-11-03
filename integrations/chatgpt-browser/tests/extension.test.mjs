@@ -907,3 +907,75 @@ test("one-click recording captures a new assistant commit and exports attributab
   assert.deepEqual(JSON.parse(JSON.stringify(replayed)), JSON.parse(JSON.stringify(data.analysis)),
     "export must be deterministically reanalyzable without prompt text");
 });
+
+
+test("complete assistant response inspection finds commits beyond 12k and 30 other links", async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("long-u", "Implement the requested change"));
+  const otherLinks = Array.from({ length: 45 }, (_, i) =>
+    '<a href="https://example.com/reference/' + i + '">Reference</a>').join("");
+  const longText = "irrelevant visible text ".repeat(1100);
+  await d.change(assistantTurn("long-a",
+    '<div data-message-author-role="assistant"><p>' + longText + '</p>' +
+      otherLinks + '<pre>const secretValue = "never export me";</pre></div>' +
+      '<div class="assistant-footer"><a href="' + COMMIT + '">See commit</a></div>'));
+
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences[0].sha, HASH);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedResponses, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 1);
+  assert.ok(data.analysis.tasks[0].responseMetadata.maxObservedResponseCharacters > 12000);
+  assert.equal(data.analysis.captureDiagnostics.discovery.assistant, 1);
+  assert.equal(h.requests.length, 1);
+  assert.equal(data.commits["testerinopapa/gentle-control-room@" + HASH].status, "retrieved");
+  assert.ok(!JSON.stringify(data).includes("never export me"),
+    "raw assistant text/code must not be sent to persistent storage");
+  assert.ok(!JSON.stringify(data).includes("irrelevant visible text"),
+    "only structured metadata and filtered GitHub patches are exported");
+});
+
+test("plain-text commit at very end of large reply is captured without an anchor", async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("plain-u", "Implement an update"));
+  await d.change(assistantTurn("plain-a",
+    "Large assistant response ".repeat(1500) + " Final commit: " + COMMIT));
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 1);
+  assert.equal(h.requests.length, 1);
+});
+
+test("assistant response metadata is updated during streaming and rejects historical or raw payloads", async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h, assistantTurn("old-a", '<pre>Historical code</pre>'));
+  await d.enable();
+  await d.change(userTurn("new-u", "Implement an update"));
+  await d.change(assistantTurn("new-a", '<pre>const safe = true;</pre>'));
+  let data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "assistant_evidence").length, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 1);
+  const responseId = data.analysis.tasks[0].responseIds[0];
+  assert.equal((await h.send({ type: "assistantEvidence", responseId,
+    observedCharacters: 100, observedCodeBlocks: 2,
+    observedCommitLinks: 1, rawText: "LEAK PRIVATE CHAT" }, origin)).ok, true);
+  data = await exported(h);
+  const records = data.events.filter(e => e.type === "assistant_evidence");
+  assert.equal(records.length, 1, "one snapshot per assistant turn, not one event per token");
+  assert.equal(records[0].observedCodeBlocks, 2);
+  assert.equal(records[0].observedCommitLinks, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 2);
+  assert.ok(!JSON.stringify(data).includes("LEAK PRIVATE CHAT"));
+  assert.equal((await h.send({ type: "assistantEvidence", responseId,
+    observedCharacters: -1, observedCodeBlocks: 0, observedCommitLinks: 0 }, origin)).ok, false);
+  assert.equal((await h.send({ type: "assistantEvidence", responseId: "m-invalid!",
+    observedCharacters: 1, observedCodeBlocks: 0, observedCommitLinks: 0 }, origin)).ok, false);
+  await h.send({ type: "stop", tabId: 9 });
+  assert.equal((await h.send({ type: "assistantEvidence", responseId,
+    observedCharacters: 100, observedCodeBlocks: 0, observedCommitLinks: 0 }, origin)).ok, false);
+});
