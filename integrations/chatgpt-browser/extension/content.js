@@ -101,16 +101,39 @@
     return [...references.values()];
   }
   function assistantMetadata(node, commitLinks) {
-    // Counts only. Never persist message content, source code, or arbitrary URLs.
+    // Whitelisted labels and counts only. No response, source code, commands,
+    // file paths, or arbitrary URLs leave this content script.
     const text = String(node.innerText ?? node.textContent ?? "");
     const blocks = Math.max(
       node.querySelectorAll("pre").length,
       node.querySelectorAll('[data-testid="code-block"]').length
     );
+    const mentionedStages = workflowCategories
+      .filter(([, expression]) => expression.test(text))
+      .map(([stage]) => stage);
+    const commandPatterns = [
+      ["git", /^\s*(?:\$\s*)?git\s+/mi],
+      ["npm", /^\s*(?:\$\s*)?npm\s+/mi],
+      ["npx", /^\s*(?:\$\s*)?npx\s+/mi],
+      ["pnpm", /^\s*(?:\$\s*)?pnpm\s+/mi],
+      ["yarn", /^\s*(?:\$\s*)?yarn\s+/mi],
+      ["node", /^\s*(?:\$\s*)?node\s+/mi],
+      ["python", /^\s*(?:\$\s*)?(?:python|python3)\s+/mi],
+      ["pytest", /^\s*(?:\$\s*)?pytest(?:\s+|$)/mi],
+      ["docker", /^\s*(?:\$\s*)?docker\s+/mi],
+      ["dotnet", /^\s*(?:\$\s*)?dotnet\s+/mi],
+      ["powershell", /^\s*(?:\$\s*)?(?:pwsh|powershell)\s+/mi]
+    ];
+    const code = Array.from(node.querySelectorAll("pre"), element =>
+      String(element.innerText ?? element.textContent ?? "")).join("\n");
+    const commandFamilies = commandPatterns.filter(([, pattern]) =>
+      pattern.test(code)).map(([family]) => family);
     return {
       observedCharacters: Math.min(text.length, 10000000),
       observedCodeBlocks: Math.min(blocks, 1000),
-      observedCommitLinks: Math.min(commitLinks, maxCommitLinks)
+      observedCommitLinks: Math.min(commitLinks, maxCommitLinks),
+      mentionedStages,
+      commandFamilies
     };
   }
   function validPage() { return !stopped && workflowEnabled && location.pathname === pathname; }
