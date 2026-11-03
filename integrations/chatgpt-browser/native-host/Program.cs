@@ -5,11 +5,12 @@ using System.Text.RegularExpressions;
 
 namespace GentleControlRoom.ChatGPTHost;
 
-// Dedicated Edge native messaging executable. It never reads cookies, text,
-// conversations, page contents, tokens, URLs, or arbitrary browser data.
+// Local Edge native messaging executable. Regular event recording stays minimal;
+// Codex analysis accepts only evidence explicitly reviewed in the side panel.
 internal static class Program
 {
-  private const int MaxMessageBytes = 8192;
+  private const int MaxMessageBytes = 350_000;
+  private const int MaxEventMessageBytes = 8192;
   private const int MaxDailyFileBytes = 1024 * 1024;
   private const string HostManifest = "native-host.json";
 
@@ -46,6 +47,14 @@ internal static class Program
             commitRef?.CommitSha != "28de267f6353f99977c5185080f5573a45ab12de" ||
             JsonSerializer.Serialize(commitRef).Contains("DO-NOT-COPY", StringComparison.Ordinal) ||
             ParseEvent("""{"version":1,"event":"github_commit_ref","sessionId":"123e4567-e89b-42d3-a456-426614174000","repository":"other/secret","commitSha":"nope"}""") is not null)
+          return 1;
+        var approved = JsonSerializer.Serialize(new {
+          version = 1, type = "codex_analyze", approved = true,
+          evidence = "{\"analysis\":{\"tasks\":[],\"patterns\":[]},\"commits\":{}}"
+        });
+        var unapproved = approved.Replace("\"approved\":true", "\"approved\":false", StringComparison.Ordinal);
+        if (!CodexBridge.IsRequest(approved) || !CodexBridge.TryValidate(approved, out _) ||
+            CodexBridge.TryValidate(unapproved, out _))
           return 1;
         return 0;
       }
@@ -91,7 +100,16 @@ internal static class Program
         return 0;
       }
 
-      var record = ParseEvent(json);
+      if (CodexBridge.IsRequest(json))
+      {
+        var result = CodexBridge.AnalyzeAsync(json).GetAwaiter().GetResult();
+        WriteJson(stdout, result);
+        return 0;
+      }
+
+      // Preserve the original small event limit; large requests are only for
+      // user-approved Codex analysis, never for activity logging.
+      var record = data.Length <= MaxEventMessageBytes ? ParseEvent(json) : null;
       if (record is null)
       {
         WriteResult(stdout, false);
@@ -316,9 +334,12 @@ internal static class Program
     return true;
   }
 
-  private static void WriteResult(Stream stream, bool success)
+  private static void WriteResult(Stream stream, bool success) =>
+    WriteJson(stream, new { ok = success });
+
+  private static void WriteJson(Stream stream, object message)
   {
-    var payload = Encoding.UTF8.GetBytes(success ? """{"ok":true}""" : """{"ok":false}""");
+    var payload = JsonSerializer.SerializeToUtf8Bytes(message);
     Span<byte> prefix = stackalloc byte[4];
     BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
     stream.Write(prefix);
