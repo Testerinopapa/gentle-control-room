@@ -1374,3 +1374,68 @@ test('patch patterns exclude unattributed evidence and the same SHA mirrored acr
   mirrored.commits[commit.repository + '@' + commit.sha] = commit;
   assert.equal(codePatterns(mirrored).length, 0);
 });
+
+
+test("commit patches and recurring patterns survive recording Stop and Start", async () => {
+  const otherSha = "a".repeat(40);
+  const repository = "testerinopapa/gentle-control-room";
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/persistent.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+export const persisted = true;" }]
+    })
+  }));
+
+  await enable(h);
+  const firstSession = (await h.send({ type: "getState", tabId: 9 })).active;
+  assert.equal(firstSession, true);
+  assert.equal((await h.send({ type: "requestBoundary",
+    requestId: "m-persist-1", confidence: "supported" }, origin)).ok, true);
+  assert.equal((await h.send({ type: "assistantBoundary",
+    responseId: "m-persist-2", requestId: "m-persist-1" }, origin)).ok, true);
+  assert.equal((await h.send({ type: "githubCommitReferences",
+    responseId: "m-persist-2", links: [
+      { repository, sha: HASH, historical: false }
+    ] }, origin)).accepted[0], true);
+
+  const before = await exported(h);
+  assert.equal(before.commits[repository + "@" + HASH].status, "retrieved");
+  assert.equal(before.analysis.tasks.length, 1);
+  assert.equal(before.analysis.patterns.filter(p => p.basis === "captured_patch_changes").length, 0);
+
+  assert.equal((await h.send({ type: "stop", tabId: 9 })).ok, true);
+  const stopped = await exported(h);
+  assert.equal(stopped.commits[repository + "@" + HASH].status, "retrieved",
+    "Stop must not delete previously retrieved patches");
+
+  await enable(h);
+  const restarted = await exported(h);
+  assert.equal(restarted.commits[repository + "@" + HASH].status, "retrieved",
+    "Start must not reset persistent evidence");
+  assert.equal(restarted.events.filter(e => e.type === "session_started").length, 2);
+
+  assert.equal((await h.send({ type: "requestBoundary",
+    requestId: "m-persist-3", confidence: "supported" }, origin)).ok, true);
+  assert.equal((await h.send({ type: "assistantBoundary",
+    responseId: "m-persist-4", requestId: "m-persist-3" }, origin)).ok, true);
+  assert.equal((await h.send({ type: "githubCommitReferences",
+    responseId: "m-persist-4", links: [
+      { repository, sha: otherSha, historical: false }
+    ] }, origin)).accepted[0], true);
+
+  const after = await exported(h);
+  assert.equal(Object.keys(after.commits).length, 2);
+  assert.equal(h.requests.length, 2);
+  assert.equal(after.analysis.tasks.length, 2);
+  assert.equal(after.analysis.coverage.episodesWithActualDiffPatches, 2);
+  const sameFile = after.analysis.patterns.find(
+    p => p.type === "same_file_in_distinct_commits" &&
+      p.basis === "captured_patch_changes");
+  assert.ok(sameFile, "cross-session edits to the same source file should be detected");
+  assert.equal(sameFile.distinctTasks, 2);
+  assert.equal(sameFile.distinctCommits, 2);
+  assert.deepEqual(Array.from(sameFile.supportingCommitRefs).sort(),
+    [repository + "@" + HASH, repository + "@" + otherSha].sort());
+});
