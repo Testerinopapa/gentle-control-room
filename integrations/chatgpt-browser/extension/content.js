@@ -67,7 +67,7 @@
       record = { id: prefix + "-" + (++serial), stable: Boolean(raw), role,
         historical: baselinePending, sent: false, stages: new Set(), taskId: null,
         lastEvidenceSignature: null, lastEvidenceAt: 0,
-        observedCommitKeys: new Set() };
+        lastAcknowledgedCommitCount: 0, observedCommitKeys: new Set() };
       if (key && identities.size < 1000) identities.set(key, record);
     }
     nodes.set(node, record);
@@ -242,13 +242,15 @@
             // Update a single stored snapshot per response during streaming;
             // avoid flooding storage for every emitted token.
             if (signature !== record.lastEvidenceSignature &&
-                (!record.lastEvidenceAt || now - record.lastEvidenceAt >= 1200)) {
+                (metadata.observedCommitLinks > record.lastAcknowledgedCommitCount ||
+                 !record.lastEvidenceAt || now - record.lastEvidenceAt >= 1200)) {
               const reply = await chrome.runtime.sendMessage({
                 type: "assistantEvidence", responseId: record.id, ...metadata
               });
               if (reply?.ok && active()) {
                 record.lastEvidenceSignature = signature;
                 record.lastEvidenceAt = now;
+                record.lastAcknowledgedCommitCount = metadata.observedCommitLinks;
               }
             }
           }
