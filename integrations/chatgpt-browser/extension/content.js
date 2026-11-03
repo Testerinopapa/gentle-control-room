@@ -206,9 +206,13 @@
               record.observedCommitKeys.add(repository + "@" + sha);
           }
           const pending = [];
-          for (const { repository, sha } of commitRefs) {
+          // Retry ALL links observed in this assistant turn, even when a
+          // streaming rerender has since removed one from the live DOM.
+          // Keep the historical baseline and per-response quotas unchanged.
+          for (const reference of record.observedCommitKeys) {
             if (!active()) break;
-            const historical = baselineCommitLinks.has(repository + "@" + sha);
+            const [repository, sha] = reference.split("@");
+            const historical = baselineCommitLinks.has(reference);
             // Exhausting one quota must not starve valid links in the other.
             if ((historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) continue;
             const key = record.id + ":" + repository + "@" + sha;
