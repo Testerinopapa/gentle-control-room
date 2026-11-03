@@ -295,7 +295,7 @@ test("a navigation away ends approval and rejects further page events", async ()
 function domHarness(h = null, html = '<article data-turn="assistant" data-turn-id="old">Earlier reply</article>') {
   const dom = new JSDOM('<main data-app-action-timeline-scroll role="region">' + html + '</main>');
   const sent = [];
-  let command, poll, mutation;
+  let command, poll, mutation, observerOptions;
   const location = { pathname: "/c/test-conversation" };
   vm.runInNewContext(content, {
     URL, document: dom.window.document, location,
@@ -308,14 +308,20 @@ function domHarness(h = null, html = '<article data-turn="assistant" data-turn-i
       },
       onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
     } },
-    MutationObserver: class { observe() {} disconnect() {} constructor(fn) { mutation = fn; } },
+    MutationObserver: class {
+      observe(_target, options) { observerOptions = options; }
+      disconnect() {}
+      constructor(fn) { mutation = fn; }
+    },
     setInterval(fn) { poll = fn; return 1; }, clearInterval() {},
     setTimeout(fn) { queueMicrotask(fn); return 1; }, clearTimeout() {}, Date
   });
   const root = dom.window.document.querySelector('main');
   const flush = async () => { for (let i = 0; i < 35; i++) await tick(); };
-  return { sent, root, location, flush, async enable() { command({ type: "gcrWorkflowMode", enabled: true }); await flush(); },
+  return { sent, root, location, flush, observerOptions: () => observerOptions,
+    async enable() { command({ type: "gcrWorkflowMode", enabled: true }); await flush(); },
     async change(html) { root.insertAdjacentHTML('beforeend', html); mutation(); await flush(); },
+    async mutate() { mutation(); await flush(); },
     async scan() { poll(); await flush(); }, command };
 }
 const userTurn = (id, text) => `<article data-turn="user" data-turn-id="${id}"><div data-message-author-role="user">${text}</div></article>`;
@@ -1526,4 +1532,53 @@ test("accessible ChatGPT link controls capture two commits without HTML anchors"
   assert.equal(h.requests.length, 2);
   assert.ok(!JSON.stringify(captured).includes("Open commit: "),
     "accessible descriptions must not be exported verbatim");
+});
+
+
+test("late link metadata updates capture two commits without reloading the page", async () => {
+  const second = "a".repeat(40);
+  const repository = "testerinopapa/gentle-control-room";
+  const secondUrl = "https://github.com/" + repository + "/commit/" + second;
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/late-link.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+export const captured = true;" }]
+    })
+  }));
+  await enable(h);
+  const d = domHarness(h);
+  await d.enable();
+
+  const attrs = d.observerOptions().attributeFilter;
+  for (const name of ["href", "data-href", "data-url", "data-clipboard-text", "aria-label", "title"])
+    assert.ok(attrs.includes(name), "content observer must watch " + name);
+
+  await d.change(userTurn("attribute-u", "Implement two changes"));
+  await d.change(assistantTurn("attribute-a",
+    '<span role="link" aria-label="Commit link pending">First</span>' +
+    '<button data-clipboard-text="Pending">Second</button>'));
+  assert.equal((await exported(h)).analysis.tasks[0].commitReferences.length, 0);
+
+  // Commit destinations appear ONLY through late attribute updates; no
+  // child-list, text, or href mutation occurs.
+  d.root.querySelector('[role="link"]').setAttribute("aria-label", "View " + COMMIT);
+  d.root.querySelector("button").setAttribute("data-clipboard-text", "Copy " + secondUrl);
+  await d.mutate();
+
+  const captured = await exported(h);
+  const refs = captured.events.filter(e => e.type === "github_commit_ref" &&
+    e.attribution?.state === "automatic");
+  assert.deepEqual(Array.from(refs, e => e.commitSha).sort(), [HASH, second].sort());
+  assert.equal(captured.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(captured.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(captured.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  await waitForStoredCommit(h, repository + "@" + HASH);
+  await waitForStoredCommit(h, repository + "@" + second);
+  assert.equal((await exported(h)).analysis.captureDiagnostics.retrieval.withTextPatches, 2);
+  await d.mutate();
+  assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref" &&
+    e.attribution?.state === "automatic").length, 2,
+    "repeat metadata updates must not duplicate commit references");
 });
