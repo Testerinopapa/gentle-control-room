@@ -1196,3 +1196,54 @@ test("one temporarily rejected commit retries without losing the other link", as
   assert.equal(data.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
   assert.equal(h.requests.length, 2);
 });
+
+
+test("missed first commit retries after its link disappears during streaming", async () => {
+  const second = "e".repeat(40);
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/disappearing-link.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+streamed" }]
+    })
+  }));
+  await enable(h);
+  let firstBatch = true;
+  const proxy = { send: async (message, sender) => {
+    if (message.type === "githubCommitReferences" && firstBatch) {
+      firstBatch = false;
+      const secondAck = await h.send({
+        ...message, links: [message.links[1]]
+      }, sender);
+      return { ok: true, accepted: [false, secondAck.accepted[0]] };
+    }
+    return h.send(message, sender);
+  } };
+  const d = domHarness(proxy);
+  await d.enable();
+  await d.change(userTurn("lost-link-u", "Implement two independent commits"));
+  await d.change(assistantTurn("lost-link-a",
+    '<a href="' + COMMIT + '">First</a>' +
+    '<a href="https://github.com/testerinopapa/gentle-control-room/commit/' +
+    second + '">Second</a>'));
+
+  let data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 1);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+
+  // ChatGPT re-renders away the first link before the worker acknowledges it.
+  d.root.lastElementChild.querySelector("a").remove();
+  await d.scan();
+  data = await exported(h);
+  const refs = data.events.filter(e => e.type === "github_commit_ref");
+  assert.deepEqual(Array.from(refs, e => e.commitSha).sort(), [HASH, second].sort());
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(data.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(data.analysis.captureDiagnostics.retrieval.withTextPatches, 2);
+  assert.equal(h.requests.length, 2);
+  await d.scan();
+  assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref").length, 2);
+});
