@@ -1439,3 +1439,41 @@ test("commit patches and recurring patterns survive recording Stop and Start", a
   assert.deepEqual(Array.from(sameFile.supportingCommitRefs).sort(),
     [repository + "@" + HASH, repository + "@" + otherSha].sort());
 });
+
+
+test("switching conversations keeps previously collected patches available", async () => {
+  const repository = "testerinopapa/gentle-control-room";
+  const nextSha = "b".repeat(40);
+  const h = harness("https://chatgpt.com/c/first-conversation", null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/session-evidence.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+export const retained = true;" }]
+    })
+  }));
+
+  await enable(h);
+  assert.equal((await h.send({
+    type: "githubCommitReference", repository, sha: HASH
+  }, origin)).ok, true);
+  const original = await exported(h);
+  assert.equal(original.commits[repository + "@" + HASH].status, "retrieved");
+
+  h.navigate("https://chatgpt.com/c/second-conversation");
+  for (let i = 0; i < 12; i++) await tick();
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).active, false);
+  const navigated = await exported(h);
+  assert.equal(navigated.commits[repository + "@" + HASH].status, "retrieved",
+    "Changing conversations must stop recording without clearing local evidence");
+
+  await enable(h);
+  assert.equal((await h.send({
+    type: "githubCommitReference", repository, sha: nextSha
+  }, origin)).ok, true);
+  const after = await exported(h);
+  assert.equal(after.events.filter(event => event.type === "session_started").length, 2);
+  assert.equal(after.commits[repository + "@" + HASH].status, "retrieved");
+  assert.equal(after.commits[repository + "@" + nextSha].status, "retrieved");
+  assert.equal(h.requests.length, 2);
+});
