@@ -21,6 +21,36 @@
   };
   const finite = value => Number.isInteger(value) && value >= 0 ? value : 0;
 
+  const PATCH_PATTERN_TYPES = new Set([
+    "same_file_in_distinct_commits", "test_file_changes", "error_handling_additions"
+  ]);
+  const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|java|cs|go|rs|rb|php|swift|kt|kts|scala|c|cc|cpp|h|hpp|sh|ps1|vue|svelte)$/i;
+  const TEST_FILE = /(?:^|\/)(?:tests?|__tests__|specs?)(?:\/)|(?:^|\/)(?:test_[^/]+|[^/]+(?:[._-](?:test|spec)|Tests?))\.[^/]+$/i;
+
+  function patchSignals(file) {
+    // Apply the capture limits again when analyzing an older/imported export.
+    if (!file || typeof file.patch !== "string" || file.patch.length > 24000 ||
+        !file.patch.startsWith("@@ ") || !SOURCE_FILE.test(file.path || "")) return null;
+    let inHunk = false, changed = false;
+    const additions = [];
+    for (const line of file.patch.split(/\r?\n/)) {
+      if (/^@@ /.test(line)) { inHunk = true; continue; }
+      if (!inHunk || /^(?:\+\+\+|---)/.test(line)) continue;
+      if (/^[+-]/.test(line) && line.slice(1).trim()) changed = true;
+      if (line.startsWith("+")) additions.push(line.slice(1).trim());
+    }
+    if (!changed) return null;
+    // Syntax observations only: added catch/except/throw/raise/assert, Swift
+    // guards, or a single-line conditional return/throw/raise. Plain `if`,
+    // context lines, removed code and comment-only keywords are insufficient.
+    const errorHandling = additions.some(line => !/^(?:\/\/|\/\*|\*|#)/.test(line) && (
+      /^(?:}\s*)?(?:catch\s*(?:\(|\{)|except(?:\s+[^:]+)?:|throw\s+|raise(?:\s|$)|assert(?:\s|\())/.test(line) ||
+      /^guard\s+.+\belse\s*\{/.test(line) ||
+      /^if\s*(?:\(.+\)|.+:)\s*(?:\{\s*)?(?:return\b|throw\b|raise\b)/.test(line)
+    ));
+    return { testing: TEST_FILE.test(file.path) && ["added", "modified"].includes(file.status), errorHandling };
+  }
+
   function makeEpisode(sessionId, segment, items, commits) {
     const stages = [];
     const stageCounts = Object.create(null);
@@ -362,11 +392,13 @@
     const tasks = allTasks.slice(-MAX_TASKS);
 
     const candidates = new Map();
-    const add = (key, label, type, task, referenceKey = null) => {
+    const add = (key, label, type, task, referenceKey = null, path = null) => {
       if (!candidates.has(key))
-        candidates.set(key, { id: key, label, type, tasks: new Set(), references: new Set() });
+        candidates.set(key, { id: key, label, type, tasks: new Set(), references: new Set(), evidence: new Map() });
       const p = candidates.get(key);
       p.tasks.add(task.id);
+      if (path) p.evidence.set(task.id + ":" + referenceKey + ":" + path,
+        { taskId: task.id, commitRef: referenceKey, path });
       if (referenceKey) p.references.add(referenceKey);
       else for (const ref of task.commitReferences) p.references.add(ref.key);
     };
@@ -401,6 +433,16 @@
             "file_category_recurrence", task, reference.key);
         }
         for (const file of reference.filesWithCapturedPatches) {
+          const stored = commits[reference.key];
+          const patchFile = stored?.files?.slice(0, 20).find(entry => entry.path === file.path);
+          const signals = patchSignals(patchFile);
+          if (!signals) continue;
+          if (signals.testing)
+            add("patch:testing", "Test files added or modified across tasks",
+              "test_file_changes", task, reference.key, file.path);
+          if (signals.errorHandling)
+            add("patch:error-handling", "Guard or exception-handling syntax added across tasks",
+              "error_handling_additions", task, reference.key, file.path);
           const key = reference.repository + "/" + file.path;
           if (!fileEvidence.has(key)) fileEvidence.set(key, new Map());
           const byTask = fileEvidence.get(key);
@@ -421,25 +463,33 @@
         if (!refs) continue;
         for (const ref of refs)
           add(id, "Repeated code edits observed for: " + file,
-            "same_file_in_distinct_commits", task, ref);
+            "same_file_in_distinct_commits", task, ref, file.slice(ref.split("@")[0].length + 1));
       }
     }
 
+    const distinctCommitCount = pattern => new Set([...pattern.references].map(ref => ref.split("@")[1])).size;
     const patterns = [...candidates.values()]
       .filter(pattern => pattern.tasks.size >= 2 &&
+        (!PATCH_PATTERN_TYPES.has(pattern.type) || distinctCommitCount(pattern) >= 2) &&
         (!['repository_recurrence', 'file_category_recurrence', 'test_request_with_commit'].includes(pattern.type) || pattern.references.size >= 2))
       .map(pattern => ({
         id: pattern.id, type: pattern.type, label: pattern.label,
         distinctTasks: pattern.tasks.size,
         supportingTaskIds: [...pattern.tasks].slice(0, MAX_MATCHES),
         supportingCommitRefs: [...pattern.references].slice(0, MAX_MATCHES),
-        basis: "observed_recurring_metadata",
+        basis: PATCH_PATTERN_TYPES.has(pattern.type) ? "captured_patch_changes" : "observed_recurring_metadata",
+        ...(PATCH_PATTERN_TYPES.has(pattern.type) ? {
+          distinctCommits: distinctCommitCount(pattern),
+          supportingEvidence: [...pattern.evidence.values()].slice(0, MAX_MATCHES),
+          evidenceTruncated: pattern.evidence.size > MAX_MATCHES
+        } : {}),
         verifiedOutcome: false,
-        note: pattern.type === "same_file_in_distinct_commits"
-          ? "Distinct public commit patches reference this same file in multiple task episodes. No author or successful result inferred."
+        note: PATCH_PATTERN_TYPES.has(pattern.type)
+          ? "Observed file changes or added syntax in captured patches; not proof of execution, intent, code quality or successful results."
           : "Repeated classifications of visible requests; not proof these actions were performed."
       }))
-      .sort((a, b) => b.distinctTasks - a.distinctTasks || a.id.localeCompare(b.id))
+      .sort((a, b) => Number(PATCH_PATTERN_TYPES.has(b.type)) - Number(PATCH_PATTERN_TYPES.has(a.type)) ||
+        b.distinctTasks - a.distinctTasks || a.id.localeCompare(b.id))
       .slice(0, MAX_PATTERNS);
 
     return {

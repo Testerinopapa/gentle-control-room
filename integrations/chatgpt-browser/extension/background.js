@@ -480,6 +480,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         attributionTasks: analysis.tasks.filter(task => task.requestId).map(task => ({
           taskId: task.taskId, startedAt: task.startedAt, stages: task.stages })),
         unresolvedCommits: analysis.unattributedCommits,
+        patterns: analysis.patterns,
         recordedEvents: local.events.length,
         recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length
       };

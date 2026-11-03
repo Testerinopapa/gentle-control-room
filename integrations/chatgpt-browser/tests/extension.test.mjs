@@ -1247,3 +1247,130 @@ test("missed first commit retries after its link disappears during streaming", a
   await d.scan();
   assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref").length, 2);
 });
+
+// Minimal version-1 evidence envelope; no prompt/stage signals contribute.
+function patchEvidence(taskNumbers = [0, 1]) {
+  const repository = 'example/project';
+  const timestamp = new Date().toISOString();
+  const sessionId = 'session-patch-tests';
+  const events = [...new Set(taskNumbers)].map(task => ({ timestamp, sessionId,
+    type: 'request_boundary', taskId: sessionId + ':' + task, requestId: 'm-patch-' + task,
+    confidence: 'supported' }));
+  const commits = {};
+  taskNumbers.forEach((task, index) => {
+    const sha = String(index + 1).repeat(40), key = repository + '@' + sha;
+    events.push({ timestamp, sessionId, type: 'github_commit_ref', repository, commitSha: sha,
+      taskId: sessionId + ':' + task, discovery: 'assistant', attribution: { state: 'automatic' } });
+    commits[key] = { repository, sha, status: 'retrieved', files: [
+      { path: 'src/handler.ts', status: 'modified', patch: '@@ -1 +1,2 @@\n-old();\n+if (!input) return;\n+throw new Error("invalid");' },
+      { path: 'tests/handler.test.ts', status: index ? 'modified' : 'added', patch: '@@ -0,0 +1 @@\n+test("input", () => {});' }
+    ] };
+  });
+  return { version: 1, events, commits };
+}
+const codePatterns = data => harness().analyze(data).patterns.filter(p => p.basis === 'captured_patch_changes');
+
+test('patch patterns require separate tasks and cite only matching commits and paths', () => {
+  const data = patchEvidence([0, 1, 2]);
+  const keys = Object.keys(data.commits);
+  data.commits[keys[2]].files = [{ path: 'README.md', status: 'modified', patch: '@@ -0,0 +1 @@\n+throw new Error("documentation example");' }];
+  const patterns = codePatterns(data);
+  for (const type of ['same_file_in_distinct_commits', 'test_file_changes', 'error_handling_additions']) {
+    const pattern = patterns.find(p => p.type === type);
+    assert.ok(pattern, type);
+    assert.equal(pattern.distinctTasks, 2);
+    assert.equal(pattern.distinctCommits, 2);
+    assert.deepEqual(Array.from(pattern.supportingCommitRefs), keys.slice(0, 2));
+    assert.ok(pattern.supportingEvidence.every(e => pattern.supportingTaskIds.includes(e.taskId) && pattern.supportingCommitRefs.includes(e.commitRef)));
+    assert.equal(pattern.verifiedOutcome, false);
+  }
+  assert.ok(!JSON.stringify(patterns).includes('new Error'));
+  assert.equal(JSON.stringify(codePatterns(data)), JSON.stringify(codePatterns(JSON.parse(JSON.stringify(data)))));
+});
+
+test('two commits on one task do not produce recurring patch patterns', () => {
+  const result = harness().analyze(patchEvidence([0, 0]));
+  assert.equal(result.tasks.length, 1);
+  assert.equal(result.tasks[0].commitReferences.length, 2);
+  assert.equal(result.patterns.length, 0);
+});
+
+test('missing, metadata-only, malformed, oversized and identity-mismatched patches cannot support recurrence', () => {
+  for (const change of [
+    commit => { commit.status = 'metadata_only'; },
+    commit => { commit.files.forEach(file => { delete file.patch; }); },
+    commit => { commit.files.forEach(file => { file.patch = 'not a patch'; }); },
+    commit => { commit.files.forEach(file => { file.patch = '@@ -0,0 +1 @@\n+' + 'x'.repeat(24000); }); },
+    commit => { commit.sha = 'f'.repeat(40); },
+  ]) {
+    const data = patchEvidence();
+    change(Object.values(data.commits)[1]);
+    assert.equal(codePatterns(data).length, 0);
+  }
+  const data = patchEvidence();
+  delete data.commits[Object.keys(data.commits)[1]];
+  assert.equal(codePatterns(data).length, 0);
+});
+
+test('the same commit referenced by two tasks is not a recurring patch change', () => {
+  const data = patchEvidence();
+  const refs = data.events.filter(e => e.type === 'github_commit_ref');
+  refs[1].commitSha = refs[0].commitSha;
+  assert.equal(codePatterns(data).length, 0);
+});
+
+test('error-handling rules ignore context, removals, comments, strings and generic conditions', () => {
+  for (const line of [' throw new Error("context");', '-throw new Error("removed");', '+// throw new Error("comment");', '+const text = "catch (error)";', '+if (ready) work();']) {
+    const data = patchEvidence();
+    Object.values(data.commits)[1].files[0].patch = '@@ -1 +1,2 @@\n' + line + '\n+work();';
+    assert.ok(!codePatterns(data).some(p => p.type === 'error_handling_additions'), line);
+  }
+  for (const line of ['+} catch (error) {', '+except ValueError:', '+assert input is not None', '+guard input != nil else {', '+if not input: raise ValueError()']) {
+    const data = patchEvidence();
+    Object.values(data.commits)[1].files[0].patch = '@@ -0,0 +1 @@\n' + line;
+    assert.ok(codePatterns(data).some(p => p.type === 'error_handling_additions'), line);
+  }
+});
+
+test('test-file patterns require changed test source, not deletion or prompt labels', () => {
+  const data = patchEvidence();
+  Object.values(data.commits)[1].files[1].status = 'removed';
+  assert.ok(!codePatterns(data).some(p => p.type === 'test_file_changes'));
+  Object.values(data.commits)[1].files[1].status = 'modified';
+  Object.values(data.commits)[1].files[1].patch = '@@ -1 +1 @@\n test("unchanged", () => {});';
+  assert.ok(!codePatterns(data).some(p => p.type === 'test_file_changes'));
+});
+
+test('existing Evidence panel shows patch pattern task counts and supporting commit links', async () => {
+  const h = harness();
+  h.local.set('gcrEvidenceV1', patchEvidence());
+  const state = await h.send({ type: 'getState', tabId: 9 });
+  assert.ok(state.patterns.some(p => p.type === 'error_handling_additions'));
+  const dom = new JSDOM(markup);
+  vm.runInNewContext(panel, { document: dom.window.document, Option: dom.window.Option, Date,
+    setInterval() {}, chrome: { runtime: { sendMessage: h.send }, tabs: {
+      query: async () => [{ id: 9 }], onActivated: { addListener() {} }, onUpdated: { addListener() {} }
+    } } });
+  for (let i = 0; i < 5; i++) await tick();
+  const list = dom.window.document.getElementById('code-patterns');
+  assert.match(list.textContent, /Test files added or modified across tasks/);
+  assert.match(list.textContent, /2 tasks/);
+  assert.ok([...list.querySelectorAll('a')].every(a => /^https:\/\/github.com\/example\/project\/commit\/[12]{40}$/.test(a.href)));
+  assert.ok(list.querySelectorAll('a').length >= 6);
+  dom.window.close();
+});
+
+test('patch patterns exclude unattributed evidence and the same SHA mirrored across repositories', () => {
+  const unattributed = patchEvidence();
+  unattributed.events.at(-1).attribution.state = 'unattributed';
+  assert.equal(codePatterns(unattributed).length, 0);
+  const mirrored = patchEvidence();
+  const references = mirrored.events.filter(e => e.type === 'github_commit_ref');
+  const oldKey = Object.keys(mirrored.commits)[1];
+  const commit = mirrored.commits[oldKey];
+  delete mirrored.commits[oldKey];
+  references[1].repository = commit.repository = 'example/fork';
+  references[1].commitSha = commit.sha = references[0].commitSha;
+  mirrored.commits[commit.repository + '@' + commit.sha] = commit;
+  assert.equal(codePatterns(mirrored).length, 0);
+});

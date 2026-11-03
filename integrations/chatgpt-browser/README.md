@@ -229,3 +229,34 @@ Limitations: a newly mounted message is not necessarily newly authored. Unsuppor
 or virtualized markup may leave evidence uncertain, and unseen history cannot be
 recovered. Identical requests without stable DOM IDs are conservatively deduplicated.
 Each request is a candidate task, so semantic multi-request task merging is not claimed.
+
+## Local code-pattern analysis
+
+The existing Evidence section shows code patterns from `analysis.patterns`, with
+supporting task counts and clickable commit references. JSON exports include the
+same results plus `supportingEvidence` entries linking task IDs, commit keys and
+file paths; no patch text is duplicated.
+
+Three deterministic rules inspect retained GitHub patches:
+- **Repeated file modifications:** changed source-file hunks for the same
+  repository/path across tasks (existing `same_file_in_distinct_commits` type).
+- **Repeated testing changes:** added or modified source files under test/spec
+  directories or with common test/spec filenames (`test_file_changes`).
+- **Repeated error-handling additions:** added catch/except, throw/raise, assert,
+  Swift guard, or single-line conditional return/throw/raise syntax
+  (`error_handling_additions`). Generic conditions alone are insufficient.
+
+Every code pattern requires at least two distinct attributed tasks and two distinct
+commits. Two commits on one task, repeated references to a single commit, missing
+patches, metadata-only retrievals and unchanged context cannot establish recurrence.
+Patch inspection stays local and bounded to captured evidence limits. These are
+lexical observations, not a parser or proof of intent, quality, execution or success;
+unrecognized languages, multiline guards and unusual test names may be missed.
+Existing request-stage patterns remain separately labeled metadata observations.
+
+To verify, reload the unpacked extension and open Evidence. A one-task/two-commit
+recording should show no recurring code patterns. Once two attributed tasks have
+matching patch evidence, the list shows the pattern, task count and commit links.
+Export JSON to inspect `basis: "captured_patch_changes"`, supporting paths and
+commit references. Run `node --test integrations/chatgpt-browser/tests/extension.test.mjs`
+for the regression suite. No additional permissions, dependencies or APIs are needed.

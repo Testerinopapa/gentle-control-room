@@ -17,6 +17,7 @@ const importButton = document.getElementById("import-commit");
 const taskSelect = document.getElementById("commit-task");
 const unresolvedNode = document.getElementById("unresolved-commits");
 const importStatus = document.getElementById("import-status");
+const patternsNode = document.getElementById("code-patterns");
 const codeCountNode = document.getElementById("code-count");
 let workflowEnabled = false;
 
@@ -38,6 +39,30 @@ function showError(message) {
   errorNode.hidden = !message;
 }
 
+function renderPatterns(patterns) {
+  patternsNode.replaceChildren();
+  const observed = (patterns || []).filter(pattern => pattern.basis === "captured_patch_changes");
+  if (!observed.length) {
+    const item = document.createElement("li");
+    item.textContent = "No recurring code patterns yet. Each needs two tasks and two distinct commits with captured patches.";
+    patternsNode.append(item);
+  }
+  for (const pattern of observed) {
+    const item = document.createElement("li");
+    item.textContent = pattern.label + " · " + pattern.distinctTasks + " tasks. Commits: ";
+    for (const ref of pattern.supportingCommitRefs) {
+      const match = /^([a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100})@([a-f0-9]{40})$/i.exec(ref);
+      if (!match) continue;
+      const link = document.createElement("a");
+      link.href = "https://github.com/" + match[1] + "/commit/" + match[2];
+      link.textContent = match[1] + "@" + match[2].slice(0, 7);
+      link.target = "_blank"; link.rel = "noopener noreferrer";
+      item.append(link, " ");
+    }
+    patternsNode.append(item);
+  }
+}
+
 async function refresh() {
   if (busy) return;
   try {
@@ -50,6 +75,7 @@ async function refresh() {
     });
     if (!result?.ok) throw new Error(result?.error || "Unable to read the current tab.");
 
+    renderPatterns(result.patterns);
     const selection = taskSelect.value;
     taskSelect.replaceChildren(new Option("Unattributed", ""));
     for (const task of result.attributionTasks || [])
