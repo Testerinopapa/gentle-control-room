@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
   "version": "0.8.3",
-  "description": "Opt-in local coding evidence, task grouping and recurring workflow pattern analysis.",
+  "description": "Opt-in local coding evidence, recurring pattern detection, and approved Codex analysis.",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "nativeMessaging"
   ],
   "action": {
     "default_title": "Open ChatGPT Activity sidebar"
