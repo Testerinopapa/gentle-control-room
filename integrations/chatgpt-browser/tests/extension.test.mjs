@@ -1582,3 +1582,45 @@ test("late link metadata updates capture two commits without reloading the page"
     e.attribution?.state === "automatic").length, 2,
     "repeat metadata updates must not duplicate commit references");
 });
+
+
+test("assistant DOM replacement retains previously seen commit links in the same task", async () => {
+  const repository = "testerinopapa/gentle-control-room";
+  const secondSha = "b".repeat(40);
+  const secondUrl = "https://github.com/" + repository + "/commit/" + secondSha;
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/response-rerender.ts", status: "modified",
+        additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\\n+export const captured = true;" }]
+    })
+  }));
+  await enable(h);
+  const d = domHarness(h);
+  await d.enable();
+  await d.change(userTurn("replacement-u", "Implement a fix and a test"));
+  await d.change(assistantTurn("replacement-a", '<a href="' + COMMIT + '">Fix</a>'));
+
+  // ChatGPT replaces the entire assistant DOM node during streaming. The
+  // second render exposes only the new link, not the old one.
+  d.root.lastElementChild.outerHTML = assistantTurn("replacement-a",
+    '<a href="' + secondUrl + '">Test</a>');
+  await d.mutate();
+
+  await waitForStoredCommit(h, repository + "@" + HASH);
+  await waitForStoredCommit(h, repository + "@" + secondSha);
+  const data = await exported(h);
+  const refs = data.events.filter(e => e.type === "github_commit_ref" &&
+    e.attribution?.state === "automatic");
+  assert.deepEqual(Array.from(refs, e => e.commitSha).sort(), [HASH, secondSha].sort());
+  assert.equal(data.analysis.tasks.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(data.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(data.analysis.captureDiagnostics.retrieval.withTextPatches, 2);
+  await d.mutate();
+  assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref" &&
+    e.attribution?.state === "automatic").length, 2,
+    "a repeated scan must not duplicate the commits");
+});
