@@ -227,8 +227,8 @@ async function recordCommit(tabId, session, repository, sha, discovery, details 
   const state = discovery === "manual" ? (manualTask ? "manual" : "unattributed") :
     details.historical === true ? "historical" :
       request?.confidence === "supported" ? "automatic" : "unattributed";
-  if (state !== "historical" && !(session.commitRefs || []).includes(key) &&
-      (session.commitRefs || []).length >= MAX_COMMITS) return { ok: false };
+  if (state !== "historical" && !(current.commitRefs || []).includes(key) &&
+      (current.commitRefs || []).length >= MAX_COMMITS) return { ok: false };
   const taskId = state === "manual" ? manualTask.taskId : state === "automatic" ? request.taskId : null;
   const association = { state, method: discovery === "manual" ? "user_selection" : "assistant_response",
     confidence: taskId ? "supported" : "uncertain",
