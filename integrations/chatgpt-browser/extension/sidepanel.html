@@ -101,6 +101,23 @@
       <button id="export-evidence" type="button">Export evidence JSON</button>
       <button id="clear-evidence" type="button">Delete stored evidence</button>
     </section>
+    <section aria-label="Codex insights">
+      <h2 class="section-heading">Codex insights</h2>
+      <p class="hint">Analyze recorded coding evidence with your local signed-in Codex CLI. Nothing is sent to Codex until you review and approve the exact JSON.</p>
+      <button id="prepare-codex" type="button">Review evidence for Codex</button>
+      <div id="codex-review" hidden>
+        <label for="codex-preview" class="hint" style="display:block;margin:10px 0 6px;">Exact evidence to send</label>
+        <textarea id="codex-preview" readonly spellcheck="false" style="width:100%;height:180px;resize:vertical;font:14px/1.45 monospace;border:1px solid #cbd5e1;border-radius:8px;padding:10px;"></textarea>
+        <label style="display:flex;align-items:start;gap:9px;margin:10px 0;">
+          <input type="checkbox" id="codex-approval" style="width:20px;height:20px;flex:none;" />
+          <span>I reviewed this evidence and approve sending it to Codex for analysis.</span>
+        </label>
+        <button id="analyze-codex" type="button" class="primary" disabled>Analyze with Codex</button>
+      </div>
+      <p id="codex-status" class="hint" role="status" aria-live="polite">Requires the optional local Codex bridge.</p>
+      <pre id="codex-output" hidden style="white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 system-ui,'Segoe UI',sans-serif;"></pre>
+    </section>
+
     <p class="notice">
       Start recording is the single approval for coding tagging, local workflow classification and public GitHub commit retrieval in this conversation. Switching conversations stops collection for the previous one.
     </p>
@@ -111,6 +128,7 @@
     <p class="muted">Local workflow analysis starts with recording. Public GitHub commit diffs can be fetched while recording is on. Exports remain on your device.</p>
   </footer>
 </div>
+<script src="codex-evidence.js"></script>
 <script src="sidepanel.js"></script>
 </body>
 </html>
