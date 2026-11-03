@@ -230,8 +230,48 @@
     workflow.sessionsWithoutWorkflowEvidence = [...startedSessions]
       .filter(id => !sessionsWithWorkflowEvidence.has(id)).length;
 
+    // Compare what the content script found in each rendered assistant reply
+    // with the commit references actually accepted by the background worker.
+    // Counts only: do not echo response text, URLs, or opaque message IDs.
+    const acceptedByResponse = new Map();
+    for (const ref of refs) {
+      if (ref.discovery !== "assistant" || typeof ref.sessionId !== "string" ||
+          typeof ref.attribution?.responseId !== "string") continue;
+      const key = ref.sessionId + ":" + ref.attribution.responseId;
+      if (!acceptedByResponse.has(key)) acceptedByResponse.set(key, new Set());
+      acceptedByResponse.get(key).add(ref.repository.toLowerCase() + "@" + ref.commitSha.toLowerCase());
+    }
+    const snapshots = new Map();
+    for (const e of events) {
+      if (e?.type !== "assistant_evidence" || typeof e.sessionId !== "string" ||
+          typeof e.responseId !== "string" ||
+          !Number.isInteger(e.observedCommitLinks) || e.observedCommitLinks < 0) continue;
+      // A response is represented once, even in older files containing
+      // multiple streaming snapshots for the same message.
+      snapshots.set(e.sessionId + ":" + e.responseId, e);
+    }
+    const linkDelivery = {
+      inspectedAssistantResponses: snapshots.size,
+      responsesWithDetectedCommitLinks: 0,
+      detectedCommitLinks: 0,
+      responsesWithAcceptedCommitReferences: 0,
+      responsesWithMissingCommitReferences: 0,
+      responsesWithPartialCommitReferences: 0
+    };
+    for (const [response, snapshot] of snapshots) {
+      const detected = snapshot.observedCommitLinks;
+      const accepted = acceptedByResponse.get(response)?.size || 0;
+      linkDelivery.detectedCommitLinks += detected;
+      if (detected === 0) continue;
+      linkDelivery.responsesWithDetectedCommitLinks++;
+      if (accepted > 0) linkDelivery.responsesWithAcceptedCommitReferences++;
+      if (accepted === 0) linkDelivery.responsesWithMissingCommitReferences++;
+      else if (accepted < detected) linkDelivery.responsesWithPartialCommitReferences++;
+    }
+
     return {
       workflow,
+      linkDelivery,
       observedReferenceEvents: refs.length,
       distinctNonhistoricalReferencedCommits: eligibleKeys.size,
       distinctHistoricalReferencedCommits: historicalKeys.size,
