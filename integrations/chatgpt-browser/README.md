@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.8.2)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.8.3)
 
 **The Windows application and native messaging host are no longer required.**
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.8.2**. Reload the ChatGPT tab itself as well.
+   **0.8.3**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -39,7 +39,10 @@ computer's filesystem is used.
 - The **complete currently rendered assistant response** is inspected
   transiently for GitHub links and code-block structure, including links outside
   nested text wrappers, late-streamed content, and URLs beyond 12,000 characters.
-  GitHub references are reduced to `owner/repo` plus the 40-character SHA.
+  Multiple distinct commit links in one response are sent as a bounded batch,
+  with independent per-link acknowledgement and retries on future scans.
+  Links observed during streaming remain counted even if a later render removes
+  them. GitHub references are reduced to `owner/repo` plus the 40-character SHA.
 - Per-response `assistant_evidence` contains **only structured metadata**:
   `observedCharacters`, `observedCodeBlocks`, `observedCommitLinks`,
   whitelisted `mentionedStages` and `commandFamilies`, and opaque
@@ -51,6 +54,12 @@ computer's filesystem is used.
   bounded, filtered patch data locally along with the link's session ID.
 - A downloadable `gentle-control-room-evidence.json` including recorded
   chronology, commit references and available exact patches.
+
+Commit discovery is still limited to URLs accessible in rendered ChatGPT
+markup. A clickable control that does not expose its GitHub URL cannot be
+reconstructed by the extension. Existing links when recording begins remain
+historical. To test multiple-link capture, start recording before requesting
+code edits and have the *new assistant reply* display complete commit URLs.
 
 ## Coding tasks and repeated-workflow analysis (v0.8)
 
