@@ -1,8 +1,7 @@
 "use strict";
-// Injected only after the user explicitly enables this ChatGPT conversation.
-// Ordinary recording reads structural counts only. A separate explicit toggle
-// allows ephemeral local classification of visible user requests. Neither mode
-// exports raw message text, code, IDs, URLs or input field values.
+// Injected only after the user starts recording this ChatGPT conversation.
+// Local classification and complete rendered-response scanning run under this
+// one opt-in. Raw message text and code never leave the content script.
 (() => {
   if (globalThis.__gcrChatGPTObserver) globalThis.__gcrChatGPTObserver.stop();
 
@@ -41,9 +40,17 @@
   function units() {
     const root = document.querySelector('[data-app-action-timeline-scroll][role="region"]') || document;
     const selector = roleSelectors("user") + "," + roleSelectors("assistant");
-    // Innermost role wrappers avoid nested duplicate turns and mixed-role ancestors.
-    return Array.from(root.querySelectorAll(selector)).filter(node =>
-      !node.querySelector(selector)).slice(-240);
+    // Select the outermost matching turn, not the innermost text wrapper:
+    // assistant replies may have links/code blocks OUTSIDE the inner body.
+    // Ignore nested matches to avoid generating duplicate message identities.
+    const found = Array.from(root.querySelectorAll(selector));
+    const matches = new Set(found);
+    return found.filter(node => {
+      for (let parent = node.parentElement; parent && parent !== root; parent = parent.parentElement) {
+        if (matches.has(parent)) return false;
+      }
+      return true;
+    }).slice(-240);
   }
   function identity(node, role) {
     if (nodes.has(node)) return nodes.get(node);
@@ -58,28 +65,50 @@
     let record = key && identities.get(key);
     if (!record) {
       record = { id: prefix + "-" + (++serial), stable: Boolean(raw), role,
-        historical: baselinePending, sent: false, stages: new Set(), taskId: null };
+        historical: baselinePending, sent: false, stages: new Set(), taskId: null,
+        lastEvidenceSignature: null, lastEvidenceAt: 0 };
       if (key && identities.size < 1000) identities.set(key, record);
     }
     nodes.set(node, record);
     return record;
   }
+  // Scan every accessible link and the COMPLETE rendered message text,
+  // including code blocks. Only validated GitHub owner/repo/SHA pairs cross
+  // the extension boundary; neither raw text nor other URLs are transmitted.
+  const COMMIT_URL = /https:\/\/github\.com\/[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}\/commit\/[a-f0-9]{40}\b/gi;
   function commitIdentifiers(node) {
-    const references = [];
-    const candidates = Array.from(node.querySelectorAll('a[href]')).slice(0, 30)
-      .map(anchor => anchor.getAttribute("href"));
-    const visible = String(node.innerText ?? node.textContent ?? "").slice(0, 12000);
-    candidates.push(...(visible.match(/https:\/\/github\.com\/[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}\/commit\/[a-f0-9]{40}\b/gi) || []).slice(0, 30));
-    for (const href of candidates) {
+    const references = new Map();
+    const add = href => {
+      if (typeof href !== "string" || references.size >= maxCommitLinks) return;
       let url;
-      try { url = new URL(href); } catch { continue; }
-      if (url.origin !== "https://github.com" || url.search || url.hash) continue;
+      try { url = new URL(href.trim()); } catch { return; }
+      if (url.origin !== "https://github.com" || url.search || url.hash) return;
       const match = /^\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})\/commit\/([a-f0-9]{40})\/?$/i.exec(url.pathname);
-      if (!match) continue;
+      if (!match) return;
       const repository = (match[1] + "/" + match[2]).toLowerCase(), sha = match[3].toLowerCase();
-      references.push({ repository, sha });
+      references.set(repository + "@" + sha, { repository, sha });
+    };
+    for (const anchor of node.querySelectorAll("a[href], a[data-href]")) {
+      add(anchor.getAttribute("href"));
+      add(anchor.getAttribute("data-href"));
+      if (references.size >= maxCommitLinks) break;
     }
-    return references;
+    const visible = String(node.innerText ?? node.textContent ?? "");
+    for (const match of visible.matchAll(COMMIT_URL)) {
+      add(match[0]);
+      if (references.size >= maxCommitLinks) break;
+    }
+    return [...references.values()];
+  }
+  function assistantMetadata(node, commitLinks) {
+    // Counts only. Never persist message content, source code, or arbitrary URLs.
+    const text = String(node.innerText ?? node.textContent ?? "");
+    const blocks = node.querySelectorAll('pre,[data-testid="code-block"]').length;
+    return {
+      observedCharacters: Math.min(text.length, 10000000),
+      observedCodeBlocks: Math.min(blocks, 1000),
+      observedCommitLinks: Math.min(commitLinks, maxCommitLinks)
+    };
   }
   function validPage() { return !stopped && workflowEnabled && location.pathname === pathname; }
   async function scanEvidence() {
@@ -141,7 +170,8 @@
               historical: record.historical });
             if (reply?.ok) record.sent = true;
           }
-          for (const { repository, sha } of commitIdentifiers(node)) {
+          const commitRefs = commitIdentifiers(node);
+          for (const { repository, sha } of commitRefs) {
             const historical = baselineCommitLinks.has(repository + "@" + sha);
             if (!active() || (historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) break;
             const key = record.id + ":" + repository + "@" + sha;
@@ -151,6 +181,23 @@
             if (reply?.ok) {
               seenCommitLinks.add(key);
               if (historical) historicalCommitLinks++; else newCommitLinks++;
+            }
+          }
+          if (!record.historical && record.sent) {
+            const metadata = assistantMetadata(node, commitRefs.length);
+            const signature = Object.values(metadata).join(":");
+            const now = Date.now();
+            // Update a single stored snapshot per response during streaming;
+            // avoid flooding storage for every emitted token.
+            if (signature !== record.lastEvidenceSignature &&
+                (!record.lastEvidenceAt || now - record.lastEvidenceAt >= 1200)) {
+              const reply = await chrome.runtime.sendMessage({
+                type: "assistantEvidence", responseId: record.id, ...metadata
+              });
+              if (reply?.ok && active()) {
+                record.lastEvidenceSignature = signature;
+                record.lastEvidenceAt = now;
+              }
             }
           }
         }
