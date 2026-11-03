@@ -297,6 +297,44 @@ async function fromPage(message, sender) {
       return { ok: true };
     });
   }
+  if (message.type === "assistantEvidence") {
+    // Accept only bounded, structured metadata for a response that this
+    // consented conversation actually recorded. Never accept raw text/code.
+    if (!session.workflowEnabled || !MESSAGE_ID.test(message.responseId || "") ||
+        !Number.isInteger(message.observedCharacters) || message.observedCharacters < 0 ||
+        message.observedCharacters > 10000000 ||
+        !Number.isInteger(message.observedCodeBlocks) || message.observedCodeBlocks < 0 ||
+        message.observedCodeBlocks > 1000 ||
+        !Number.isInteger(message.observedCommitLinks) || message.observedCommitLinks < 0 ||
+        message.observedCommitLinks > MAX_COMMITS) return { ok: false };
+    return mutateEvidence(data => {
+      const response = data.events.find(e => e.sessionId === session.id &&
+        e.type === "assistant_response" && e.responseId === message.responseId &&
+        e.historical !== true);
+      if (!response) return { ok: false };
+      const current = data.events.find(e => e.sessionId === session.id &&
+        e.type === "assistant_evidence" && e.responseId === message.responseId);
+      const fields = {
+        observedCharacters: message.observedCharacters,
+        observedCodeBlocks: message.observedCodeBlocks,
+        observedCommitLinks: message.observedCommitLinks,
+        coverage: "rendered_at_observation"
+      };
+      if (current) {
+        Object.assign(current, fields, { lastObservedAt: new Date().toISOString() });
+      } else {
+        if (data.events.filter(e => e.sessionId === session.id &&
+            e.type === "assistant_evidence").length >= 240) return { ok: false };
+        data.events.push({
+          timestamp: new Date().toISOString(), source: "chatgpt_browser",
+          sessionId: session.id, type: "assistant_evidence",
+          responseId: response.responseId, taskId: response.taskId,
+          ...fields
+        });
+      }
+      return { ok: true };
+    });
+  }
   if (message.type === "workflowStage") {
     if (!session.workflowEnabled || !WORKFLOW_STAGES.has(message.stage) ||
         session.workflowStages >= 120) return { ok: false };
@@ -345,7 +383,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const operation = operationQueue.then(async () => {
     if (!message || typeof message.type !== "string") throw Error("Invalid request");
     if (["visibleCounts", "conversationChanged", "observerStatus",
-      "workflowStage", "githubCommitReference", "requestBoundary", "assistantBoundary"].includes(message.type))
+      "workflowStage", "githubCommitReference", "requestBoundary", "assistantBoundary", "assistantEvidence"].includes(message.type))
       return fromPage(message, sender);
     if (message.type === "importCommitUrl") {
       // Only the extension's own side panel may invoke manual import.
