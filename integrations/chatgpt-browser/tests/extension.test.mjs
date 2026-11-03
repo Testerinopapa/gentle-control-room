@@ -876,3 +876,34 @@ test("export exposes passive-only workflow diagnostics after one-click Start", a
   assert.equal(second.analysis.captureDiagnostics.workflow.sessionsWithRequestBoundaries, 1);
   assert.equal(second.analysis.tasks.length, 1);
 });
+
+
+test("one-click recording captures a new assistant commit and exports attributable patch evidence", async () => {
+  const h = harness();
+  await enable(h);
+  const d = domHarness(h, assistantTurn("before-opt-in", "Historical assistant response"));
+  await d.enable();
+
+  await d.change(userTurn("observed-request", "Implement a small regression fix"));
+  await d.change(assistantTurn("observed-reply",
+    '<a href="' + COMMIT + '">View the finished commit</a>'));
+  const data = await exported(h);
+  const diagnostic = data.analysis.captureDiagnostics;
+
+  assert.equal(h.requests.length, 1, "one public GitHub commit should be fetched");
+  assert.equal(data.analysis.tasks.length, 1, "start tag should not create a phantom task");
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 1);
+  assert.equal(data.analysis.tasks[0].commitReferences[0].attribution.state, "automatic");
+  assert.equal(diagnostic.discovery.assistant, 1);
+  assert.equal(diagnostic.discovery.manual, 0);
+  assert.equal(diagnostic.retrieval.withTextPatches, 1);
+  assert.equal(diagnostic.workflow.sessionsStarted, 1);
+  assert.equal(diagnostic.workflow.sessionsWithRequestBoundaries, 1);
+  assert.equal(diagnostic.workflow.sessionsWithoutWorkflowEvidence, 0);
+  assert.equal(diagnostic.workflow.requestBoundaries, 1);
+  assert.equal(diagnostic.workflow.automaticCodingTags, 1);
+
+  const replayed = h.analyze(JSON.parse(JSON.stringify(data)));
+  assert.deepEqual(JSON.parse(JSON.stringify(replayed)), JSON.parse(JSON.stringify(data.analysis)),
+    "export must be deterministically reanalyzable without prompt text");
+});
