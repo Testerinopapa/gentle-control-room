@@ -1097,7 +1097,7 @@ test("a rendered reply with two distinct commit links captures both automaticall
   const exportedData = await exported(h);
   const references = exportedData.events.filter(e => e.type === "github_commit_ref");
   assert.equal(references.length, 2);
-  assert.deepEqual(references.map(e => e.commitSha).sort(), [HASH, second].sort());
+  assert.deepEqual(Array.from(references, e => e.commitSha).sort(), [HASH, second].sort());
   assert.ok(references.every(e => e.attribution.state === "automatic"));
   assert.equal(exportedData.analysis.tasks.length, 1);
   assert.equal(exportedData.analysis.tasks[0].commitReferences.length, 2);
