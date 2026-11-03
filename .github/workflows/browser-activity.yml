@@ -41,11 +41,14 @@ jobs:
         shell: pwsh
         run: |
           node --check integrations/chatgpt-browser/extension/analysis.js
+          node --check integrations/chatgpt-browser/extension/codex-evidence.js
           node --check integrations/chatgpt-browser/extension/background.js
           node --check integrations/chatgpt-browser/extension/content.js
           node --check integrations/chatgpt-browser/extension/sidepanel.js
       - name: Browser extension tests
         run: node --test integrations/chatgpt-browser/tests/extension.test.mjs
+      - name: Codex evidence review tests
+        run: node --test integrations/chatgpt-browser/tests/codex-evidence.test.mjs
       - name: Native messaging host self-test
         run: dotnet run --project integrations/chatgpt-browser/native-host/GentleControlRoom.ChatGPTHost.csproj -- --self-test
       - name: Desktop reader and insight regression tests
