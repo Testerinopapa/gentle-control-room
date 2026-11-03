@@ -40,10 +40,12 @@ computer's filesystem is used.
   transiently for GitHub links and code-block structure, including links outside
   nested text wrappers, late-streamed content, and URLs beyond 12,000 characters.
   GitHub references are reduced to `owner/repo` plus the 40-character SHA.
-- Per-response `assistant_evidence` contains **only counts**:
+- Per-response `assistant_evidence` contains **only structured metadata**:
   `observedCharacters`, `observedCodeBlocks`, `observedCommitLinks`,
-  and the opaque response/task IDs. A single snapshot is updated during streaming;
-  raw assistant response text or code is never saved by this scanner.
+  whitelisted `mentionedStages` and `commandFamilies`, and opaque
+  response/task IDs. A single snapshot is updated during streaming; the raw
+  assistant response, source code and exact shell commands are never saved
+  by this scanner.
 - While recording is ON, the extension can fetch a matching public
   commit's changed file patch hunks directly from GitHub's public API. It stores
   bounded, filtered patch data locally along with the link's session ID.
@@ -61,7 +63,9 @@ DeepSeek request, or Windows software is required.
 The analysis includes `tasks[].responseMetadata`, summarizing code-block
 counts, observed commit-link counts, and the maximum rendered response length.
 These are **observations of ChatGPT output, not evidence that tests ran, code
-was edited, or deployment succeeded**. Raw response text, commands, code blocks,
+was edited, or deployment succeeded**. Assistant stage mentions and shell command
+families (for example, `git` and `npm`) are reported only as whitelisted labels,
+not as verified actions. Raw response text, commands, code blocks,
 and non-GitHub links are not copied into the event log. GitHub patch capture
 continues to use the existing filtered public-commit retrieval mechanism.
 
