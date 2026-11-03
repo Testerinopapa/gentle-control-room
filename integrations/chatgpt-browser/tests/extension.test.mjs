@@ -290,7 +290,12 @@ function domHarness(h = null, html = '<article data-turn="assistant" data-turn-i
   vm.runInNewContext(content, {
     URL, document: dom.window.document, location,
     chrome: { runtime: {
-      async sendMessage(message) { sent.push(message); return h ? h.send(message, origin) : { ok: true }; },
+      async sendMessage(message) {
+        sent.push(message);
+        if (h) return h.send(message, origin);
+        return message.type === "githubCommitReferences"
+          ? { ok: true, accepted: message.links.map(() => true) } : { ok: true };
+      },
       onMessage: { addListener(fn) { command = fn; }, removeListener() {} }
     } },
     MutationObserver: class { observe() {} disconnect() {} constructor(fn) { mutation = fn; } },
@@ -342,14 +347,14 @@ test("GitHub capture works without message counts, with streamed text and rerend
 test("plain-text and delayed href capture excludes user links and stops on navigation", async () => {
   const d = domHarness(); await d.enable();
   await d.change(userTurn('u1', 'Implement ' + COMMIT));
-  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 0);
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReferences').length, 0);
   await d.change(assistantTurn('a1', '<a>Commit</a>'));
   d.root.querySelector('a').setAttribute('href', COMMIT);
   await d.scan();
-  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 1);
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReferences').length, 1);
   d.location.pathname = '/c/elsewhere';
   await d.change(assistantTurn('a2', COMMIT));
-  assert.equal(d.sent.filter(e => e.type === 'githubCommitReference').length, 1);
+  assert.equal(d.sent.filter(e => e.type === 'githubCommitReferences').length, 1);
 });
 
 test("sidepanel manual commit fallback requires active workflow consent and strict GitHub URL", async () => {
@@ -1068,4 +1073,89 @@ test("link delivery counts are deduplicated per response and expose partial deli
   });
   assert.ok(!JSON.stringify(data.captureDiagnostics.linkDelivery).includes("m-test-"),
     "diagnostics must not contain response identifiers or source text");
+});
+
+
+test("a rendered reply with two distinct commit links captures both automatically", async () => {
+  const second = "a".repeat(40);
+  const repository = "testerinopapa/gentle-control-room";
+  const url2 = "https://github.com/" + repository + "/commit/" + second;
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/change.js", status: "modified", additions: 1,
+        deletions: 0, patch: "@@ -0,0 +1 @@\n+change" }]
+    })
+  }));
+  await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("batch-u", "Implement the two changes"));
+  await d.change(assistantTurn("batch-a",
+    '<a href="' + COMMIT + '">First commit</a>' +
+    '<a data-url="' + url2 + '">Second commit</a> ' + url2));
+  const exportedData = await exported(h);
+  const references = exportedData.events.filter(e => e.type === "github_commit_ref");
+  assert.equal(references.length, 2);
+  assert.deepEqual(references.map(e => e.commitSha).sort(), [HASH, second].sort());
+  assert.ok(references.every(e => e.attribution.state === "automatic"));
+  assert.equal(exportedData.analysis.tasks.length, 1);
+  assert.equal(exportedData.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(exportedData.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(exportedData.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(h.requests.length, 2);
+  assert.equal(exportedData.analysis.captureDiagnostics.retrieval.withTextPatches, 2);
+  await d.scan();
+  assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref").length, 2,
+    "rerender and repeated scans must not create duplicate references");
+});
+
+test("a second commit streamed into an earlier reply is still captured and counted", async () => {
+  const second = "b".repeat(40);
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/stream.ts", status: "modified", additions: 1,
+        deletions: 0, patch: "@@ -0,0 +1 @@\n+stream" }]
+    })
+  }));
+  await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("stream-u", "Implement, then add regression tests"));
+  await d.change(assistantTurn("stream-a", '<a href="' + COMMIT + '">First</a>'));
+  d.root.lastElementChild.querySelector('div').insertAdjacentHTML("beforeend",
+    '<a href="https://github.com/testerinopapa/gentle-control-room/commit/' + second + '">Second</a>');
+  await d.scan();
+  let data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 2);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  // Removing a streamed link must not erase that it was already observed.
+  d.root.lastElementChild.querySelector('a').remove();
+  await d.scan();
+  data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 2);
+  assert.equal(data.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(data.analysis.captureDiagnostics.linkDelivery.detectedCommitLinks, 2);
+});
+
+test("batch capture accepts remaining links when one reference is rejected", async () => {
+  const second = "c".repeat(40);
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "requestBoundary", requestId: "m-test-1", confidence: "supported" }, origin);
+  await h.send({ type: "assistantBoundary", responseId: "m-test-2", requestId: "m-test-1" }, origin);
+  const result = await h.send({ type: "githubCommitReferences", responseId: "m-test-2",
+    links: [
+      { repository: "evil/invalid/path", sha: HASH, historical: false },
+      { repository: "Testerinopapa/gentle-control-room", sha: HASH, historical: false },
+      { repository: "Testerinopapa/gentle-control-room", sha: second, historical: false }
+    ]
+  }, origin);
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.accepted), [false, true, true]);
+  const data = await exported(h);
+  assert.equal(data.events.filter(e => e.type === "github_commit_ref").length, 2);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(h.requests.length, 2);
 });
