@@ -432,6 +432,8 @@
   }
 
   let debounce = null;
+  // Watch link metadata as well as href: a commit URL may be attached to a
+  // rendered control after the assistant response first appears.
   const observer = new MutationObserver(() => {
     if (debounce !== null) clearTimeout(debounce);
     debounce = setTimeout(poll, 250);
@@ -440,7 +442,8 @@
     childList: true, subtree: true, characterData: true,
     attributes: true,
     attributeFilter: [
-      "href", "data-message-id", "data-role", "data-message-author", "data-message-author-role", "data-turn",
+      "href", "data-href", "data-url", "data-clipboard-text", "aria-label", "title",
+      "data-message-id", "data-role", "data-message-author", "data-message-author-role", "data-turn",
       "data-user-message-bubble", "data-content-search-unit-key",
       "role", "data-app-action-timeline-scroll"
     ]
