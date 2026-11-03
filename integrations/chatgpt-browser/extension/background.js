@@ -364,6 +364,35 @@ async function fromPage(message, sender) {
         workflowStages: current.workflowStages + 1 } });
     return { ok: true };
   }
+  if (message.type === "githubCommitReferences") {
+    // A single message acknowledges each link independently. A malformed or
+    // temporarily rejected reference must never starve later valid commits.
+    if (!session.workflowEnabled || !MESSAGE_ID.test(message.responseId || "") ||
+        !Array.isArray(message.links) || message.links.length < 1 ||
+        message.links.length > MAX_COMMITS) return { ok: false };
+    const accepted = [];
+    const seen = new Set();
+    for (const link of message.links) {
+      if (!link || typeof link.repository !== "string" || typeof link.sha !== "string" ||
+          !REPOSITORY.test(link.repository) || !COMMIT_SHA.test(link.sha) ||
+          typeof link.historical !== "boolean") {
+        accepted.push(false);
+        continue;
+      }
+      const repository = link.repository.toLowerCase(), sha = link.sha.toLowerCase();
+      const key = repository + "@" + sha;
+      if (seen.has(key)) { accepted.push(true); continue; }
+      seen.add(key);
+      try {
+        const result = await recordCommit(tabId, session, repository, sha, "assistant",
+          { responseId: message.responseId, historical: link.historical });
+        accepted.push(result.ok === true);
+      } catch {
+        accepted.push(false);
+      }
+    }
+    return { ok: true, accepted };
+  }
   if (message.type === "githubCommitReference") {
     if (!session.workflowEnabled || typeof message.repository !== "string" ||
         typeof message.sha !== "string" || !REPOSITORY.test(message.repository) ||
@@ -394,7 +423,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const operation = operationQueue.then(async () => {
     if (!message || typeof message.type !== "string") throw Error("Invalid request");
     if (["visibleCounts", "conversationChanged", "observerStatus",
-      "workflowStage", "githubCommitReference", "requestBoundary", "assistantBoundary", "assistantEvidence"].includes(message.type))
+      "workflowStage", "githubCommitReference", "githubCommitReferences", "requestBoundary", "assistantBoundary", "assistantEvidence"].includes(message.type))
       return fromPage(message, sender);
     if (message.type === "importCommitUrl") {
       // Only the extension's own side panel may invoke manual import.
