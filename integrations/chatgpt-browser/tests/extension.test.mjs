@@ -1006,3 +1006,66 @@ test("complete assistant response yields safe stage mentions and command familie
     observedCharacters: 25, observedCodeBlocks: 1, observedCommitLinks: 0,
     commandFamilies: [], mentionedStages: ["unverified_execution"] }, origin)).ok, false);
 });
+
+
+test("link delivery diagnostics distinguish detected links from accepted commit evidence", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "requestBoundary", requestId: "m-test-1", confidence: "supported" }, origin);
+  await h.send({ type: "assistantBoundary", responseId: "m-test-2", requestId: "m-test-1" }, origin);
+  const snapshot = { type: "assistantEvidence", responseId: "m-test-2",
+    observedCharacters: 16500, observedCodeBlocks: 1, observedCommitLinks: 1 };
+  assert.equal((await h.send(snapshot, origin)).ok, true);
+  let data = await exported(h);
+  assert.deepEqual(JSON.parse(JSON.stringify(data.analysis.captureDiagnostics.linkDelivery)), {
+    inspectedAssistantResponses: 1,
+    responsesWithDetectedCommitLinks: 1,
+    detectedCommitLinks: 1,
+    responsesWithAcceptedCommitReferences: 0,
+    responsesWithMissingCommitReferences: 1,
+    responsesWithPartialCommitReferences: 0
+  });
+  assert.equal((await h.send({
+    type: "githubCommitReference", responseId: "m-test-2",
+    repository: "Testerinopapa/gentle-control-room", sha: HASH
+  }, origin)).ok, true);
+  data = await exported(h);
+  const delivery = data.analysis.captureDiagnostics.linkDelivery;
+  assert.equal(delivery.responsesWithDetectedCommitLinks, 1);
+  assert.equal(delivery.responsesWithAcceptedCommitReferences, 1);
+  assert.equal(delivery.responsesWithMissingCommitReferences, 0);
+  assert.equal(delivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(data.analysis.tasks[0].commitReferences.length, 1);
+});
+
+test("link delivery counts are deduplicated per response and expose partial delivery", () => {
+  const h = harness();
+  const sha2 = "a".repeat(40);
+  const sessionId = "session-link-delivery";
+  const observed = (responseId, count) => ({
+    type: "assistant_evidence", sessionId, responseId,
+    observedCommitLinks: count, observedCharacters: 20000
+  });
+  const accepted = (responseId, sha) => ({
+    type: "github_commit_ref", sessionId, repository: "testerinopapa/gentle-control-room",
+    commitSha: sha, discovery: "assistant",
+    attribution: { state: "automatic", responseId }
+  });
+  const data = h.analyze({ events: [
+    observed("m-test-1", 1), accepted("m-test-1", HASH),
+    observed("m-test-2", 1), observed("m-test-2", 2),
+    accepted("m-test-2", sha2),
+    observed("m-test-3", 1),
+    observed("m-test-4", 0)
+  ], commits: {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(data.captureDiagnostics.linkDelivery)), {
+    inspectedAssistantResponses: 4,
+    responsesWithDetectedCommitLinks: 3,
+    detectedCommitLinks: 4,
+    responsesWithAcceptedCommitReferences: 2,
+    responsesWithMissingCommitReferences: 1,
+    responsesWithPartialCommitReferences: 1
+  });
+  assert.ok(!JSON.stringify(data.captureDiagnostics.linkDelivery).includes("m-test-"),
+    "diagnostics must not contain response identifiers or source text");
+});
