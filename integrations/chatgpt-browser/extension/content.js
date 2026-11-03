@@ -103,7 +103,10 @@
   function assistantMetadata(node, commitLinks) {
     // Counts only. Never persist message content, source code, or arbitrary URLs.
     const text = String(node.innerText ?? node.textContent ?? "");
-    const blocks = node.querySelectorAll('pre,[data-testid="code-block"]').length;
+    const blocks = Math.max(
+      node.querySelectorAll("pre").length,
+      node.querySelectorAll('[data-testid="code-block"]').length
+    );
     return {
       observedCharacters: Math.min(text.length, 10000000),
       observedCodeBlocks: Math.min(blocks, 1000),
