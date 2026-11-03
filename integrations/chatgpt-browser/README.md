@@ -1,6 +1,6 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.8.3)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.0)
 
-**The Windows application and native messaging host are no longer required.**
+**The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.8.3**. Reload the ChatGPT tab itself as well.
+   **0.9.0**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -25,9 +25,53 @@ browsers with side-panel support). It keeps activity evidence in
    This is a manual fallback, not automatic access to hidden ChatGPT tool calls.
 6. Use **Export evidence JSON** in the extension panel. No Windows steps required.
 
-The extension's host permissions are restricted to ChatGPT and
+For recording, the extension is standalone. The optional Codex integration uses
+`nativeMessaging` to contact a user-installed local host; it does not require
+opening the Windows dashboard.
+
+The extension's network host permissions are restricted to ChatGPT and
 `https://api.github.com/*`; no blanket access to GitHub webpages or the
 computer's filesystem is used.
+
+
+## Optional Codex analysis — in the Edge side panel
+
+The extension can analyze its already recorded tasks, recurring patterns, and
+retrieved GitHub patches using **your signed-in local Codex CLI**. There is no
+DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
+
+1. Install and sign in to Codex CLI. Confirm `codex --version` and
+   `codex login status` both work in PowerShell.
+2. Install the optional native bridge (requires .NET 8 SDK to publish it).
+   In the repository root, run:
+
+   ```powershell
+   git pull --ff-only origin main
+   .\\integrations\\chatgpt-browser\\install-host.ps1 -ExtensionId YOUR_32_CHARACTER_EDGE_EXTENSION_ID
+   ```
+
+   Copy the exact ID from `edge://extensions`. The installer publishes a
+   standalone host under `%LOCALAPPDATA%\\GentleControlRoom\\BrowserNativeHost`
+   and registers it for that Edge extension ID only. **Do not** launch the
+   Windows desktop application. Restart Edge if you installed Codex CLI after
+   opening the browser, so its PATH is refreshed.
+3. Reload the unpacked extension from `edge://extensions` (v0.9.0).
+4. Open the Gentle Control Room side panel. In **Codex insights**, select
+   **Review evidence for Codex**, inspect the exact JSON, tick the explicit
+   approval checkbox, and click **Analyze with Codex**.
+5. Codex runs once with `codex exec --sandbox read-only --ephemeral`, with
+   stdin-only evidence and a three-minute timeout. Its report appears in
+   the panel, and only the last result is saved in `chrome.storage.local`.
+   Deleting stored evidence also removes this result.
+
+The reviewed package contains task/pattern analysis plus *retrieved public
+GitHub file patches*. Raw browser event chronology and conversation text are
+excluded; inspect the review anyway because public patches may contain sensitive
+source. The approved evidence is sent by the local Codex CLI to OpenAI for model
+analysis. Neither Start recording nor loading the side panel sends anything to
+Codex automatically. The host never accepts user-supplied shell commands or
+updates the repository. If Codex is missing, the bridge is not installed, or
+analysis fails, recording and local patterns continue to work.
 
 ## What is captured
 
