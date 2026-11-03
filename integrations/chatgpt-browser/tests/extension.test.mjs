@@ -979,3 +979,30 @@ test("assistant response metadata is updated during streaming and rejects histor
   assert.equal((await h.send({ type: "assistantEvidence", responseId,
     observedCharacters: 100, observedCodeBlocks: 0, observedCommitLinks: 0 }, origin)).ok, false);
 });
+
+
+test("complete assistant response yields safe stage mentions and command families without commands", async () => {
+  const h = harness(); await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("commands-u", "Please implement this change"));
+  await d.change(assistantTurn("commands-a",
+    "<p>I tested the bug fix; commands mentioned below are not verified executions.</p>" +
+    "<pre>git status\nnpm test\nSECRET_TOKEN=keep-private</pre>"));
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 1);
+  const evidence = data.analysis.tasks[0].responseMetadata;
+  assert.deepEqual(Array.from(evidence.commandFamilies), ["git", "npm"]);
+  assert.ok(evidence.mentionedStages.includes("testing"));
+  assert.ok(evidence.mentionedStages.includes("version_control"));
+  assert.equal(evidence.scope, "rendered_assistant_metadata_not_execution_proof");
+  assert.ok(!JSON.stringify(data).includes("SECRET_TOKEN"));
+  assert.ok(!JSON.stringify(data).includes("git status"));
+  assert.ok(!JSON.stringify(data).includes("npm test"));
+  const responseId = data.analysis.tasks[0].responseIds[0];
+  assert.equal((await h.send({ type: "assistantEvidence", responseId,
+    observedCharacters: 25, observedCodeBlocks: 1, observedCommitLinks: 0,
+    commandFamilies: ["curl https://private.example/path"], mentionedStages: [] }, origin)).ok, false);
+  assert.equal((await h.send({ type: "assistantEvidence", responseId,
+    observedCharacters: 25, observedCodeBlocks: 1, observedCommitLinks: 0,
+    commandFamilies: [], mentionedStages: ["unverified_execution"] }, origin)).ok, false);
+});
