@@ -1491,3 +1491,39 @@ test("switching conversations keeps previously collected patches available", asy
   assert.equal(after.commits[repository + "@" + nextSha].status, "retrieved");
   assert.equal(h.requests.length, 2);
 });
+
+
+test("accessible ChatGPT link controls capture two commits without HTML anchors", async () => {
+  const second = "f".repeat(40);
+  const repository = "testerinopapa/gentle-control-room";
+  const next = "https://github.com/" + repository + "/commit/" + second;
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get() { return null; } },
+    text: async () => JSON.stringify({
+      sha: url.split("/").at(-1),
+      files: [{ filename: "src/accessible-link.ts", status: "modified",
+        additions: 1, deletions: 0,
+        patch: "@@ -0,0 +1 @@" + "\\n+export const linked = true;" }]
+    })
+  }));
+  await enable(h);
+  const d = domHarness(h); await d.enable();
+  await d.change(userTurn("aria-u", "Implement two changes"));
+  await d.change(assistantTurn("aria-a",
+    '<span role="link" aria-label="Open commit: ' + COMMIT + '">First</span>' +
+    '<button data-clipboard-text="Copy commit ' + next + '">Second</button>' +
+    '<div title="https://github.com/example/ignored/commit/' + "e".repeat(40) +
+    '">Unrelated</div>'));
+
+  const captured = await exported(h);
+  const refs = captured.events.filter(e => e.type === "github_commit_ref" &&
+    e.attribution?.state === "automatic");
+  assert.deepEqual(Array.from(refs, e => e.commitSha).sort(), [HASH, second].sort());
+  assert.equal(captured.analysis.tasks.length, 1);
+  assert.equal(captured.analysis.tasks[0].responseMetadata.observedCommitLinks, 2);
+  assert.equal(captured.analysis.tasks[0].commitReferences.length, 2);
+  assert.equal(captured.analysis.captureDiagnostics.linkDelivery.responsesWithPartialCommitReferences, 0);
+  assert.equal(h.requests.length, 2);
+  assert.ok(!JSON.stringify(captured).includes("Open commit: "),
+    "accessible descriptions must not be exported verbatim");
+});
