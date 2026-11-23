@@ -23,6 +23,11 @@ const historySummaryNode = document.getElementById("history-summary");
 const historySummaryScope = document.getElementById("history-summary-scope");
 const historySummaryPatterns = document.getElementById("history-summary-patterns");
 const downloadHistoryButton = document.getElementById("download-history-summary");
+const captureBrowserButton = document.getElementById("capture-browser-conversation");
+const browserConversationStatus = document.getElementById("browser-conversation-status");
+const browserConversationPreview = document.getElementById("browser-conversation-preview");
+const downloadBrowserButton = document.getElementById("download-browser-conversation");
+const deleteBrowserButton = document.getElementById("delete-browser-conversation");
 const codexPrepare = document.getElementById("prepare-codex");
 const codexReview = document.getElementById("codex-review");
 const codexPreview = document.getElementById("codex-preview");
@@ -39,6 +44,8 @@ let selectedTab = null;
 let busy = false;
 let lastError = "";
 let currentHistorySummary = null;
+let currentBrowserConversation = null;
+let loadedBrowserSnapshotKey = null;
 
 async function activeTab() {
   // The sidebar lives inside the current Edge window. Do not blindly use the
@@ -52,6 +59,36 @@ async function activeTab() {
 function showError(message) {
   errorNode.textContent = message;
   errorNode.hidden = !message;
+}
+
+function browserConversationText(snapshot) {
+  return (snapshot?.messages || []).map(item =>
+    (item.role === "user" ? "YOU" : "CHATGPT") + "\n" + item.text).join("\n\n---\n\n");
+}
+
+function renderBrowserConversation(snapshot) {
+  currentBrowserConversation = snapshot || null;
+  loadedBrowserSnapshotKey = snapshot
+    ? snapshot.sessionId + ":" + snapshot.capturedAt : null;
+  browserConversationPreview.value = snapshot ? browserConversationText(snapshot) : "";
+  browserConversationPreview.hidden = !snapshot;
+  downloadBrowserButton.disabled = !snapshot;
+  deleteBrowserButton.disabled = !snapshot;
+  browserConversationStatus.textContent = snapshot
+    ? snapshot.messages.length + " real messages captured from the browser on " +
+      new Date(snapshot.capturedAt).toLocaleString() +
+      (snapshot.truncated ? " (capture limit reached or conversation partially loaded)." : ".")
+    : "No browser conversation has been captured yet.";
+}
+
+async function loadBrowserConversation(meta) {
+  if (!meta) { renderBrowserConversation(null); return; }
+  const key = meta.sessionId + ":" + meta.capturedAt;
+  if (key === loadedBrowserSnapshotKey) return;
+  const result = await chrome.runtime.sendMessage({
+    type: "getBrowserConversation", tabId: selectedTab
+  });
+  if (result?.ok) renderBrowserConversation(result.snapshot || null);
 }
 
 function renderHistorySummary(summary, isCurrent) {
@@ -109,6 +146,8 @@ async function refresh() {
 
     renderPatterns(result.patterns);
     renderHistorySummary(result.conversationSummary, Boolean(result.active));
+    captureBrowserButton.disabled = busy || !result.active || !result.workflowEnabled;
+    await loadBrowserConversation(result.browserConversation);
     const selection = taskSelect.value;
     taskSelect.replaceChildren(new Option("Unattributed", ""));
     for (const task of result.attributionTasks || [])
@@ -171,6 +210,8 @@ async function refresh() {
     importButton.disabled = true;
     workflowEnabled = false;
     renderHistorySummary(null, false);
+    captureBrowserButton.disabled = true;
+    renderBrowserConversation(null);
     codeCountNode.textContent = "—";
     userNode.textContent = "—";
     assistantNode.textContent = "—";
@@ -257,6 +298,57 @@ function downloadHistorySummary() {
   }
 }
 
+async function captureBrowserConversation() {
+  if (busy || !workflowEnabled || !Number.isInteger(selectedTab)) return;
+  busy = true;
+  captureBrowserButton.disabled = true;
+  browserConversationStatus.textContent = "Reading rendered ChatGPT messages…";
+  try {
+    const tab = await activeTab();
+    if (!tab || tab.id !== selectedTab)
+      throw Error("Select the ChatGPT conversation you want to capture.");
+    const result = await chrome.runtime.sendMessage({
+      type: "captureBrowserConversation", tabId: selectedTab
+    });
+    if (!result?.ok) throw Error(result?.error || "Could not read browser conversation.");
+    // The next refresh loads the freshly stored transcript from Edge.
+    loadedBrowserSnapshotKey = null;
+  } catch (error) {
+    lastError = error?.message || "Unable to capture conversation.";
+    browserConversationStatus.textContent = lastError;
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+
+function downloadBrowserConversation() {
+  if (!currentBrowserConversation) return;
+  const text = "Gentle Control Room — Captured Browser Conversation\n" +
+    "Captured: " + currentBrowserConversation.capturedAt + "\n" +
+    "Only ChatGPT messages loaded in the browser at capture time.\n\n" +
+    browserConversationText(currentBrowserConversation) + "\n";
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gentle-control-room-browser-conversation.txt";
+    a.click();
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+
+async function deleteBrowserConversation() {
+  if (busy || !currentBrowserConversation ||
+      !confirm("Delete captured browser conversations stored by this extension?")) return;
+  busy = true; deleteBrowserButton.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "clearBrowserConversation" });
+    if (!result?.ok) throw Error("Could not delete captured conversation.");
+    renderBrowserConversation(null);
+  } catch (error) { lastError = error?.message || "Could not delete conversation."; }
+  finally { busy = false; await refresh(); }
+}
+
 async function exportEvidence() {
   if (busy) return;
   busy = true; exportButton.disabled = true; lastError = "";
@@ -282,6 +374,7 @@ async function clearEvidence() {
     const response = await chrome.runtime.sendMessage({ type: "clearEvidence" });
     if (!response?.ok) throw Error("Unable to delete local evidence.");
     await chrome.storage.local.remove(CODEX_INSIGHTS_KEY);
+    renderBrowserConversation(null);
     reviewedEvidence = null;
     codexReview.hidden = true;
     codexOutput.hidden = true;
@@ -387,6 +480,9 @@ stopButton.addEventListener("click", () => void command("stop"));
 importButton.addEventListener("click", () => void importCommit());
 exportButton.addEventListener("click", () => void exportEvidence());
 downloadHistoryButton.addEventListener("click", downloadHistorySummary);
+captureBrowserButton.addEventListener("click", () => void captureBrowserConversation());
+downloadBrowserButton.addEventListener("click", downloadBrowserConversation);
+deleteBrowserButton.addEventListener("click", () => void deleteBrowserConversation());
 clearButton.addEventListener("click", () => void clearEvidence());
 
 // Edge keeps a side panel open across tab switches; never leave stale controls
