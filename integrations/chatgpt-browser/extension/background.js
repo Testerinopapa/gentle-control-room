@@ -41,8 +41,8 @@ async function getSession(tabId) {
   const data = await chrome.storage.session.get(KEY(tabId));
   return data[KEY(tabId)] || null;
 }
-// Full message text is kept separately from coding evidence, and only after
-// an explicit side-panel click. It is never included in evidence/Codex exports.
+// Browser message text is stored separately from coding evidence after the
+// explicitly labeled Start/capture action. It never enters Codex exports.
 async function readBrowserChats() {
   const stored = (await chrome.storage.local.get(BROWSER_CHAT_KEY))[BROWSER_CHAT_KEY];
   return stored?.version === 1 && Array.isArray(stored.snapshots)
@@ -65,9 +65,65 @@ function browserChatForTab(store, session) {
   if (session) return store.snapshots.find(item => item.sessionId === session.id) || null;
   return store.snapshots.at(-1) || null;
 }
+function cleanChatText(role, text) {
+  const value = String(text).trim();
+  return role === "assistant"
+    ? value.replace(/^ChatGPT said:\s*\n+/i, "").trim()
+    : role === "user" ? value.replace(/^You said:\s*\n+/i, "").trim() : value;
+}
+function normalizeChatTurn(message) {
+  const text = cleanChatText(message.role, message.text);
+  const key = typeof message.key === "string" && message.key.length <= 220 &&
+    /^[a-z]+:[^\r\n]{1,210}$/.test(message.key) ? message.key : null;
+  return { role: message.role, text, ...(key ? { key } : {}) };
+}
+function sameChatTurn(a, b) {
+  // Older v0.9.3 snapshots have no stable keys. Compare their cleaned
+  // content when merging an upgraded recording.
+  return Boolean(a.key && b.key && a.key === b.key) ||
+    (a.role === b.role && a.text === b.text);
+}
+function mergeChatWindows(previous, incoming) {
+  const saved = previous.map(normalizeChatTurn);
+  const window = incoming.map(normalizeChatTurn);
+  if (!saved.length) return { messages: window, uncertain: false };
+  if (!window.length) return { messages: saved, uncertain: false };
+  const anyOverlap = window.some(item => saved.some(other => sameChatTurn(other, item)));
+  if (!anyOverlap) return { messages: [...window, ...saved], uncertain: true };
+  let lastIndex = -1;
+  for (let i = 0; i < window.length; i++) {
+    const item = window[i];
+    const current = saved.findIndex(other => sameChatTurn(other, item));
+    if (current >= 0) {
+      if (item.text.length >= saved[current].text.length)
+        saved[current] = item;
+      lastIndex = current;
+      continue;
+    }
+    const next = window.slice(i + 1)
+      .map(nextItem => saved.findIndex(other => sameChatTurn(other, nextItem)))
+      .find(index => index >= 0);
+    const index = next !== undefined ? next : lastIndex < 0 ? 0 : lastIndex + 1;
+    saved.splice(index, 0, item);
+    lastIndex = index;
+  }
+  return { messages: saved, uncertain: false };
+}
+function boundChatMessages(messages) {
+  let total = messages.reduce((sum, message) => sum + message.text.length, 0);
+  let limited = false;
+  while (messages.length > 160 || total > 350000) {
+    const removed = messages.splice(Math.floor(messages.length / 2), 1)[0];
+    total -= removed.text.length;
+    limited = true;
+  }
+  return { messages, limited };
+}
+
 function browserChatMeta(chat) {
   return chat ? { sessionId: chat.sessionId, capturedAt: chat.capturedAt,
     messageCount: chat.messages.length, truncated: chat.truncated,
+    orderUncertain: chat.orderUncertain === true,
     renderedCount: chat.renderedCount } : null;
 }
 
@@ -528,20 +584,30 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           return { ok: false, error: "Invalid browser conversation content." };
         chars += entry.text.length;
         if (chars > 350000) return { ok: false, error: "Conversation snapshot is too large." };
-        messages.push({ role: entry.role, text: entry.text });
+        if (entry.key !== undefined &&
+            (typeof entry.key !== "string" || entry.key.length > 220))
+          return { ok: false, error: "Invalid browser message identity." };
+        messages.push(normalizeChatTurn(entry));
       }
       // Consent can be revoked while the browser is preparing its reply.
       const current = await getSession(tabId);
       if (!current || current.id !== session.id ||
           current.page !== session.page || !current.workflowEnabled)
         return { ok: false, error: "Recording ended before capture completed." };
+      const chats = await readBrowserChats();
+      const previous = chats.snapshots.find(item => item.sessionId === session.id);
+      const merged = mergeChatWindows(previous?.messages || [], messages);
+      const limited = boundChatMessages(merged.messages);
       const snapshot = {
         sessionId: session.id, capturedAt: new Date().toISOString(),
-        messages, renderedCount: Number.isInteger(rendered.renderedCount) ?
+        messages: limited.messages,
+        renderedCount: Number.isInteger(rendered.renderedCount) ?
           Math.min(240, Math.max(0, rendered.renderedCount)) : messages.length,
-        truncated: rendered.truncated === true
+        truncated: rendered.truncated === true || previous?.truncated === true ||
+          limited.limited,
+        orderUncertain: rendered.orderUncertain === true ||
+          previous?.orderUncertain === true || merged.uncertain
       };
-      const chats = await readBrowserChats();
       chats.snapshots = chats.snapshots.filter(item => item.sessionId !== session.id);
       chats.snapshots.push(snapshot);
       await chrome.storage.local.set({ [BROWSER_CHAT_KEY]: boundedBrowserChats(chats) });
