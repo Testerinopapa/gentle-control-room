@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 const background = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
 const analysisSource = readFileSync(new URL("../extension/analysis.js", import.meta.url), "utf8");
 const content = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
+const liveReader = readFileSync(new URL("../extension/live-archiver-reader.js", import.meta.url), "utf8");
 const panel = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
 const markup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
 const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
@@ -300,7 +301,7 @@ function domHarness(h = null, html = '<article data-turn="assistant" data-turn-i
   const sent = [];
   let command, poll, mutation, observerOptions;
   const location = { pathname: "/c/test-conversation" };
-  vm.runInNewContext(content, {
+  vm.runInNewContext(liveReader + "\n" + content, {
     URL, document: dom.window.document, location,
     chrome: { runtime: {
       async sendMessage(message) {
@@ -329,6 +330,56 @@ function domHarness(h = null, html = '<article data-turn="assistant" data-turn-i
 }
 const userTurn = (id, text) => `<article data-turn="user" data-turn-id="${id}"><div data-message-author-role="user">${text}</div></article>`;
 const assistantTurn = (id, text) => `<article data-turn="assistant" data-turn-id="${id}"><div data-message-author-role="assistant">${text}</div></article>`;
+
+test("Live Archiver DOM reader extracts modern ChatGPT paired turns without UI labels", async () => {
+  const markup = [
+    '<div data-turn-key="turn-uuid-1">',
+      '<div data-content-search-turn-key="fallback-turn-1"></div>',
+      '<div data-chatgpt-search-unit-key="turn-uuid-1:user">',
+        '<div data-markdown-text-tone="user-message">Please debug the checkout</div>',
+      '</div>',
+      '<div data-chatgpt-search-unit-key="turn-uuid-1:assistant">',
+        '<h4 data-conversation-role="assistant">ChatGPT said:</h4>',
+        '<div data-markdown-text-style="assistant-message">',
+          '<p>Fixed the checkout bug</p><pre><code>npm test</code></pre>',
+        '</div>',
+      '</div>',
+    '</div>',
+    '<div data-turn-key="turn-uuid-2">',
+      '<div data-content-search-turn-key="fallback-turn-2"></div>',
+      '<div data-chatgpt-search-unit-key="turn-uuid-2:user">',
+        '<div data-markdown-text-tone="user-message">Review the new solution</div>',
+      '</div>',
+      '<div data-chatgpt-search-unit-key="turn-uuid-2:assistant">',
+        '<h4 data-conversation-role="assistant">ChatGPT said:</h4>',
+        '<div data-markdown-text-style="assistant-message"><p>Reviewed changes</p></div>',
+      '</div>',
+    '</div>'
+  ].join("");
+  const d = domHarness(null, markup);
+  await d.enable();
+  const answer = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(answer.ok, true);
+  assert.deepEqual(Array.from(answer.messages, item => item.role),
+    ["user", "assistant", "user", "assistant"]);
+  assert.ok(answer.messages[1].text.includes("npm test"));
+  assert.ok(answer.messages[1].text.includes("Fixed the checkout bug"));
+  assert.ok(!JSON.stringify(answer.messages).includes("ChatGPT said:"));
+  assert.equal(answer.messages[0].key, "user:turn-uuid-1:user");
+  assert.equal(answer.messages[1].key, "assistant:turn-uuid-1:assistant");
+});
+
+test("Live Archiver reader runs without internal ChatGPT network requests", async () => {
+  assert.ok(liveReader.includes("top"));
+  assert.ok(liveReader.includes("scroller.scrollTop"));
+  assert.ok(!/fetch\(['"]\/backend-api/.test(liveReader));
+  assert.ok(!liveReader.includes("/api/auth/session"));
+  assert.ok(background.includes('"live-archiver-reader.js", "content.js"'));
+  assert.ok(manifest.host_permissions.every(url =>
+    !url.includes("claude.ai") && !url.includes("gstatic.com")),
+    "only existing ChatGPT/GitHub permissions should remain");
+});
 
 test("content observer reports only categories and local identities; historical references never fetch", async () => {
   const h = harness(); await enable(h);
