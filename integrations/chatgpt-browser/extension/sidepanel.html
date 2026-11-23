@@ -47,6 +47,11 @@
       margin: 0; overflow-wrap: anywhere;
     }
     .error { color: #9f1239; font-weight: 600; }
+    .advanced { border: 1px solid #d5dde9; border-radius: 12px; background: #fff; }
+    .advanced > summary { cursor: pointer; padding: 15px 18px; font-weight: 650; }
+    .advanced-content { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 12px; }
+    .advanced-content section { padding: 14px; }
+    button[hidden] { display: none; }
     footer { padding: 18px 20px 24px; color: #475569; border-top: 1px solid #e2e8f0; }
     footer p { margin: 0 0 8px; }
   </style>
@@ -64,69 +69,33 @@
       <div id="state" class="status" data-active="false" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span>
       </div>
-      <p id="note" class="hint">Start reads currently loaded ChatGPT messages and saves the text locally in Edge. It also records coding metadata and may fetch public GitHub patches. You can delete the chat snapshot anytime.</p>
+      <p id="note" class="hint">Start captures this conversation and records coding activity locally.</p>
       <p id="error" class="error" role="alert" hidden></p>
       <div class="buttons">
         <button id="start" class="primary" disabled>Start &amp; read this conversation</button>
-        <button id="stop" disabled>Stop recording</button>
+        <button id="stop" disabled hidden>Stop recording</button>
       </div>
       
     </section>
 
-    <section aria-label="Visible message counts">
-      <h2 class="section-heading">Visible messages</h2>
-      <div class="counts">
-        <div class="count"><strong id="user-count">—</strong><span>Your messages</span></div>
-        <div class="count"><strong id="assistant-count">—</strong><span>ChatGPT replies</span></div>
-      </div>
-      <p class="hint" id="observer-state" role="status" aria-live="polite">Start recording to check the page observer.</p>
-      <p class="hint"><strong id="code-count">—</strong> visible code examples</p>
-      <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
-    </section>
-
     <section aria-label="Browser conversation">
       <h2 class="section-heading">Conversation from browser</h2>
-      <p class="hint">Read user and assistant messages directly from this ChatGPT tab. The extension scans older rendered turns where possible, then retains new ones across additional captures. Captured text is stored locally in Edge and may be sensitive. Nothing is sent to an AI service.</p>
-      <button id="capture-browser-conversation" type="button" disabled>Capture conversation from browser</button>
+      <p class="hint">Captured automatically when you start. Re-scan older messages in Advanced options.</p>
       <p id="browser-conversation-status" class="hint" role="status">Start recording, then capture the browser conversation.</p>
       <textarea id="browser-conversation-preview" readonly spellcheck="false" rows="9" hidden
         aria-label="Captured browser conversation" style="width:100%;margin-top:10px;resize:vertical;white-space:pre-wrap;overflow:auto;font:14px/1.5 monospace;border:1px solid #cbd5e1;border-radius:8px;padding:12px;"></textarea>
       <div class="buttons">
         <button id="download-browser-conversation" type="button" disabled>Download conversation (.txt)</button>
-        <button id="delete-browser-conversation" type="button" disabled>Delete captured conversation</button>
       </div>
-      <p class="hint">Capture tries scrolling through older browser-rendered messages and returns to your position. Scroll upward yourself and capture again to add any missing messages; existing turns are retained and deduplicated. A complete history is not guaranteed.</p>
     </section>
 
-    <section aria-label="Conversation summary">
-      <h2 class="section-heading">Conversation summary</h2>
-      <p id="history-summary" class="hint" role="status" aria-live="polite">Start recording to summarize the coding activity already visible in this conversation.</p>
-      <p id="history-summary-scope" class="hint muted">Summary is derived from local activity labels and GitHub evidence, not a transcript or a complete account of what was said.</p>
-      <ul id="history-summary-patterns" class="hint" aria-label="Recurring signals in this conversation"></ul>
-      <button id="download-history-summary" type="button" disabled>Download summary</button>
-    </section>
-
-    <section aria-label="Export local evidence">
-      <h2 class="section-heading">Evidence</h2>
-      <p class="hint"><strong>Code patterns</strong> · Observed patch changes, not verified outcomes.</p>
+    <section aria-label="Codex insights">
+      <h2 class="section-heading">Coding insights</h2>
+      <p class="hint"><strong>Observed patterns</strong></p>
       <ul id="code-patterns" class="hint" aria-label="Code patterns"></ul>
       <p id="evidence-count" class="hint" role="status">No local evidence yet.</p>
-      <label for="commit-url" class="hint" style="display:block; margin-bottom:6px;">GitHub commit URL (when automatic detection is unavailable)</label>
-      <input id="commit-url" type="url" autocomplete="off" spellcheck="false"
-        placeholder="https://github.com/owner/repo/commit/..." 
-        style="width:100%; min-width:0; padding:11px; border:1px solid #cbd5e1; border-radius:9px; font:inherit; margin-top:6px;" />
-      <label for="commit-task" class="hint">Associate with task (optional)</label>
-      <select id="commit-task" style="width:100%;padding:10px;font:inherit"><option value="">Unattributed</option></select>
-      <p id="unresolved-commits" class="hint"></p>
-      <button id="import-commit" type="button" disabled>Import commit evidence</button>
-      <p id="import-status" class="hint" role="status" aria-live="polite">Requires recording. Only public GitHub commits can be fetched.</p>
-      <button id="export-evidence" type="button">Export evidence JSON</button>
-      <button id="clear-evidence" type="button">Delete stored evidence</button>
-    </section>
-    <section aria-label="Codex insights">
-      <h2 class="section-heading">Codex insights</h2>
-      <p class="hint">Analyze recorded coding evidence with your local signed-in Codex CLI. Nothing is sent to Codex until you review and approve the exact JSON.</p>
-      <button id="prepare-codex" type="button">Review evidence for Codex</button>
+      <p class="hint">For deeper analysis, review the evidence before approving local Codex processing.</p>
+      <button id="prepare-codex" type="button">Analyze with Codex</button>
       <div id="codex-review" hidden>
         <label for="codex-preview" class="hint" style="display:block;margin:10px 0 6px;">Exact evidence to send</label>
         <textarea id="codex-preview" readonly spellcheck="false" style="width:100%;height:180px;resize:vertical;font:14px/1.45 monospace;border:1px solid #cbd5e1;border-radius:8px;padding:10px;"></textarea>
@@ -140,8 +109,53 @@
       <pre id="codex-output" hidden style="white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 system-ui,'Segoe UI',sans-serif;"></pre>
     </section>
 
+    <details class="advanced" id="advanced-options">
+      <summary>Advanced options</summary>
+      <div class="advanced-content">
+    <section aria-label="Capture and data controls">
+      <h2 class="section-heading">Capture and data</h2>
+      <p class="hint">Use these only to retry a history scan or remove saved text.</p>
+      <div class="buttons">
+        <button id="capture-browser-conversation" type="button" disabled>Re-scan conversation</button>
+        <button id="delete-browser-conversation" type="button" disabled>Delete saved conversation</button>
+      </div>
+    </section>
+    <section aria-label="Visible message counts">
+      <h2 class="section-heading">Visible messages</h2>
+      <div class="counts">
+        <div class="count"><strong id="user-count">—</strong><span>Your messages</span></div>
+        <div class="count"><strong id="assistant-count">—</strong><span>ChatGPT replies</span></div>
+      </div>
+      <p class="hint" id="observer-state" role="status" aria-live="polite">Start recording to check the page observer.</p>
+      <p class="hint"><strong id="code-count">—</strong> visible code examples</p>
+      <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
+    </section>
+    <section aria-label="Conversation summary">
+      <h2 class="section-heading">Conversation summary</h2>
+      <p id="history-summary" class="hint" role="status" aria-live="polite">Start recording to summarize the coding activity already visible in this conversation.</p>
+      <p id="history-summary-scope" class="hint muted">Summary is derived from local activity labels and GitHub evidence, not a transcript or a complete account of what was said.</p>
+      <ul id="history-summary-patterns" class="hint" aria-label="Recurring signals in this conversation"></ul>
+      <button id="download-history-summary" type="button" disabled>Download summary</button>
+    </section>
+    <section aria-label="Export local evidence">
+      <h2 class="section-heading">Evidence</h2>
+      <label for="commit-url" class="hint" style="display:block; margin-bottom:6px;">GitHub commit URL (when automatic detection is unavailable)</label>
+      <input id="commit-url" type="url" autocomplete="off" spellcheck="false"
+        placeholder="https://github.com/owner/repo/commit/..." 
+        style="width:100%; min-width:0; padding:11px; border:1px solid #cbd5e1; border-radius:9px; font:inherit; margin-top:6px;" />
+      <label for="commit-task" class="hint">Associate with task (optional)</label>
+      <select id="commit-task" style="width:100%;padding:10px;font:inherit"><option value="">Unattributed</option></select>
+      <p id="unresolved-commits" class="hint"></p>
+      <button id="import-commit" type="button" disabled>Import commit evidence</button>
+      <p id="import-status" class="hint" role="status" aria-live="polite">Requires recording. Only public GitHub commits can be fetched.</p>
+      <button id="export-evidence" type="button">Export evidence JSON</button>
+      <button id="clear-evidence" type="button">Delete stored evidence</button>
+    </section>
+      </div>
+    </details>
+
     <p class="notice">
-      Start also saves the text currently loaded in this ChatGPT conversation to local Edge extension storage. This text may include private information. The captured transcript is not included in Codex evidence. Switching conversations stops recording, but previously saved snapshots remain until deleted.
+      Conversation text is saved locally in Edge when you start. It is not included in Codex evidence. You must review and approve evidence before sending it to the optional local Codex bridge.
     </p>
   </main>
 
