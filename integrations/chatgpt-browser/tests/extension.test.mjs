@@ -369,6 +369,32 @@ test("Start classifies available old conversation turns without storing text or 
     "repeated scans cannot duplicate historical boundaries");
 });
 
+test("historical conversation summary is readable, session-scoped and survives Stop", async () => {
+  const h = harness(); await enable(h);
+  const dom = domHarness(h,
+    userTurn("summary-u1", "PRIVATE_NAME please debug the broken login") +
+    assistantTurn("summary-a1", "<p>Investigated the login issue</p>") +
+    userTurn("summary-u2", "PRIVATE_NAME debug and test the authentication") +
+    assistantTurn("summary-a2", "<p>Testing recommendations</p>"));
+  await dom.enable();
+  let data = await exported(h);
+  assert.equal(data.analysis.conversationSummaries.length, 1);
+  const summary = data.analysis.conversationSummaries[0];
+  assert.equal(summary.requests, 2);
+  assert.equal(summary.historicalRequests, 2);
+  assert.equal(summary.newRequests, 0);
+  assert.match(summary.overview, /debugging/);
+  assert.ok(summary.repeatedSignals.some(label => /debugging/i.test(label)));
+  assert.ok(!JSON.stringify(data).includes("PRIVATE_NAME"));
+  const active = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(active.conversationSummary.overview, summary.overview);
+  await h.send({ type: "stop", tabId: 9 });
+  const stopped = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(stopped.conversationSummary.overview, summary.overview);
+  await h.send({ type: "clearEvidence" });
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).conversationSummary, null);
+});
+
 test("GitHub capture works without message counts, with streamed text and rerendered nested wrappers", async () => {
   const h = harness(); await enable(h); const d = domHarness(h); await d.enable();
   assert.equal(d.sent.find(m => m.type === 'observerStatus').detector, 'waiting');
@@ -1395,6 +1421,10 @@ test('existing Evidence panel shows patch pattern task counts and supporting com
     } } });
   for (let i = 0; i < 5; i++) await tick();
   const list = dom.window.document.getElementById('code-patterns');
+  const summaryNode = dom.window.document.getElementById('history-summary');
+  const summaryDownload = dom.window.document.getElementById('download-history-summary');
+  assert.ok(summaryNode.textContent.includes('coding-related request'));
+  assert.equal(summaryDownload.disabled, false);
   assert.match(list.textContent, /Test files added or modified across tasks/);
   assert.match(list.textContent, /2 tasks/);
   assert.ok([...list.querySelectorAll('a')].every(a => /^https:\/\/github.com\/example\/project\/commit\/[12]{40}$/.test(a.href)));
