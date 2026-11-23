@@ -155,31 +155,101 @@ function sameChatTurn(a, b) {
   return Boolean(a.key && b.key && a.key === b.key) ||
     (a.role === b.role && a.text === b.text);
 }
-function mergeChatWindows(previous, incoming) {
-  const saved = previous.map(normalizeChatTurn);
-  const window = incoming.map(normalizeChatTurn);
-  if (!saved.length) return { messages: window, uncertain: false };
-  if (!window.length) return { messages: saved, uncertain: false };
-  const anyOverlap = window.some(item => saved.some(other => sameChatTurn(other, item)));
-  if (!anyOverlap) return { messages: [...window, ...saved], uncertain: true };
-  let lastIndex = -1;
-  for (let i = 0; i < window.length; i++) {
-    const item = window[i];
-    const current = saved.findIndex(other => sameChatTurn(other, item));
-    if (current >= 0) {
-      if (item.text.length >= saved[current].text.length)
-        saved[current] = item;
-      lastIndex = current;
+// Merge at the *user-turn* level. Prior implementations inserted individual
+// messages around the nearest matching assistant and could scramble the order
+// of old prompts whenever a new capture exposed a different history window.
+// A top-to-bottom DOM scan is authoritative for visible user-turn ordering;
+// older snapshots contribute missing turns and replies, never reorder it.
+function chatComparableText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function chatTurnBlocks(messages) {
+  const turns = [], prelude = [];
+  for (const message of messages.map(normalizeChatTurn).filter(item => item.text)) {
+    if (message.role === "user") turns.push({ user: message, replies: [] });
+    else if (turns.length) turns[turns.length - 1].replies.push(message);
+    else prelude.push(message);
+  }
+  return { turns, prelude };
+}
+function findChatTurn(needle, haystack) {
+  // Stable user identifiers are preferred. Text fallback is used only for
+  // substantial, unique prompts (not repeated "proceed" or "yes" messages).
+  if (needle.user?.key) {
+    const ids = haystack.map((item, i) => item.user.key === needle.user.key ? i : -1)
+      .filter(i => i >= 0);
+    if (ids.length === 1) return ids[0];
+  }
+  const text = chatComparableText(needle.user?.text);
+  if (text.length < 14) return -1;
+  const found = haystack.map((item, i) =>
+    chatComparableText(item.user.text) === text ? i : -1).filter(i => i >= 0);
+  return found.length === 1 ? found[0] : -1;
+}
+function mergeChatReplies(previous, incoming) {
+  const out = previous.slice();
+  for (const next of incoming) {
+    const match = out.findIndex(saved => sameChatTurn(saved, next) ||
+      duplicateAssistantReplies(saved, next));
+    if (match >= 0) {
+      if (duplicateAssistantReplies(out[match], next))
+        out[match] = preferCompleteAssistantReply(out[match], next);
+      else if (next.text.length >= out[match].text.length) out[match] = next;
+    } else out.push(next);
+  }
+  return collapseDuplicateAssistantReplies(out);
+}
+function mergeChatWindows(previous, incoming, options = {}) {
+  const old = chatTurnBlocks(previous);
+  const fresh = chatTurnBlocks(incoming);
+  const preferIncomingOrder = options.preferIncomingOrder === true && fresh.turns.length > 0;
+  const base = (preferIncomingOrder ? fresh : old).turns.map(block =>
+    ({ user: block.user, replies: block.replies.slice() }));
+  const other = (preferIncomingOrder ? old : fresh).turns;
+  let uncertain = false, earlierMatch = -1, hasAnchor = false;
+  for (let i = 0; i < other.length; i++) {
+    const block = other[i];
+    const currentIndex = findChatTurn(block, base);
+    if (currentIndex >= 0) {
+      hasAnchor = true;
+      if (earlierMatch > currentIndex) uncertain = true;
+      const current = base[currentIndex];
+      // The freshest scan's user identity is retained when its ordering wins.
+      if (!preferIncomingOrder && block.user.text.length >= current.user.text.length)
+        current.user = block.user;
+      current.replies = preferIncomingOrder
+        ? mergeChatReplies(block.replies, current.replies)
+        : mergeChatReplies(current.replies, block.replies);
+      earlierMatch = currentIndex;
       continue;
     }
-    const next = window.slice(i + 1)
-      .map(nextItem => saved.findIndex(other => sameChatTurn(other, nextItem)))
-      .find(index => index >= 0);
-    const index = next !== undefined ? next : lastIndex < 0 ? 0 : lastIndex + 1;
-    saved.splice(index, 0, item);
-    lastIndex = index;
+    // Place an old missing turn between neighboring common user prompts.
+    // When windows have no shared anchors, append conservatively and report
+    // uncertain order instead of blindly PREPENDING (the original regression).
+    let nextAnchor = -1;
+    for (let j = i + 1; j < other.length; j++) {
+      nextAnchor = findChatTurn(other[j], base);
+      if (nextAnchor >= 0) break;
+    }
+    let insertion = base.length;
+    if (nextAnchor >= 0 && (earlierMatch < 0 || nextAnchor > earlierMatch))
+      insertion = nextAnchor;
+    else if (earlierMatch >= 0) insertion = earlierMatch + 1;
+    else uncertain = true;
+    base.splice(insertion, 0, { user: block.user, replies: block.replies.slice() });
+    earlierMatch = insertion;
+    if (nextAnchor < 0 && earlierMatch === base.length - 1 && i > 0 &&
+        !hasAnchor) uncertain = true;
   }
-  return { messages: saved, uncertain: false };
+  if (old.turns.length && fresh.turns.length && !hasAnchor) uncertain = true;
+  const olderPrelude = old.prelude, newerPrelude = fresh.prelude;
+  const prelude = mergeChatReplies(olderPrelude, newerPrelude);
+  if (prelude.length && base.length && (olderPrelude.length || newerPrelude.length))
+    uncertain = true;
+  return { messages: [
+    ...prelude,
+    ...base.flatMap(block => [block.user, ...collapseDuplicateAssistantReplies(block.replies)])
+  ], uncertain };
 }
 // Legacy v0.9.3–0.9.5 captures have no conversation identity. An overlap of
 // substantial user+assistant messages is sufficient to migrate them safely;
@@ -694,12 +764,18 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       let orderUncertain = rendered.orderUncertain === true;
       let truncated = rendered.truncated === true;
       for (const item of matches) {
-        const merge = mergeChatWindows(combined, item.messages);
+        const merge = mergeChatWindows(combined, item.messages, {
+          preferIncomingOrder: item.coverage?.atTop === true &&
+            item.coverage?.atBottom === true
+        });
         combined = merge.messages;
         orderUncertain ||= merge.uncertain || item.orderUncertain === true;
         truncated ||= item.truncated === true;
       }
-      const merged = mergeChatWindows(combined, messages);
+      const merged = mergeChatWindows(combined, messages, {
+        preferIncomingOrder: rendered.coverage?.atTop === true &&
+          rendered.coverage?.atBottom === true
+      });
       orderUncertain ||= merged.uncertain;
       const limited = boundChatMessages(merged.messages);
       const snapshot = {
