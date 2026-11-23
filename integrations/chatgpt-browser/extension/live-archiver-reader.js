@@ -368,7 +368,9 @@
     // whose order may already have been affected by virtualization.
     entries.length = 0; uncertain = false; limited = false;
     let observedWindows = 0, disconnectedWindows = 0, previousDownKeys = null;
+    let tabWasHidden = document.hidden === true;
     const captureWindow = direction => {
+      if (document.hidden === true) tabWasHidden = true;
       const rows = observe(direction, true);
       observedWindows++;
       if (direction === "down" && rows.length) {
@@ -468,7 +470,7 @@
       lastCoverage = { observedMessageCount: entries.length, initiallyRendered: initialCount,
         atTop, atBottom, scrolling: !!scrolling, stoppedEarly, capped: limited,
         durationMs: Date.now() - startedAt, initialScrollHeight: initialHeight,
-        observedWindows, disconnectedWindows, possibleReplyGaps,
+        observedWindows, disconnectedWindows, possibleReplyGaps, tabWasHidden,
         recoveredFromUpwardPass, recoveredUserTurns, uncertainPlacements,
         unanchoredReplies, verifiedComplete: false };
       return { ok: true, messages: entries.map(({ role, text, key }) => ({ role, text, key })),
