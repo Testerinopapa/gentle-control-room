@@ -491,7 +491,7 @@ test("repeated browser captures merge previous snapshots instead of overwriting 
     ["Fix the issue", "Done", "Please test it", "Tests reviewed"]);
   assert.equal(current.orderUncertain, false);
   firstWindow.messages = [{ role: "assistant", key: "assistant:oldest", text:
-    "ChatGPT said:\\n\\nFirst analysis" }];
+    "ChatGPT said:\n\nFirst analysis" }];
   await h.send({ type: "captureBrowserConversation", tabId: 9 });
   const merged = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
   assert.equal(merged.messages.length, 5);
