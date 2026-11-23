@@ -454,7 +454,6 @@ test("browser capture strips ChatGPT speaker labels and skips empty placeholders
   const h = harness();
   await enable(h);
   const timestamp = new Date().toISOString();
-  const session = (await h.send({ type: "getState", tabId: 9 }));
   const activeSession = [...h.sessions.values()].find(item => item?.id);
   assert.ok(activeSession);
   h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
@@ -462,7 +461,7 @@ test("browser capture strips ChatGPT speaker labels and skips empty placeholders
     messages: [
       { role: "user", text: "What did we build?" },
       { role: "assistant", text: "ChatGPT said:" },
-      { role: "assistant", text: "ChatGPT said:\\n\\nWe built a browser extension." }
+      { role: "assistant", text: "ChatGPT said:\n\nWe built a browser extension." }
     ],
     renderedCount: 3, truncated: false
   }] });
