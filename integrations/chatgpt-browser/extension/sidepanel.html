@@ -64,10 +64,10 @@
       <div id="state" class="status" data-active="false" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span>
       </div>
-      <p id="note" class="hint">Starting a conversation records coding-work metadata and automatically enables local workflow classification. Public GitHub patches may be stored locally. Full chat text is saved only if you explicitly capture the browser conversation.</p>
+      <p id="note" class="hint">Start reads currently loaded ChatGPT messages and saves the text locally in Edge. It also records coding metadata and may fetch public GitHub patches. You can delete the chat snapshot anytime.</p>
       <p id="error" class="error" role="alert" hidden></p>
       <div class="buttons">
-        <button id="start" class="primary" disabled>Start for this conversation</button>
+        <button id="start" class="primary" disabled>Start &amp; read this conversation</button>
         <button id="stop" disabled>Stop recording</button>
       </div>
       
@@ -141,7 +141,7 @@
     </section>
 
     <p class="notice">
-      Start recording is the single approval for coding tagging, local workflow classification and public GitHub commit retrieval in this conversation. Switching conversations stops collection for the previous one.
+      Start also saves the text currently loaded in this ChatGPT conversation to local Edge extension storage. This text may include private information. Nothing in the browser transcript is sent to Codex unless you separately choose to share it. Switching conversations stops recording, but previously saved snapshots remain until deleted.
     </p>
   </main>
 
