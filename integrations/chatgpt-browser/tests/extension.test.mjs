@@ -432,6 +432,14 @@ test("legacy out-of-turn response is added to the correct modern user turn", asy
   assert.equal(result.coverage.supplementalReplies, 1);
 });
 
+test("browser history scan waits longer and takes smaller scrolling steps", () => {
+  assert.match(liveReader, /TOP_WAIT_MS = 500, DOWN_WAIT_MS = 650, RECHECK_WAIT_MS = 300/);
+  assert.match(liveReader, /SCROLL_FRACTION = 0\.5, MAX_DOWN_STEPS = 220/);
+  assert.match(liveReader, /await settleWindow\("up", TOP_WAIT_MS\)/);
+  assert.match(liveReader, /await settleWindow\("down", DOWN_WAIT_MS\)/);
+  assert.match(liveReader, /scrolling\.clientHeight \* SCROLL_FRACTION/);
+});
+
 test("Live Archiver reader runs without internal ChatGPT network requests", async () => {
   assert.ok(liveReader.includes("top"));
   assert.ok(liveReader.includes("scroller.scrollTop"));
