@@ -221,6 +221,14 @@
     }
     return rows;
   }
+  function enforceCaptureLimits() {
+    let size = entries.reduce((sum, row) => sum + row.text.length, 0);
+    while (entries.length > MAX_MESSAGES || size > MAX_CHARS) {
+      const removed = entries.splice(Math.floor(entries.length / 2), 1)[0];
+      size -= removed.text.length;
+      limited = true;
+    }
+  }
   function mergeRows(incoming, direction = "up", trustedDirection = false) {
     const overlap = incoming.some(row => entries.some(prev => prev.key === row.key));
     if (!overlap && entries.length && incoming.length) {
@@ -252,12 +260,7 @@
     // turns relative to what is loaded in the DOM, and virtualization can
     // reassign the same number to a completely different earlier/later turn.
     // The browser's rendered order and the direction of harvesting are safer.
-    let size = entries.reduce((sum, row) => sum + row.text.length, 0);
-    while (entries.length > MAX_MESSAGES || size > MAX_CHARS) {
-      const dropped = entries.splice(Math.floor(entries.length / 2), 1)[0];
-      size -= dropped.text.length;
-      limited = true;
-    }
+    enforceCaptureLimits();
   }
   function observe(direction = null, trustedDirection = false) {
     // Passive observation follows the user's scroll direction; the old
@@ -276,6 +279,8 @@
   // preserving proven order where adjacent stable anchors exist.
   function recoverUpwardTurns(upwardRows) {
     let recoveredReplies = 0, recoveredUserTurns = 0, uncertainPlacements = 0;
+    let unanchoredReplies = 0;
+    const prelude = [];
     const canonical = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
     const sameUser = (a, b) => a?.role === "user" && b?.role === "user" &&
       (a.key === b.key || (canonical(a.text).length >= 14 &&
@@ -285,6 +290,7 @@
       if (row.role === "user") blocks.push({ user: row, replies: [] });
       else if (row.role === "assistant" && blocks.length)
         blocks[blocks.length - 1].replies.push(row);
+      else if (row.role === "assistant") prelude.push(row);
     }
     const find = user => {
       const locations = entries.map((row, index) => sameUser(user, row) ? index : -1)
@@ -336,7 +342,20 @@
         }
       }
     }
-    return { recoveredUserTurns, recoveredReplies, uncertainPlacements };
+    // A window can begin with an assistant body whose parent user message
+    // has already been virtualized away. Preserve the text without asserting
+    // that its position relative to later user turns is known.
+    const orphans = prelude.filter(reply => !entries.some(row =>
+      row.role === "assistant" && (row.key === reply.key ||
+        canonical(row.text) === canonical(reply.text))));
+    if (orphans.length) {
+      entries.unshift(...orphans);
+      unanchoredReplies = orphans.length;
+      uncertain = true;
+      uncertainPlacements += orphans.length;
+    }
+    enforceCaptureLimits();
+    return { recoveredUserTurns, recoveredReplies, uncertainPlacements, unanchoredReplies };
   }
 
   async function collect(allowed = () => true, onWindow = () => {}) {
@@ -387,7 +406,7 @@
     const wasAtBottom = scrolling && scrolling.scrollHeight - scrolling.clientHeight - oldTop < 60;
     let atTop = false, atBottom = false, stoppedEarly = false;
     let recoveredFromUpwardPass = 0, recoveredUserTurns = 0;
-    let uncertainPlacements = 0, upwardRows = [];
+    let uncertainPlacements = 0, unanchoredReplies = 0, upwardRows = [];
     try {
       if (scrolling && allowed()) {
         // Live Archiver's two-pass harvesting idea: force the real top, let
@@ -438,6 +457,7 @@
           recoveredFromUpwardPass = restored.recoveredReplies;
           recoveredUserTurns = restored.recoveredUserTurns;
           uncertainPlacements = restored.uncertainPlacements;
+          unanchoredReplies = restored.unanchoredReplies;
         }
       }
       if (!allowed()) return { ok: false, error: "Conversation changed during capture." };
@@ -450,7 +470,7 @@
         durationMs: Date.now() - startedAt, initialScrollHeight: initialHeight,
         observedWindows, disconnectedWindows, possibleReplyGaps,
         recoveredFromUpwardPass, recoveredUserTurns, uncertainPlacements,
-        verifiedComplete: false };
+        unanchoredReplies, verifiedComplete: false };
       return { ok: true, messages: entries.map(({ role, text, key }) => ({ role, text, key })),
         renderedCount: readRows().length, truncated: limited,
         orderUncertain: uncertain, coverage: lastCoverage };
