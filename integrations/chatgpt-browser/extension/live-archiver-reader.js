@@ -73,10 +73,24 @@
     ]) for (const item of clone.querySelectorAll(selector)) item.remove();
     for (const h of clone.querySelectorAll("h4,h5,h6"))
       if (/^\s*(you|chatgpt) said:?\s*$/i.test(h.textContent)) h.remove();
-    // A detached clone can have innerText="" in Chromium even when it
-    // contains actual message text. Fall back to textContent in that case.
+    // Detached clones often have empty innerText; textContent alone also
+    // concatenates paragraphs, list items and headings without separators.
+    function readable(node) {
+      if (!node) return "";
+      if (node.nodeType === 3) return node.nodeValue || "";
+      if (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11) return "";
+      const tag = String(node.localName || "").toLowerCase();
+      if (tag === "br") return "\n";
+      const children = [...(node.childNodes || [])];
+      let text = children.map(readable).join("");
+      if (/^(?:p|div|section|article|header|footer|blockquote|pre|h[1-6]|li|ul|ol|table|tr)$/.test(tag))
+        text = "\n" + text + "\n";
+      return text;
+    }
     const visual = typeof clone.innerText === "string" ? clone.innerText.trim() : "";
-    const source = visual || String(clone.textContent ?? "");
+    const structured = readable(clone).replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    const source = structured || visual || String(clone.textContent ?? "");
     let result = cleanText(role, source);
     if (result.length > MAX_MESSAGE_CHARS) { limited = true; result = result.slice(0, MAX_MESSAGE_CHARS); }
     return result;
@@ -97,22 +111,40 @@
     return direct ? role + ":" + String(direct).slice(0, 175) : null;
   }
   function responseParts(turn, user) {
-    // Live Archiver's modern ChatGPT adapter: each prompt and response lives
-    // inside the same data-turn-key, with one or more assistant message units.
-    const assistant = outermost([...turn.querySelectorAll(
-      '[data-chatgpt-search-unit-key$=":assistant"], [data-content-search-unit-key$=":assistant"]')]);
-    if (assistant.length) return assistant;
-    const units = outermost([...turn.querySelectorAll('[data-chatgpt-search-message-ids]')])
+    // Live Archiver's assistant units are frequently adjacent to the
+    // accessible "ChatGPT said:" heading. An explicit :assistant wrapper
+    // may contain *only* that heading while the rendered answer lives in a
+    // sibling unit. Examine the candidate groups instead of returning the
+    // first selector match, or genuine replies can disappear.
+    const unitSelector = '[data-chatgpt-search-message-ids]';
+    const units = outermost([...turn.querySelectorAll(unitSelector)])
       .filter(node => !(user && (node === user || user.contains(node) || node.contains(user))));
-    const tagged = units.filter(unit => unit.querySelector('[data-conversation-role="assistant"]') ||
-      unit.previousElementSibling?.matches?.('[data-conversation-role="assistant"]'));
-    if (tagged.length) return tagged;
+    const tagged = units.filter(node =>
+      node.querySelector('[data-conversation-role="assistant"]') ||
+      node.previousElementSibling?.matches?.('[data-conversation-role="assistant"]'));
+    const explicit = outermost([...turn.querySelectorAll(
+      '[data-chatgpt-search-unit-key$=":assistant"], [data-content-search-unit-key$=":assistant"]')]);
     const markdown = outermost([...turn.querySelectorAll(
       '[data-markdown-text-style="assistant-message"]')]);
-    if (markdown.length) return markdown;
     const legacy = outermost([...turn.querySelectorAll('[data-message-author-role="assistant"]')]);
-    if (legacy.length) return legacy;
-    return units;
+    return [tagged, explicit, markdown, legacy, units].filter(group => group.length);
+  }
+
+  function responseText(turn, user) {
+    const groups = responseParts(turn, user);
+    let best = "";
+    for (const group of groups) {
+      const parts = group.map(part => {
+        const markdownRoots = [...part.querySelectorAll('[data-markdown-text-style="assistant-message"]')];
+        return (markdownRoots.length ? markdownRoots.map(body => textOf(body, "assistant"))
+          : [textOf(part, "assistant")]).filter(Boolean).join("\n\n");
+      }).filter(Boolean);
+      const candidate = parts.join("\n\n").trim();
+      // A richer, meaningful answer is preferable to a label-only wrapper.
+      // Rich answer bodies can contain several message units.
+      if (candidate.length > best.length) best = candidate;
+    }
+    return best;
   }
   function readRows() {
     const root = transcript();
@@ -144,15 +176,10 @@
             key: stableKey(user, "user", turnKey ? turnKey + ":user" : "") || hashKey("user", text),
             order: order === null ? null : order * 2 });
         }
-        const parts = responseParts(turn, user);
-        const body = parts.map(part =>
-          [...part.querySelectorAll('[data-markdown-text-style="assistant-message"]')]
-            .map(body => textOf(body, "assistant")).filter(Boolean).join("\n\n") ||
-          textOf(part, "assistant")
-        ).filter(Boolean);
-        if (body.length) {
-          const text = body.join("\n\n").slice(0, MAX_MESSAGE_CHARS);
-          if (body.join("\n\n").length > MAX_MESSAGE_CHARS) limited = true;
+        const fullReply = responseText(turn, user);
+        if (fullReply) {
+          const text = fullReply.slice(0, MAX_MESSAGE_CHARS);
+          if (fullReply.length > MAX_MESSAGE_CHARS) limited = true;
           rows.push({ role: "assistant", text,
             key: stableKey(turn, "assistant", turnKey ? turnKey + ":assistant" : "") ||
               hashKey("assistant", text), order: order === null ? null : order * 2 + 1 });
