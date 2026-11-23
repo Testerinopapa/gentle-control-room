@@ -481,6 +481,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           taskId: task.taskId, startedAt: task.startedAt, stages: task.stages })),
         unresolvedCommits: analysis.unattributedCommits,
         patterns: analysis.patterns,
+        conversationSummary: (samePage && session
+          ? analysis.conversationSummaries.find(item => item.sessionId === session.id)
+          : null) || analysis.conversationSummaries.at(-1) || null,
         recordedEvents: local.events.length,
         recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length
       };
