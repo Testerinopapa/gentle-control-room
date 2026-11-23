@@ -639,6 +639,48 @@ test("earlier browser replies survive extension reload and old snapshot migratio
     "subsequent sessions in one conversation should not consume extra snapshot slots");
 });
 
+test("near-duplicate assistant renderings collapse on read without losing distinct replies", async () => {
+  const h = harness();
+  await enable(h);
+  const session = [...h.sessions.values()].find(item => item?.id);
+  const actual = "Because we added controls for every new feature, the sidebar had eleven buttons. " +
+    "I simplified it to Start, Download and Analyze with Codex. " +
+    "Manual actions remain under Advanced options. " +
+    "Pull main, reload the extension, and verify that the new design works in Edge.";
+  const progressWrapped = [
+    "Inspected the project panel and listed its controls.",
+    "Updated layout and verified component identifiers.",
+    "Completed the work and prepared the release.",
+    actual
+  ].join("\n\n");
+  const separateReply = "This is a second, unrelated assistant message containing a completely " +
+    "different set of instructions about analyzing software changes, tracking " +
+    "GitHub commits, interpreting recurring patterns and reviewing test outcomes.";
+  h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
+    sessionId: session.id, capturedAt: new Date().toISOString(),
+    messages: [
+      { role: "user", text: "Why so many buttons?" },
+      { role: "assistant", text: progressWrapped, key: "assistant:status-wrapper" },
+      { role: "assistant", text: actual, key: "assistant:final-reply" },
+      { role: "user", text: "What does pattern analysis do?" },
+      { role: "assistant", text: separateReply },
+      { role: "assistant", text: "A separate explanation discusses " +
+        "database schema changes, migrations, deployment pipelines, credentials " +
+        "and permissions. None of that is related to the GitHub review explanation." }
+    ], renderedCount: 6, truncated: false
+  }] });
+  const snapshot = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.deepEqual(Array.from(snapshot.messages, row => row.role),
+    ["user", "assistant", "user", "assistant", "assistant"]);
+  assert.equal(snapshot.messages[1].text, actual,
+    "prefer the final reply instead of status-heavy duplicate");
+  assert.equal(snapshot.messages.length, 5,
+    "do not conflate two substantively distinct assistant responses");
+  const evidence = await exported(h);
+  assert.ok(!JSON.stringify(evidence).includes(actual),
+    "stored transcripts remain isolated from Codex evidence export");
+});
+
 test("legacy transcript migration does not merge unrelated chats with generic overlap", async () => {
   const shared = { role: "user", text: "Please explain the next steps for the project in detail." };
   const h = harness(undefined, null, null, {
