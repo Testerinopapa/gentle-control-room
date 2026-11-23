@@ -102,8 +102,8 @@ async function refresh() {
     noteNode.textContent = !allowed
       ? (result.reason || "Open a ChatGPT conversation to enable collection.")
       : active
-        ? "Recording coding-work metadata and analyzing workflow locally. Stop whenever you like."
-        : "Start recording to enable coding and workflow analysis together. Visible request text is classified locally; only labels and task boundaries are saved. Public GitHub commits may be fetched.";
+        ? "Recording metadata, including rendered history captured at Start. Stop whenever you like."
+        : "Start scans rendered conversation history, then observes new work. Only metadata is saved. Historical commit links are not fetched automatically.";
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
     workflowEnabled = active && Boolean(result.workflowEnabled);
