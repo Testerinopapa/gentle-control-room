@@ -1,0 +1,11 @@
+Live Archiver
+Copyright 2026 Mark West
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes marked v12.0.2 (vendor/marked.umd.js),
+https://github.com/markedjs/marked
+Copyright (c) 2018+, MarkedJS
+Copyright (c) 2011-2018, Christopher Jeffrey
+Licensed under the MIT License, with portions Copyright (c) 2004 John Gruber
+under a BSD license. See vendor/marked-LICENSE.md.
