@@ -19,7 +19,9 @@ browsers with side-panel support). It keeps activity evidence in
    task-boundary detection, and public GitHub commit evidence collection.
    No extra coding-work or workflow toggles are needed. Start also classifies
    already-rendered requests and assistant replies as historical evidence
-   (up to 60 historical request boundaries). Raw conversation text is not saved.
+   (up to 60 historical request boundaries). The explicitly labeled Start
+   button also saves currently rendered message text locally in Edge as a
+   separate browser conversation snapshot.
 5. The extension recognizes complete GitHub commit URLs in assistant HTML
    links **or visible plain text**. If ChatGPT renders only a link label
    with no accessible URL, paste the complete GitHub commit URL in the
@@ -81,7 +83,8 @@ analysis fails, recording and local patterns continue to work.
 - Visible message counts and code-block counts, where available.
 - An automatic coding-work tag when you start recording, plus locally classified
   workflow stages. User text is inspected transiently only while recording is ON
-  and is never saved.
+  and is never saved in coding evidence. The separate browser conversation
+  snapshot stores message text only after the explicitly labeled Start/capture action.
 - The **complete currently rendered assistant response** is inspected
   transiently for GitHub links and code-block structure, including links outside
   nested text wrappers, late-streamed content, and URLs beyond 12,000 characters.
@@ -112,16 +115,19 @@ code edits and have the *new assistant reply* display complete commit URLs.
 The extension can now capture the **actual text of rendered ChatGPT messages**,
 including user requests, assistant replies and visible code blocks.
 
-1. Open the ChatGPT conversation and select **Start for this conversation**.
-2. In the Edge side panel, select **Capture conversation from browser**.
-3. Read the text in **Conversation from browser**, or select
+1. Open the ChatGPT conversation and select **Start & read this conversation**.
+   The extension automatically captures messages currently loaded in the tab.
+2. Read the text in **Conversation from browser**, or select
    **Download conversation (.txt)**.
+3. To refresh the snapshot after loading older messages, select **Capture
+   conversation from browser** again.
 4. To erase it, select **Delete captured conversation**. The global
    **Delete stored evidence** action also erases captured conversations.
 
-This extra click is deliberate: normal recording still stores only coding
-metadata. Only **Capture conversation from browser** transfers raw message
-text from the content script to the extension's **local Edge storage**,
+The explicitly labeled **Start & read this conversation** button authorizes
+reading rendered messages alongside coding metadata. Later **Capture
+conversation from browser** clicks replace that snapshot. Only these actions
+transfer raw message text into the extension's **local Edge storage**,
 under `gcrBrowserConversationV1`. Conversation snapshots are kept separate
 from `gcrEvidenceV1` and **never included in the Codex evidence payload**.
 No provider API, Codex, remote server or external storage is involved.
