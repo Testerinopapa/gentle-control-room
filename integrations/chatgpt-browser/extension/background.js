@@ -570,16 +570,16 @@ async function recentPublicCommits(repository) {
     const response = await fetch("https://api.github.com/repos/" + repository + "/commits?per_page=3",
       { headers: { Accept: "application/vnd.github+json" }, signal: controller.signal,
         redirect: "error", credentials: "omit" });
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const length = Number(response.headers?.get?.("content-length") || 0);
-    if (length > 32000) return [];
+    if (length > 32000) return null;
     const body = await response.text();
-    if (body.length > 32000) return [];
+    if (body.length > 32000) return null;
     const data = JSON.parse(body);
-    if (!Array.isArray(data) || data.length > 3) return [];
+    if (!Array.isArray(data) || data.length > 3) return null;
     return [...new Set(data.map(item => item?.sha?.toLowerCase())
       .filter(sha => typeof sha === "string" && COMMIT_SHA.test(sha)))];
-  } catch { return []; }
+  } catch { return null; }
   finally { clearTimeout(timeout); }
 }
 async function collectConversationGithub(tabId, session, messages) {
@@ -609,13 +609,13 @@ async function collectConversationGithub(tabId, session, messages) {
     const existing = await readEvidence();
     const lastLookup = existing.publicHistoryLookups?.[repository] || 0;
     if (Date.now() - lastLookup < PUBLIC_HISTORY_COOLDOWN_MS) continue;
-    // Mark the lookup before networking, to avoid repeated scans hammering
-    // GitHub's unauthenticated API. No code is claimed if retrieval fails.
+    const shas = await recentPublicCommits(repository);
+    if (!shas) continue; // Network/API errors must not block later retry.
     await mutateEvidence(data => {
       if (!data.publicHistoryLookups) data.publicHistoryLookups = {};
       data.publicHistoryLookups[repository] = Date.now();
     });
-    for (const sha of await recentPublicCommits(repository)) {
+    for (const sha of shas) {
       const current = await getSession(tabId);
       if (!current || current.id !== session.id || !current.workflowEnabled) return;
       const result = await recordCommit(tabId, session, repository, sha, "repository_history");
