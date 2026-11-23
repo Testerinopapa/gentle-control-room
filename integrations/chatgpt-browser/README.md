@@ -16,8 +16,9 @@ browsers with side-panel support). It keeps activity evidence in
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
-   task-boundary detection, and public GitHub commit evidence collection.
-   No extra coding-work or workflow toggles are needed.
+   task-boundary detection, and public GitHub commit evidence collection.   No extra coding-work or workflow toggles are needed. Start also classifies
+   already-rendered requests and assistant replies as historical evidence
+   (up to 60 historical request boundaries). Raw conversation text is not saved.
 5. The extension recognizes complete GitHub commit URLs in assistant HTML
    links **or visible plain text**. If ChatGPT renders only a link label
    with no accessible URL, paste the complete GitHub commit URL in the
@@ -130,7 +131,8 @@ identify a semantic goal spanning several follow-up requests. Stage sequences ca
 include several categories observed in one request, in textual order. They are
 request classifications, not verified actions.
 
-Messages mounted when recording is started are baselined. Their existing commit
+Messages mounted when recording begins are scanned for historical request
+boundaries, stages and assistant response metadata. Their existing commit
 references are **historical** and do not trigger GitHub retrieval, even when repeated
 in a later response. A new link streamed into an old response can be captured as
 unattributed, since that response has no supported new-task boundary. Streaming text,
@@ -188,8 +190,11 @@ changed in distinct commits. Code-change patterns require distinct commit SHAs;
 repeated references to one commit never constitute repeated modifications. None of
 these patterns verifies execution or success. No external AI service is contacted.
 
-Your first export may show one inferred task and **zero patterns**. This is
-correct until two separately observed coding episodes support recurrence.
+The first export may include historical tasks from already-rendered messages,
+marked `historical: true`. Repeated historical stage classifications can support
+metadata patterns, not proof of executed actions. Code-change patterns still
+require attributed distinct commits with captured patches. Unrendered older
+turns cannot be recovered; no undocumented ChatGPT API is used.
 
 The extension does not inspect other tabs, cookies, session tokens,
 conversation titles/URLs or any arbitrary local Git repositories. It does not
