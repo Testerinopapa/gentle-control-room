@@ -489,6 +489,26 @@ function runNativeCodex(message) {
   });
 }
 
+// An older installed Windows host can accept native messaging and reply
+// {ok:true} without actually implementing the Codex analysis response.
+// Keep this distinct from missing CLI login, invalid evidence, or timeouts.
+function codexResponseProblem(result) {
+  if (!result || typeof result !== "object")
+    return "The local Codex bridge returned no usable response. Reinstall the native host with install-host.ps1, then restart Edge.";
+  if (result.ok === false) {
+    if (typeof result.error === "string" && result.error.trim())
+      return result.error.trim().slice(0, 400);
+    return "The local Codex bridge rejected the request without details. Reinstall the native host with install-host.ps1, then retry.";
+  }
+  if (result.ok !== true)
+    return "The local Codex bridge returned an unrecognized response. Reinstall the native host with install-host.ps1, then restart Edge.";
+  if (typeof result.output !== "string")
+    return "The local Codex bridge connected but did not return an analysis. The installed Windows host may be outdated. Reinstall it with install-host.ps1 and restart Edge.";
+  if (!result.output.trim())
+    return "Codex returned an empty analysis. Check 'codex login status' in PowerShell and retry.";
+  return null;
+}
+
 async function analyzeWithCodex() {
   if (busy || !reviewedEvidence || !codexApproval.checked) return;
   busy = true;
@@ -502,8 +522,8 @@ async function analyzeWithCodex() {
       approved: true,
       evidence: reviewedEvidence.json
     });
-    if (!result?.ok || typeof result.output !== "string")
-      throw new Error(result?.error || "Codex could not analyze the evidence.");
+    const problem = codexResponseProblem(result);
+    if (problem) throw new Error(problem);
     codexOutput.textContent = result.output;
     codexOutput.hidden = false;
     await chrome.storage.local.set({
