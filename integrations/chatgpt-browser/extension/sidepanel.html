@@ -84,6 +84,14 @@
       <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
     </section>
 
+    <section aria-label="Conversation summary">
+      <h2 class="section-heading">Conversation summary</h2>
+      <p id="history-summary" class="hint" role="status" aria-live="polite">Start recording to summarize the coding activity already visible in this conversation.</p>
+      <p id="history-summary-scope" class="hint muted">Summary is derived from local activity labels and GitHub evidence, not a transcript or a complete account of what was said.</p>
+      <ul id="history-summary-patterns" class="hint" aria-label="Recurring signals in this conversation"></ul>
+      <button id="download-history-summary" type="button" disabled>Download summary</button>
+    </section>
+
     <section aria-label="Export local evidence">
       <h2 class="section-heading">Evidence</h2>
       <p class="hint"><strong>Code patterns</strong> · Observed patch changes, not verified outcomes.</p>
