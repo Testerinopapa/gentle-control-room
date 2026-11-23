@@ -344,6 +344,31 @@ test("content observer reports only categories and local identities; historical 
   assert.ok(!JSON.stringify(data).includes('new-u'));
 });
 
+test("Start classifies available old conversation turns without storing text or fetching old commits", async () => {
+  const h = harness(); await enable(h);
+  const old = userTurn("history-u1", "Debug PRIVATE_OLD_A issue") +
+    assistantTurn("history-a1", '<pre>npm test</pre><a href="' + COMMIT + '">commit</a>') +
+    userTurn("history-u2", "Debug PRIVATE_OLD_B issue") +
+    assistantTurn("history-a2", "<p>Inspecting the failure</p>");
+  const d = domHarness(h, old);
+  await d.enable();
+  const data = await exported(h);
+  const history = data.analysis.tasks.filter(task => task.historical);
+  assert.equal(history.length, 2);
+  assert.equal(data.analysis.coverage.historicalRenderedTasks, 2);
+  assert.ok(history.every(task => task.attribution.confidence === "uncertain"));
+  assert.equal(data.events.filter(e => e.type === "request_boundary" && e.historical).length, 2);
+  assert.equal(history[0].responseMetadata.observedCodeBlocks, 1);
+  assert.ok(data.analysis.patterns.some(pattern =>
+    pattern.type === "request_stage_recurrence" && pattern.id === "stage:debugging"));
+  assert.equal(h.requests.length, 0, "historical commit links must not initiate network fetch");
+  assert.ok(!JSON.stringify(data).includes("PRIVATE_OLD_A"));
+  assert.ok(!JSON.stringify(data).includes("PRIVATE_OLD_B"));
+  await d.scan();
+  assert.equal((await exported(h)).events.filter(e => e.type === "request_boundary").length, 2,
+    "repeated scans cannot duplicate historical boundaries");
+});
+
 test("GitHub capture works without message counts, with streamed text and rerendered nested wrappers", async () => {
   const h = harness(); await enable(h); const d = domHarness(h); await d.enable();
   assert.equal(d.sent.find(m => m.type === 'observerStatus').detector, 'waiting');
@@ -973,7 +998,7 @@ test("plain-text commit at very end of large reply is captured without an anchor
   assert.equal(h.requests.length, 1);
 });
 
-test("assistant response metadata is updated during streaming and rejects historical or raw payloads", async () => {
+test("assistant response metadata is updated during streaming and rejects raw payloads", async () => {
   const h = harness(); await enable(h);
   const d = domHarness(h, assistantTurn("old-a", '<pre>Historical code</pre>'));
   await d.enable();
