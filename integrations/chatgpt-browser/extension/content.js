@@ -551,14 +551,62 @@
     }
   }
 
+  // A second, independent DOM view catches legacy assistant bodies whose
+  // modern message-unit wrapper only renders the accessibility heading. Use
+  // matching user prompts as anchors so recovered replies sit in their turn.
+  function supplementAssistantReplies(primary) {
+    const messages = primary.slice();
+    let recovered = 0;
+    const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const indexOfUser = value => messages.findIndex(item =>
+      item.role === "user" && normalize(item.text) === normalize(value));
+    for (let i = 0; i < rememberedTurns.length; i++) {
+      const item = rememberedTurns[i];
+      if (item.role !== "assistant" || !item.text.trim()) continue;
+      let preceding = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (rememberedTurns[j].role === "user") { preceding = rememberedTurns[j]; break; }
+      }
+      if (!preceding) continue;
+      const userIndex = indexOfUser(preceding.text);
+      if (userIndex < 0) continue;
+      const nextUser = messages.findIndex((row, index) =>
+        index > userIndex && row.role === "user");
+      const after = nextUser < 0 ? messages.length : nextUser;
+      const answer = normalize(item.text);
+      // A message-unit parser can return the full response while the legacy
+      // collector returns just an inner paragraph. Don't duplicate it.
+      if (messages.slice(userIndex + 1, after).some(row =>
+        row.role === "assistant" && (normalize(row.text) === answer ||
+          (answer.length >= 35 && normalize(row.text).includes(answer)))))
+        continue;
+      messages.splice(after, 0, { role: "assistant", text: item.text, key: item.key });
+      recovered++;
+    }
+    return { messages, recovered };
+  }
+
   async function capturedConversation() {
     if (!validPage()) return { ok: false, error: "Start recording this conversation first." };
     // Use the Live Archiver-derived top/down DOM collector for the transcript.
     // Existing workflow classification and commit analysis stay independent.
     if (globalThis.GcrLiveArchiverReader) {
-      const result = await globalThis.GcrLiveArchiverReader.collect(validPage);
+      const result = await globalThis.GcrLiveArchiverReader.collect(validPage, rememberRenderedTurns);
       if (!result.ok) return result;
-      if (result.messages.length) return result;
+      if (result.messages.length) {
+        const merged = supplementAssistantReplies(result.messages);
+        result.messages = merged.messages;
+        result.coverage = { ...result.coverage,
+          supplementalReplies: merged.recovered };
+        // Do not submit an oversized transcript to extension storage.
+        let chars = result.messages.reduce((sum, row) => sum + row.text.length, 0);
+        while (result.messages.length > 160 || chars > 350000) {
+          const removed = result.messages.splice(Math.floor(result.messages.length / 2), 1)[0];
+          chars -= removed.text.length;
+          result.truncated = true;
+        }
+        return result;
+      }
     }
     // Fallback for an unpacked installation lacking the new reader.
     rememberRenderedTurns();
