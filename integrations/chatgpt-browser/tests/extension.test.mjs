@@ -879,7 +879,7 @@ test("browser capture records continuity diagnostics and does not claim full con
       observedWindows: 18, disconnectedWindows: 3,
       recoveredUserTurns: 1, recoveredFromUpwardPass: 2,
       uncertainPlacements: 1, unanchoredReplies: 1,
-      verifiedComplete: false }
+      tabWasHidden: true, verifiedComplete: false }
   });
   await enable(h);
   assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
@@ -890,6 +890,7 @@ test("browser capture records continuity diagnostics and does not claim full con
   assert.equal(snapshot.coverage.recoveredFromUpwardPass, 2);
   assert.equal(snapshot.coverage.uncertainPlacements, 1);
   assert.equal(snapshot.coverage.unanchoredReplies, 1);
+  assert.equal(snapshot.coverage.tabWasHidden, true);
   assert.equal(snapshot.coverage.verifiedComplete, false);
   assert.equal(snapshot.messages.length, 3);
   const exportedData = await exported(h);
