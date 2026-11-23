@@ -176,14 +176,13 @@
     const refs = events.filter(e => e && e.type === "github_commit_ref" &&
       typeof e.repository === "string" && typeof e.commitSha === "string" &&
       COMMIT_RE.test(e.repository.toLowerCase() + "@" + e.commitSha.toLowerCase()));
-    const discovery = { assistant: 0, manual: 0, unknown: 0 };
+    const discovery = { assistant: 0, manual: 0, conversation_scan: 0, repository_history: 0, unknown: 0 };
     const attribution = { automatic: 0, manual: 0, unattributed: 0, historical: 0, unknown: 0 };
     const eligibleKeys = new Set();
     const historicalKeys = new Set();
 
     for (const ref of refs) {
-      const origin = ref.discovery === "assistant" || ref.discovery === "manual"
-        ? ref.discovery : "unknown";
+      const origin = Object.hasOwn(discovery, ref.discovery) ? ref.discovery : "unknown";
       discovery[origin]++;
       const state = ref.attribution?.state;
       attribution[Object.hasOwn(attribution, state) ? state : "unknown"]++;
