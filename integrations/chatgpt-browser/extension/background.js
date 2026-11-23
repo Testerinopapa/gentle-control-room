@@ -221,7 +221,7 @@ function mergeChatWindows(previous, incoming, options = {}) {
     const currentIndex = findChatTurn(block, base);
     if (currentIndex >= 0) {
       hasAnchor = true;
-      if (earlierMatch > currentIndex) uncertain = true;
+      if (earlierMatch > currentIndex && !preferIncomingOrder) uncertain = true;
       const current = base[currentIndex];
       // The freshest scan's user identity is retained when its ordering wins.
       if (!preferIncomingOrder && block.user.text.length >= current.user.text.length)
@@ -784,11 +784,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         orderUncertain ||= merge.uncertain || item.orderUncertain === true;
         truncated ||= item.truncated === true;
       }
+      const authoritativeScan = rendered.coverage?.atTop === true &&
+        rendered.coverage?.atBottom === true;
       const merged = mergeChatWindows(combined, messages, {
-        preferIncomingOrder: rendered.coverage?.atTop === true &&
-          rendered.coverage?.atBottom === true
+        preferIncomingOrder: authoritativeScan
       });
-      orderUncertain ||= merged.uncertain;
+      // A complete new pass repairs the relative ordering of older user
+      // turns. Don't carry forward obsolete "uncertain" from corrupt
+      // snapshots when every old turn has a reliable current anchor.
+      orderUncertain = authoritativeScan
+        ? rendered.orderUncertain === true || merged.uncertain
+        : orderUncertain || merged.uncertain;
       const limited = boundChatMessages(merged.messages);
       const snapshot = {
         sessionId: session.id, conversationKey, capturedAt: new Date().toISOString(),
