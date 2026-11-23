@@ -586,12 +586,14 @@
       if (existing >= 0) {
         const position = userIndex + 1 + existing;
         if (answer.length > normalize(messages[position].text).length) {
-          messages[position] = { role: "assistant", text: item.text, key: item.key };
+          messages[position] = { role: "assistant", text: item.text, key: item.key,
+            ...(messages[position].github ? { github: messages[position].github } : {}) };
           recovered++;
         }
         continue;
       }
-      messages.splice(after, 0, { role: "assistant", text: item.text, key: item.key });
+      messages.splice(after, 0, { role: "assistant", text: item.text, key: item.key,
+        ...(item.github ? { github: item.github } : {}) });
       recovered++;
     }
     return { messages, recovered };
