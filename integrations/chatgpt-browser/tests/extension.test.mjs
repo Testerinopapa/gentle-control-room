@@ -1725,6 +1725,40 @@ test('test-file patterns require changed test source, not deletion or prompt lab
   assert.ok(!codePatterns(data).some(p => p.type === 'test_file_changes'));
 });
 
+test("side panel keeps only Start, Download, and Analyze visible by default", async () => {
+  const dom = new JSDOM(markup);
+  const doc = dom.window.document;
+  const visibleButtons = () => [...doc.querySelectorAll("main button")]
+    .filter(el => !el.hidden && !el.closest("[hidden]") &&
+      !el.closest("details:not([open])")).map(el => el.id);
+  assert.deepEqual(visibleButtons(), [
+    "start", "download-browser-conversation", "prepare-codex"
+  ]);
+  const advanced = doc.getElementById("advanced-options");
+  assert.equal(advanced.open, false);
+  for (const id of ["capture-browser-conversation", "delete-browser-conversation",
+    "download-history-summary", "import-commit", "export-evidence", "clear-evidence"])
+    assert.ok(advanced.contains(doc.getElementById(id)),
+      id + " must stay accessible under Advanced options");
+  const h = harness(); await enable(h);
+  let tabActivated;
+  vm.runInNewContext(panel, { document: doc, Option: dom.window.Option, Date,
+    setInterval() {}, chrome: { runtime: { sendMessage: h.send }, tabs: {
+      query: async () => [{ id: 9 }],
+      onActivated: { addListener(fn) { tabActivated = fn; } },
+      onUpdated: { addListener() {} }
+    } } });
+  for (let i = 0; i < 8; i++) await tick();
+  tabActivated();
+  for (let i = 0; i < 8; i++) await tick();
+  assert.equal(doc.getElementById("start").hidden, true);
+  assert.equal(doc.getElementById("stop").hidden, false);
+  assert.deepEqual(visibleButtons(), [
+    "stop", "download-browser-conversation", "prepare-codex"
+  ]);
+  dom.window.close();
+});
+
 test('existing Evidence panel shows patch pattern task counts and supporting commit links', async () => {
   const h = harness();
   h.local.set('gcrEvidenceV1', patchEvidence());
