@@ -131,6 +131,14 @@
   }
 
   function responseText(turn, user) {
+    // Prefer the actual assistant markdown over broad enclosing message
+    // containers, which can contain progress/status UI and duplicate renderings.
+    // This is especially important for long coding conversations.
+    const markdown = outermost([...turn.querySelectorAll(
+      '[data-markdown-text-style="assistant-message"]')]);
+    const prose = markdown.map(node => textOf(node, "assistant"))
+      .filter(Boolean).join("\n\n").trim();
+    if (prose.length >= 24) return prose;
     const groups = responseParts(turn, user);
     let best = "";
     for (const group of groups) {
