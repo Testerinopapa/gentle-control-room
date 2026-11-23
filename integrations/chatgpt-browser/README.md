@@ -1,10 +1,38 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.15)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.16)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Conversation-to-GitHub evidence capture (v0.9.16)
+
+**Start & read this conversation** now preserves structured GitHub repositories and
+full commit links found during the two-pass browser scan, including hrefs hidden
+behind link labels. These references are saved with the corresponding message in
+`gcrBrowserConversationV1` and included in downloaded conversation text.
+
+After saving the conversation, the extension processes only the extracted GitHub
+addresses through the existing public commit-patch collector. Existing/historical
+links may now be fetched after an explicit full conversation capture; passive
+recording alone still treats historical references conservatively.
+
+When the captured conversation names a repository but contains **no full commit
+link for that repository**, the extension checks up to **two** identified public
+repositories, retrieving up to **three recent default-branch commits each**.
+Successful lookups are cached for 12 hours; failed requests can retry. The
+extension never scans every commit or accesses private repos without credentials.
+
+The repository-history commits are marked **unattributed**; they prove the public
+repository changed, not that ChatGPT authored the code or that a particular
+request was completed. Captured commit links are also unattributed unless
+separate workflow evidence establishes a connection.
+
+The existing **Analyze coding activity** action can now send retrieved patches to
+Codex for review and explicit user approval even if no structured coding task was
+recorded. No new buttons, ChatGPT internal endpoints or remote backend were added.
+Browser conversation text is still excluded from the Codex payload.
 
 ## Codex bridge failure diagnostics (v0.9.15)
 
@@ -168,7 +196,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.15**. Reload the ChatGPT tab itself as well.
+   **0.9.16**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -215,10 +243,10 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.15).
-4. Open the Gentle Control Room side panel. In **Codex insights**, select
-   **Review evidence for Codex**, inspect the exact JSON, tick the explicit
-   approval checkbox, and click **Analyze with Codex**.
+3. Reload the unpacked extension from `edge://extensions` (v0.9.16).
+4. Open Gentle Control Room, select **Analyze coding activity** and inspect the
+   exact JSON. Tick the explicit approval checkbox and press the same button,
+   now labeled **Run approved Codex analysis**.
 5. Codex runs once with `codex exec --sandbox read-only --ephemeral`, with
    stdin-only evidence and a three-minute timeout. Its report appears in
    the panel, and only the last result is saved in `chrome.storage.local`.
@@ -260,11 +288,11 @@ analysis fails, recording and local patterns continue to work.
 - A downloadable `gentle-control-room-evidence.json` including recorded
   chronology, commit references and available exact patches.
 
-Commit discovery is still limited to URLs accessible in rendered ChatGPT
-markup. A clickable control that does not expose its GitHub URL cannot be
-reconstructed by the extension. Existing links when recording begins remain
-historical. To test multiple-link capture, start recording before requesting
-code edits and have the *new assistant reply* display complete commit URLs.
+The live message observer detects commit URLs in rendered ChatGPT markup.
+The separate two-pass transcript scan also retains hidden href destinations and
+repository names. If only a repository is known, bounded public GitHub history
+discovery supplies recent, explicitly unattributed commits; no private
+repository or hidden ChatGPT tool call is accessed.
 
 The v0.9.5 capture cleanup also removes ChatGPT's accessible
 speaker-prefix label ("ChatGPT said:") even when the label is alone or not
@@ -378,7 +406,8 @@ This is a **coding activity summary, not a semantic recap of everything said**.
 The extension does not save the full conversation text, so it cannot reliably
 report exact problems, decisions, fixes, or task outcomes without supporting
 structured evidence. Messages ChatGPT has unloaded and unrelated conversations
-are not included. Old commit references are not fetched automatically.
+are not included. Old links remain passive-only until an explicit conversation
+capture, which can now collect their public GitHub patches.
 
 ## Coding tasks and repeated-workflow analysis (v0.8)
 
@@ -407,9 +436,10 @@ request classifications, not verified actions.
 
 Messages mounted when recording begins are scanned for historical request
 boundaries, stages and assistant response metadata. Their existing commit
-references are **historical** and do not trigger GitHub retrieval, even when repeated
-in a later response. A new link streamed into an old response can be captured as
-unattributed, since that response has no supported new-task boundary. Streaming text,
+references are **historical** and do not trigger retrieval in the passive observer.
+An explicit conversation capture can separately fetch their patches as
+unattributed evidence. A new link streamed into an old response can be captured
+as unattributed, since that response has no supported new-task boundary. Streaming text,
 delayed link attributes and rerenders with stable message identities are observed
 without requiring a working count detector. Raw DOM IDs stay in memory; only local
 opaque IDs are saved. Missing identities, initially empty timelines and prepended
