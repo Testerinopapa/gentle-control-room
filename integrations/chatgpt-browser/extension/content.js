@@ -43,6 +43,7 @@
   let turnCaptureLimited = false;
   const roleSelectors = role => [
     `[data-content-search-unit-key$=":${role}"]`,
+    `[data-chatgpt-search-unit-key$=":${role}"]`,
     `[data-message-author-role="${role}"]`, `article[data-turn="${role}"]`,
     `[data-role="${role}"]`, `[data-message-author="${role}"]`,
     ...(role === "user" ? ['[data-user-message-bubble="true"]'] : [])
@@ -65,8 +66,8 @@
   }
   function identity(node, role) {
     if (nodes.has(node)) return nodes.get(node);
-    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-turn-id], article[id]');
-    const raw = wrapper && ["data-message-id", "data-content-search-unit-key", "data-turn-id", "id"]
+    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-chatgpt-search-unit-key], [data-turn-id], article[id]');
+    const raw = wrapper && ["data-message-id", "data-content-search-unit-key", "data-chatgpt-search-unit-key", "data-turn-id", "id"]
       .map(name => wrapper.getAttribute(name)).find(Boolean);
     // Raw page identifiers never leave this ephemeral map or enter storage.
     let fingerprint = 2166136261;
@@ -446,8 +447,8 @@
       : role === "user" ? text.replace(/^(?:You said:\s*)+/i, "").trim() : text;
   }
   function capturedTurnKey(node, role, text) {
-    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-turn-id], article[id]') || node;
-    const raw = ["data-message-id", "data-content-search-unit-key", "data-turn-id", "id"]
+    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-chatgpt-search-unit-key], [data-turn-id], article[id]') || node;
+    const raw = ["data-message-id", "data-content-search-unit-key", "data-chatgpt-search-unit-key", "data-turn-id", "id"]
       .map(name => wrapper.getAttribute(name)).find(Boolean);
     if (raw) return role + ":" + raw.slice(0, 180);
     let hash = 2166136261;
