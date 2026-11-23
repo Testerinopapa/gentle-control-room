@@ -78,6 +78,11 @@ function renderBrowserConversation(snapshot) {
     ? snapshot.messages.length + " messages retained across browser history scans (last scan: " +
       snapshot.renderedCount + " rendered). Captured " +
       new Date(snapshot.capturedAt).toLocaleString() + "." +
+      (snapshot.coverage?.scanMethod === "live_archiver_dom_two_pass"
+        ? " Live Archiver DOM scan: " +
+          (snapshot.coverage.atTop && snapshot.coverage.atBottom
+            ? "reached both ends of the rendered conversation." :
+              "may not have loaded all historical turns.") : "") +
       (snapshot.orderUncertain ? " Some older and newer windows had no overlap; message order may be incomplete." : "") +
       (snapshot.truncated ? " Capture limits were reached; this may not be the full conversation." : "")
     : "No browser conversation has been captured yet.";
@@ -337,7 +342,8 @@ function downloadBrowserConversation() {
   if (!currentBrowserConversation) return;
   const text = "Gentle Control Room — Captured Browser Conversation\n" +
     "Captured: " + currentBrowserConversation.capturedAt + "\n" +
-    "Only ChatGPT messages loaded in the browser at capture time.\n\n" +
+    "Captured from rendered ChatGPT messages with Live Archiver DOM scanning.\n" +
+    "Some unrendered messages may remain inaccessible.\n\n" +
     browserConversationText(currentBrowserConversation) + "\n";
   const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
   try {
