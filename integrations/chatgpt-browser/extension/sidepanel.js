@@ -87,10 +87,21 @@ function renderBrowserConversation(snapshot) {
       snapshot.renderedCount + " rendered). Captured " +
       new Date(snapshot.capturedAt).toLocaleString() + "." +
       (snapshot.coverage?.scanMethod === "live_archiver_dom_two_pass"
-        ? " Live Archiver DOM scan: " +
+        ? " Browser scan: " +
           (snapshot.coverage.atTop && snapshot.coverage.atBottom
-            ? "reached both ends of the rendered conversation." :
-              "may not have loaded all historical turns.") : "") +
+            ? "visited both scroll boundaries (NOT proof of full history)." :
+              "did not confirm both scroll boundaries.") +
+          (snapshot.coverage.observedWindows
+            ? " " + snapshot.coverage.observedWindows + " rendered windows inspected." : "") +
+          (snapshot.coverage.recoveredUserTurns || snapshot.coverage.recoveredFromUpwardPass
+            ? " Recovered " + (snapshot.coverage.recoveredUserTurns || 0) +
+              " earlier prompts and " + (snapshot.coverage.recoveredFromUpwardPass || 0) +
+              " replies from the first pass." : "") +
+          (snapshot.coverage.disconnectedWindows || snapshot.coverage.uncertainPlacements
+            ? " Warning: " + (snapshot.coverage.disconnectedWindows || 0) +
+              " window transitions had no shared message identifiers, and " +
+              (snapshot.coverage.uncertainPlacements || 0) +
+              " recovered turns have uncertain placement." : "") : "") +
       (Number(snapshot.coverage?.supplementalReplies || 0) > 0
         ? " Recovered " + snapshot.coverage.supplementalReplies +
           " additional assistant replies with the legacy reader." : "") +
@@ -363,7 +374,16 @@ function downloadBrowserConversation() {
   const text = "Gentle Control Room — Captured Browser Conversation\n" +
     "Captured: " + currentBrowserConversation.capturedAt + "\n" +
     "Captured from rendered ChatGPT messages with Live Archiver DOM scanning.\n" +
-    "Some unrendered messages may remain inaccessible.\n" +
+    "Not a verified complete history; unrendered messages may remain inaccessible.\n" +
+    (currentBrowserConversation.coverage?.scanMethod === "live_archiver_dom_two_pass"
+      ? "Scan boundaries: top=" + Boolean(currentBrowserConversation.coverage.atTop) +
+        ", bottom=" + Boolean(currentBrowserConversation.coverage.atBottom) +
+        "; windows inspected=" + (currentBrowserConversation.coverage.observedWindows ?? "unknown") +
+        "; disconnected windows=" + (currentBrowserConversation.coverage.disconnectedWindows ?? "unknown") +
+        "; restored first-pass turns=" + (currentBrowserConversation.coverage.recoveredUserTurns ?? "unknown") +
+        "; restored first-pass replies=" + (currentBrowserConversation.coverage.recoveredFromUpwardPass ?? "unknown") +
+        ".\n"
+      : "") +
     "Possible reply gaps: " + possibleReplyGaps(currentBrowserConversation) +
     " (consecutive user messages do not prove a missing reply).\n\n" +
     browserConversationText(currentBrowserConversation) + "\n";
