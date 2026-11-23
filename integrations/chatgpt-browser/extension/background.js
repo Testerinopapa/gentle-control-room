@@ -818,6 +818,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
             ? Math.max(0, Math.min(160, rendered.coverage.recoveredUserTurns)) : 0,
           uncertainPlacements: Number.isInteger(rendered.coverage.uncertainPlacements)
             ? Math.max(0, Math.min(160, rendered.coverage.uncertainPlacements)) : 0,
+          unanchoredReplies: Number.isInteger(rendered.coverage.unanchoredReplies)
+            ? Math.max(0, Math.min(160, rendered.coverage.unanchoredReplies)) : 0,
           observedWindows: Number.isInteger(rendered.coverage.observedWindows)
             ? Math.max(0, Math.min(1500, rendered.coverage.observedWindows)) : 0,
           disconnectedWindows: Number.isInteger(rendered.coverage.disconnectedWindows)
