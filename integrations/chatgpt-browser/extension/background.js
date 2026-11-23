@@ -22,6 +22,8 @@ const COMMAND_FAMILIES = new Set([
 ]);
 const MAX_EVENTS = 1500;
 const MAX_COMMITS = 30;
+const MAX_PUBLIC_HISTORY_REPOS = 2;
+const PUBLIC_HISTORY_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const RETENTION_MS = 30 * 86400000;
 const MAX_PATCH_BYTES = 24000;
 const MAX_RESPONSE_BYTES = 512000;
@@ -347,6 +349,12 @@ function bounded(data) {
   for (const [key, entry] of Object.entries(data.commits)) {
     if (!entry || Date.parse(entry.savedAt) < cutoff) delete data.commits[key];
   }
+  // Limit lookup metadata alongside the same 30-day consented evidence store.
+  if (data.publicHistoryLookups && typeof data.publicHistoryLookups === "object") {
+    for (const [repo, timestamp] of Object.entries(data.publicHistoryLookups))
+      if (!REPOSITORY.test(repo) || !Number.isFinite(timestamp) || timestamp < cutoff)
+        delete data.publicHistoryLookups[repo];
+  }
   const keys = Object.keys(data.commits).sort((a, b) =>
     Date.parse(data.commits[b].savedAt) - Date.parse(data.commits[a].savedAt));
   for (const key of keys.slice(MAX_COMMITS)) delete data.commits[key];
@@ -559,7 +567,7 @@ async function recentPublicCommits(repository) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const response = await fetch("https://api.github.com/repos/" + repository + "/commits?per_page=4",
+    const response = await fetch("https://api.github.com/repos/" + repository + "/commits?per_page=3",
       { headers: { Accept: "application/vnd.github+json" }, signal: controller.signal,
         redirect: "error", credentials: "omit" });
     if (!response.ok) return [];
@@ -568,7 +576,7 @@ async function recentPublicCommits(repository) {
     const body = await response.text();
     if (body.length > 32000) return [];
     const data = JSON.parse(body);
-    if (!Array.isArray(data) || data.length > 4) return [];
+    if (!Array.isArray(data) || data.length > 3) return [];
     return [...new Set(data.map(item => item?.sha?.toLowerCase())
       .filter(sha => typeof sha === "string" && COMMIT_SHA.test(sha)))];
   } catch { return []; }
@@ -584,21 +592,37 @@ async function collectConversationGithub(tabId, session, messages) {
   }
   // Explicit commit links take precedence, including older messages already
   // present when recording began. Do not infer authorship or task association.
+  const pendingPatches = [];
   for (const ref of [...explicit.values()].slice(0, 12)) {
-    if (!(await getSession(tabId))?.workflowEnabled) return;
-    await recordCommit(tabId, session, ref.repository, ref.sha, "conversation_scan");
+    const active = await getSession(tabId);
+    if (!active || active.id !== session.id || !active.workflowEnabled) return;
+    const result = await recordCommit(tabId, session, ref.repository, ref.sha, "conversation_scan");
+    if (result?.retrieval) pendingPatches.push(result.retrieval);
   }
   const reposWithCommits = new Set([...explicit.values()].map(ref => ref.repository));
   const possibleRepos = [...repos.entries()]
     .filter(([repository]) => !reposWithCommits.has(repository))
-    .sort((a, b) => b[1] - a[1]).slice(0, 2);
+    .sort((a, b) => b[1] - a[1]).slice(0, MAX_PUBLIC_HISTORY_REPOS);
   for (const [repository] of possibleRepos) {
-    if (!(await getSession(tabId))?.workflowEnabled) return;
+    const active = await getSession(tabId);
+    if (!active || active.id !== session.id || !active.workflowEnabled) return;
+    const existing = await readEvidence();
+    const lastLookup = existing.publicHistoryLookups?.[repository] || 0;
+    if (Date.now() - lastLookup < PUBLIC_HISTORY_COOLDOWN_MS) continue;
+    // Mark the lookup before networking, to avoid repeated scans hammering
+    // GitHub's unauthenticated API. No code is claimed if retrieval fails.
+    await mutateEvidence(data => {
+      if (!data.publicHistoryLookups) data.publicHistoryLookups = {};
+      data.publicHistoryLookups[repository] = Date.now();
+    });
     for (const sha of await recentPublicCommits(repository)) {
-      if (!(await getSession(tabId))?.workflowEnabled) return;
-      await recordCommit(tabId, session, repository, sha, "repository_history");
+      const current = await getSession(tabId);
+      if (!current || current.id !== session.id || !current.workflowEnabled) return;
+      const result = await recordCommit(tabId, session, repository, sha, "repository_history");
+      if (result?.retrieval) pendingPatches.push(result.retrieval);
     }
   }
+  await Promise.allSettled(pendingPatches);
 }
 function parseCommitUrl(input) {
   if (typeof input !== "string" || input.length > 300) return null;
@@ -925,9 +949,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       chats.snapshots = chats.snapshots.filter(item => !linked.has(item));
       chats.snapshots.push(snapshot);
       await chrome.storage.local.set({ [BROWSER_CHAT_KEY]: boundedBrowserChats(chats) });
-      // Import only structured GitHub addresses, not conversation text.
-      // Do not delay the user-visible capture result while GitHub responds.
-      void collectConversationGithub(tabId, session, snapshot.messages).catch(() => {});
+      // The message handler remains alive until bounded public GitHub
+      // retrieval finishes; do not leave unsupported MV3 background tasks.
+      // Import only structured GitHub references, never the raw chat text.
+      try { await collectConversationGithub(tabId, session, snapshot.messages); }
+      catch { /* The conversation capture remains valid if GitHub is unavailable. */ }
       return { ok: true, meta: browserChatMeta(snapshot) };
     }
     if (message.type === "getState") {
