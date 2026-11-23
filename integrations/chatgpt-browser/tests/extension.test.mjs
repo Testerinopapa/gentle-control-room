@@ -10,6 +10,7 @@ const analysisSource = readFileSync(new URL("../extension/analysis.js", import.m
 const content = readFileSync(new URL("../extension/content.js", import.meta.url), "utf8");
 const liveReader = readFileSync(new URL("../extension/live-archiver-reader.js", import.meta.url), "utf8");
 const panel = readFileSync(new URL("../extension/sidepanel.js", import.meta.url), "utf8");
+const codexEvidence = readFileSync(new URL("../extension/codex-evidence.js", import.meta.url), "utf8");
 const markup = readFileSync(new URL("../extension/sidepanel.html", import.meta.url), "utf8");
 const manifest = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 const HASH = "3d3812a0aade7b5e7c661741054184fd09886613";
@@ -1951,8 +1952,15 @@ test("side panel keeps only Start, Download, and Analyze visible by default", as
   assert.deepEqual(visibleButtons(), [
     "start", "download-browser-conversation", "prepare-codex"
   ]);
+  assert.equal(doc.querySelectorAll("button#analyze-codex").length, 0,
+    "only one coding analysis action exists; approval stays a separate checkbox");
+  assert.match(doc.getElementById("prepare-codex").textContent, /Analyze coding activity/);
   const advanced = doc.getElementById("advanced-options");
   assert.equal(advanced.open, false);
+  const codingTools = doc.getElementById("coding-data-options");
+  assert.equal(codingTools.open, false);
+  for (const id of ["import-commit", "export-evidence", "clear-evidence"])
+    assert.ok(codingTools.contains(doc.getElementById(id)), "advanced coding controls stay accessible");
   for (const id of ["capture-browser-conversation", "delete-browser-conversation",
     "download-history-summary", "import-commit", "export-evidence", "clear-evidence"])
     assert.ok(advanced.contains(doc.getElementById(id)),
@@ -1973,6 +1981,66 @@ test("side panel keeps only Start, Download, and Analyze visible by default", as
   assert.deepEqual(visibleButtons(), [
     "stop", "download-browser-conversation", "prepare-codex"
   ]);
+  dom.window.close();
+});
+
+test("single coding action requires explicit review and approval without duplicate buttons", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "requestBoundary", requestId: "m-review-1", confidence: "supported" }, origin);
+  const dom = new JSDOM(markup);
+  const doc = dom.window.document;
+  const local = new Map();
+  let remoteCalls = 0;
+  vm.runInNewContext(codexEvidence + "\n" + panel, {
+    document: doc, Option: dom.window.Option, Date, TextEncoder,
+    setInterval() {},
+    chrome: {
+      runtime: {
+        sendMessage: h.send,
+        lastError: null,
+        sendNativeMessage(host, payload, respond) {
+          remoteCalls++;
+          assert.equal(host, "org.gentlecontrolroom.chatgpt");
+          assert.equal(payload.approved, true);
+          respond({ ok: true, output: "Checked patch-backed evidence." });
+        }
+      },
+      storage: { local: {
+        async get(key) { return { [key]: local.get(key) }; },
+        async set(items) { for (const [key, value] of Object.entries(items)) local.set(key, value); }
+      } },
+      tabs: { query: async () => [{ id: 9 }], onActivated: { addListener() {} },
+        onUpdated: { addListener() {} } }
+    }
+  });
+  for (let i = 0; i < 8; i++) await tick();
+  const main = doc.getElementById("prepare-codex");
+  const review = doc.getElementById("codex-review");
+  const approval = doc.getElementById("codex-approval");
+  main.click();
+  for (let i = 0; i < 8; i++) await tick();
+  assert.equal(review.hidden, false);
+  assert.equal(main.textContent, "Cancel review");
+  assert.equal(remoteCalls, 0, "showing evidence never sends it");
+  main.click();
+  assert.equal(review.hidden, true);
+  assert.equal(remoteCalls, 0, "cancelling review never sends it");
+  assert.equal(main.textContent, "Analyze coding activity");
+  main.click();
+  for (let i = 0; i < 8; i++) await tick();
+  assert.equal(review.hidden, false);
+  approval.checked = true;
+  approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(main.textContent, "Run approved Codex analysis");
+  main.click();
+  for (let i = 0; i < 8; i++) await tick();
+  assert.equal(remoteCalls, 1);
+  assert.equal(review.hidden, true);
+  assert.equal(main.textContent, "Analyze coding activity");
+  assert.equal(doc.getElementById("codex-output").textContent,
+    "Checked patch-backed evidence.");
+  assert.equal(local.get("gcrCodexInsightsV1").output, "Checked patch-backed evidence.");
   dom.window.close();
 });
 
