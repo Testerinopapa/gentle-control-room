@@ -75,9 +75,11 @@ function renderBrowserConversation(snapshot) {
   downloadBrowserButton.disabled = !snapshot;
   deleteBrowserButton.disabled = !snapshot;
   browserConversationStatus.textContent = snapshot
-    ? snapshot.messages.length + " real messages captured from the browser on " +
-      new Date(snapshot.capturedAt).toLocaleString() +
-      (snapshot.truncated ? " (capture limit reached or conversation partially loaded)." : ".")
+    ? snapshot.messages.length + " messages retained across browser history scans (last scan: " +
+      snapshot.renderedCount + " rendered). Captured " +
+      new Date(snapshot.capturedAt).toLocaleString() + "." +
+      (snapshot.orderUncertain ? " Some older and newer windows had no overlap; message order may be incomplete." : "") +
+      (snapshot.truncated ? " Capture limits were reached; this may not be the full conversation." : "")
     : "No browser conversation has been captured yet.";
 }
 
