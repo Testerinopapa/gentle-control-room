@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.0)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.1)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.0**. Reload the ChatGPT tab itself as well.
+   **0.9.1**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
