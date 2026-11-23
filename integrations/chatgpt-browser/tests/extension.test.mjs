@@ -15,7 +15,7 @@ const HASH = "3d3812a0aade7b5e7c661741054184fd09886613";
 const COMMIT = "https://github.com/Testerinopapa/gentle-control-room/commit/" + HASH;
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse = null, fetchOverride = null) {
+function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse = null, fetchOverride = null, browserReply = null) {
   const sessions = new Map(), local = new Map(), badge = [], requests = [], pageCommands = [];
   let listener, tabUpdated, tabRemoved, currentUrl = url;
   const record = commitResponse || {
@@ -46,7 +46,10 @@ function harness(url = "https://chatgpt.com/c/test-conversation", commitResponse
     runtime: { onMessage: { addListener(fn) { listener = fn; } } },
     tabs: {
       async get(id) { assert.equal(id, 9); return { id: 9, url: currentUrl }; },
-      async sendMessage(_tab, message) { pageCommands.push(message); },
+      async sendMessage(_tab, message) {
+        pageCommands.push(message);
+        if (message.type === "gcrCaptureConversation") return browserReply;
+      },
       onUpdated: { addListener(fn) { tabUpdated = fn; } },
       onRemoved: { addListener(fn) { tabRemoved = fn; } }
     },
@@ -393,6 +396,57 @@ test("historical conversation summary is readable, session-scoped and survives S
   assert.equal(stopped.conversationSummary.overview, summary.overview);
   await h.send({ type: "clearEvidence" });
   assert.equal((await h.send({ type: "getState", tabId: 9 })).conversationSummary, null);
+});
+
+test("actual browser chat is stored only on explicit capture, separate from evidence", async () => {
+  const raw = "PRIVATE_DONT_EXPORT_TO_CODEX";
+  const h = harness(undefined, null, null, {
+    ok: true, renderedCount: 2, truncated: false, messages: [
+      { role: "user", text: "Please fix " + raw },
+      { role: "assistant", text: "Here is the implementation" }
+    ]
+  });
+  await enable(h);
+  assert.equal(h.local.has("gcrBrowserConversationV1"), false,
+    "ordinary Start must not store raw conversation text");
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 }, origin)).ok, false,
+    "page events cannot trigger raw chat capture");
+  const captured = await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  assert.equal(captured.ok, true);
+  assert.equal(captured.meta.messageCount, 2);
+  const stored = await h.send({ type: "getBrowserConversation", tabId: 9 });
+  assert.match(stored.snapshot.messages[0].text, /PRIVATE_DONT_EXPORT_TO_CODEX/);
+  const state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.browserConversation.messageCount, 2);
+  assert.ok(!JSON.stringify(state).includes(raw), "state should expose metadata only");
+  const evidence = await exported(h);
+  assert.ok(!JSON.stringify(evidence).includes(raw), "raw text cannot enter Codex evidence export");
+  assert.equal((await h.send({ type: "clearBrowserConversation" })).ok, true);
+  assert.equal((await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot, null);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  await h.send({ type: "clearEvidence" });
+  assert.equal((await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot, null,
+    "Delete evidence must delete stored full conversation text as well");
+  await h.send({ type: "stop", tabId: 9 });
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, false);
+});
+
+test("content script reads actual text only on explicit capture request", async () => {
+  const d = domHarness(null,
+    userTurn("raw-u", "Implement PRIVATE_USER_MESSAGE") +
+    assistantTurn("raw-a", "<p>Use PRIVATE_ASSISTANT_RESPONSE</p><pre>npm test</pre>"));
+  await d.enable();
+  assert.ok(!JSON.stringify(d.sent).includes("PRIVATE_ASSISTANT_RESPONSE"),
+    "recording normally should not send the raw transcript");
+  let reply = null;
+  d.command({ type: "gcrCaptureConversation" }, null, result => { reply = result; });
+  assert.equal(reply.ok, true);
+  assert.deepEqual(Array.from(reply.messages, item => item.role), ["user", "assistant"]);
+  assert.ok(reply.messages[0].text.includes("PRIVATE_USER_MESSAGE"));
+  assert.ok(reply.messages[1].text.includes("PRIVATE_ASSISTANT_RESPONSE"));
+  d.location.pathname = "/c/another-chat";
+  d.command({ type: "gcrCaptureConversation" }, null, result => { reply = result; });
+  assert.equal(reply.ok, false, "cannot capture a different conversation than the approved tab");
 });
 
 test("GitHub capture works without message counts, with streamed text and rerendered nested wrappers", async () => {
