@@ -722,6 +722,94 @@ test("browser capture keeps already observed turns after DOM virtualization", as
   assert.ok(second.messages[3].text.includes("Latest reply"));
 });
 
+test("full DOM re-capture corrects corrupted user-turn order and retains older missing replies", async () => {
+  const user = title => ({ role: "user", text: "Please investigate " + title + " in this project" });
+  const assistant = title => ({ role: "assistant",
+    text: "Earlier detailed assistant reply about " + title + " and how to validate it." });
+  const initial = [
+    user("extension setup"), assistant("extension setup"),
+    user("browser history"), assistant("browser history"),
+    user("late sidebar changes"), assistant("late sidebar changes"),
+    user("extension loading"), assistant("extension loading"),
+    user("missing summaries"), assistant("missing summaries"),
+    user("transcript exports"), assistant("transcript exports")
+  ];
+  const render = { ok: true, messages: initial, renderedCount: 12, truncated: false };
+  const h = harness(undefined, null, null, render);
+  await enable(h);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+
+  // The old snapshot had an incorrect ordering of "late sidebar changes".
+  // The fresh browser scan visits all the rendered user turns in the true
+  // chronological order, but some historical assistant bodies are absent.
+  const canonical = [
+    user("extension setup"), assistant("extension setup"),
+    user("browser history"),
+    user("extension loading"),
+    user("missing summaries"),
+    user("transcript exports"),
+    user("late sidebar changes"), assistant("late sidebar changes"),
+    user("latest data export"), assistant("latest data export")
+  ];
+  render.messages = canonical;
+  render.coverage = { atTop: true, atBottom: true, initiallyRendered: 4 };
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  const snap = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.deepEqual(
+    Array.from(snap.messages.filter(item => item.role === "user"), item => item.text),
+    canonical.filter(item => item.role === "user").map(item => item.text),
+    "the complete fresh DOM pass must determine user order");
+  for (const name of ["browser history", "extension loading", "missing summaries", "transcript exports"])
+    assert.ok(snap.messages.some(item => item.role === "assistant" &&
+      item.text === assistant(name).text), "missing old reply to " + name + " must survive");
+  assert.equal(snap.messages.filter(item => item.role === "assistant").length, 8);
+  const newState = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(newState.browserConversation.messageCount, 16);
+  assert.equal(JSON.stringify(await exported(h)).includes("Earlier detailed assistant reply"), false);
+});
+
+test("virtualized browser windows with reused fallback numbers retain top-down order", async () => {
+  const turn = (label, idx) => [
+    '<div data-turn-key="turn-', label, '">',
+      '<div data-content-search-turn-key="fallback-turn-', idx, '"></div>',
+      '<div data-chatgpt-search-unit-key="turn-', label, ':user">',
+        '<div data-markdown-text-tone="user-message">Question ', label, '</div>',
+      '</div>',
+      '<div data-chatgpt-search-unit-key="turn-', label, ':assistant">',
+        '<div data-markdown-text-style="assistant-message"><p>Answer ', label, '</p></div>',
+      '</div>',
+    '</div>'
+  ].join("");
+  const pages = {
+    top: turn("A", 0) + turn("B", 1),
+    middle: turn("B", 0) + turn("C", 1),
+    bottom: turn("C", 0) + turn("D", 1)
+  };
+  const d = domHarness(null, pages.bottom);
+  const root = d.root;
+  let top = 1400;
+  root.checkVisibility = () => true;
+  Object.defineProperty(root, "scrollHeight", { configurable: true, get: () => 1900 });
+  Object.defineProperty(root, "clientHeight", { configurable: true, get: () => 500 });
+  Object.defineProperty(root, "scrollTop", { configurable: true,
+    get: () => top,
+    set(value) {
+      top = Math.max(0, Math.min(1400, value));
+      root.innerHTML = top < 450 ? pages.top : top < 1100 ? pages.middle : pages.bottom;
+    }
+  });
+  await d.enable();
+  const reply = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(reply.ok, true);
+  assert.deepEqual(Array.from(reply.messages, item => item.text),
+    ["Question A", "Answer A", "Question B", "Answer B",
+      "Question C", "Answer C", "Question D", "Answer D"]);
+  assert.equal(reply.coverage.atTop, true);
+  assert.equal(reply.coverage.atBottom, true);
+  assert.equal(top, 1400, "leave the user at their previous scroll position");
+});
+
 test("repeated browser captures merge previous snapshots instead of overwriting them", async () => {
   const firstWindow = { ok: true, renderedCount: 2, truncated: false, messages: [
     { role: "user", key: "user:older-u", text: "Fix the issue" },
