@@ -165,7 +165,7 @@ async function refresh() {
       ? (result.reason || "Open a ChatGPT conversation to enable collection.")
       : active
         ? "Recording metadata, including rendered history captured at Start. Stop whenever you like."
-        : "Start scans rendered conversation history, then observes new work. Only metadata is saved. Historical commit links are not fetched automatically.";
+        : "Start reads the messages currently loaded in this ChatGPT tab and saves a local text snapshot. Coding activity is recorded separately. No chat text is sent to Codex.";
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
     workflowEnabled = active && Boolean(result.workflowEnabled);
@@ -236,6 +236,15 @@ async function command(type) {
     }
     const result = await chrome.runtime.sendMessage({ type, tabId: selectedTab });
     if (!result?.ok) throw new Error(result?.error || "Extension storage unavailable.");
+    if (type === "start") {
+      // Explicit Start also captures the currently rendered transcript. The
+      // button and nearby notice disclose that text will be stored locally.
+      const capture = await chrome.runtime.sendMessage({
+        type: "captureBrowserConversation", tabId: selectedTab
+      });
+      if (capture?.ok) loadedBrowserSnapshotKey = null;
+      else lastError = "Recording started, but the page transcript was not captured. Use Capture conversation from browser to retry.";
+    }
   } catch (error) {
     lastError = error?.message || "Extension storage unavailable.";
   } finally {
