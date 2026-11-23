@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.1)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.2)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,11 +12,12 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.1**. Reload the ChatGPT tab itself as well.
+   **0.9.2**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
-   task-boundary detection, and public GitHub commit evidence collection.   No extra coding-work or workflow toggles are needed. Start also classifies
+   task-boundary detection, and public GitHub commit evidence collection.
+   No extra coding-work or workflow toggles are needed. Start also classifies
    already-rendered requests and assistant replies as historical evidence
    (up to 60 historical request boundaries). Raw conversation text is not saved.
 5. The extension recognizes complete GitHub commit URLs in assistant HTML
@@ -56,7 +57,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.1).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.2).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
