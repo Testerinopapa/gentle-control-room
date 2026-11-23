@@ -450,6 +450,38 @@ test("content script reads actual text only on explicit capture request", async 
   assert.equal(reply.ok, false, "cannot capture a different conversation than the approved tab");
 });
 
+test("browser capture strips ChatGPT speaker labels and skips empty placeholders", async () => {
+  const h = harness();
+  await enable(h);
+  const timestamp = new Date().toISOString();
+  const session = (await h.send({ type: "getState", tabId: 9 }));
+  const activeSession = [...h.sessions.values()].find(item => item?.id);
+  assert.ok(activeSession);
+  h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
+    sessionId: activeSession.id, capturedAt: timestamp,
+    messages: [
+      { role: "user", text: "What did we build?" },
+      { role: "assistant", text: "ChatGPT said:" },
+      { role: "assistant", text: "ChatGPT said:\\n\\nWe built a browser extension." }
+    ],
+    renderedCount: 3, truncated: false
+  }] });
+  const existing = await h.send({ type: "getBrowserConversation", tabId: 9 });
+  assert.deepEqual(Array.from(existing.snapshot.messages, entry => entry.text), [
+    "What did we build?", "We built a browser extension."
+  ]);
+  assert.equal((await h.send({ type: "getState", tabId: 9 })).browserConversation.messageCount, 2);
+  const d = domHarness(null, userTurn("u1", "Please explain") +
+    assistantTurn("a1", "ChatGPT said:") +
+    assistantTurn("a2", "<p>ChatGPT said:</p><p>Actual response</p>"));
+  await d.enable();
+  const reply = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.deepEqual(Array.from(reply.messages, entry => entry.text), [
+    "Please explain", "Actual response"
+  ]);
+});
+
 test("browser capture keeps already observed turns after DOM virtualization", async () => {
   const d = domHarness(null,
     userTurn("latest-u", "Please review the implementation") +
