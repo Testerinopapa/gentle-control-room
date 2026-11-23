@@ -325,7 +325,7 @@ async function start(tabId) {
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#166534" });
   await chrome.action.setBadgeText({ tabId, text: "ON" });
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["live-archiver-reader.js", "content.js"] });
     // The content observer initially runs in metadata-only mode. Explicitly
     // enable the bounded text classification/commit observer once installed.
     await chrome.tabs.sendMessage(tabId, { type: "gcrWorkflowMode", enabled: true });
