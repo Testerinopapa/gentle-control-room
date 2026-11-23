@@ -22,6 +22,8 @@
   const maxWorkflowStages = 120;
   const maxHistoryRequests = 60;
   let historicalRequests = 0;
+  let historicalStages = 0;
+  const maxHistoricalStages = 40;
   const seenCommitLinks = new Set();
   const baselineCommitLinks = new Set();
   const maxCommitLinks = 30;
@@ -204,9 +206,13 @@
               .slice(0, 20);
             for (const [ordinal, { stage }] of stages.entries()) {
               const key = ordinal + ":" + stage;
-              if (!active() || record.stages.has(key)) continue;
+              if (!active() || record.stages.has(key) ||
+                  (record.historical && historicalStages >= maxHistoricalStages)) continue;
               const reply = await chrome.runtime.sendMessage({ type: "workflowStage", stage, ordinal, requestId: record.id });
-              if (reply?.ok) record.stages.add(key);
+              if (reply?.ok) {
+                record.stages.add(key);
+                if (record.historical) historicalStages++;
+              }
             }
           }
         } else {
