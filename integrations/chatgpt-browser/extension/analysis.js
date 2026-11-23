@@ -314,6 +314,90 @@
     };
   }
 
+  // A readable history summary is rebuilt from locally retained structured
+  // evidence. It never stores or reconstructs full messages or a transcript.
+  function conversationSummaries(events, tasks, patterns, commits) {
+    const sessions = new Map();
+    const get = id => {
+      if (!sessions.has(id)) sessions.set(id, { sessionId: id, tasks: [],
+        eventCount: 0, lastObservedAt: "", commitKeys: new Set() });
+      return sessions.get(id);
+    };
+    for (const event of events) {
+      if (!event || !SESSION_RE.test(event.sessionId || "")) continue;
+      const session = get(event.sessionId);
+      session.eventCount++;
+      if (validTime(event.timestamp) !== null && event.timestamp > session.lastObservedAt)
+        session.lastObservedAt = event.timestamp;
+      if (event.type === "github_commit_ref") {
+        const ref = String(event.repository || "") + "@" + String(event.commitSha || "");
+        if (COMMIT_RE.test(ref.toLowerCase())) session.commitKeys.add(ref.toLowerCase());
+      }
+    }
+    for (const task of tasks) get(task.sessionId).tasks.push(task);
+
+    const labels = {
+      investigation: "investigation", implementation: "implementation",
+      debugging: "debugging", testing: "testing",
+      version_control: "Git/version control", deployment: "deployment"
+    };
+    return [...sessions.values()].map(session => {
+      const history = session.tasks.filter(task => task.historical);
+      const stages = new Map();
+      for (const task of session.tasks)
+        for (const stage of new Set(task.stages))
+          if (STAGES.has(stage)) stages.set(stage, (stages.get(stage) || 0) + 1);
+      const topStages = [...stages.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 3).map(([stage, requests]) => ({
+          stage, label: labels[stage], requests
+        }));
+      const repositories = [...new Set([
+        ...session.tasks.flatMap(task => task.repositories),
+        ...[...session.commitKeys].map(key => key.split("@")[0])
+      ])].sort().slice(0, 5);
+      const patchedCommits = [...session.commitKeys]
+        .filter(key => commits[key]?.status === "retrieved" &&
+          Array.isArray(commits[key]?.files) &&
+          commits[key].files.some(file => typeof file.patch === "string" && file.patch));
+      const matchingPatterns = patterns.filter(pattern =>
+        pattern.supportingTaskIds.some(id => session.tasks.some(task => task.id === id)))
+        .slice(0, 3).map(pattern => pattern.label);
+      const requests = session.tasks.filter(task => task.requestId).length;
+      const historicalRequests = history.filter(task => task.requestId).length;
+      const newRequests = Math.max(0, requests - historicalRequests);
+      const intro = requests
+        ? requests + " coding-related request" + (requests === 1 ? "" : "s") +
+          " observed (" + historicalRequests + " from already-rendered history, " +
+          newRequests + " after recording started)."
+        : "No coding requests have been identified in this recording yet.";
+      const themes = topStages.length
+        ? "Main activity: " + topStages.map(item =>
+            item.label + " (" + item.requests + " request" +
+            (item.requests === 1 ? "" : "s") + ")").join(", ") + "."
+        : "No workflow themes were confidently classified.";
+      const references = session.commitKeys.size
+        ? session.commitKeys.size + " GitHub commit reference" +
+          (session.commitKeys.size === 1 ? "" : "s") + " observed; " +
+          patchedCommits.length + " with retained text patches."
+        : "No GitHub commit references were captured.";
+      const overview = [intro, themes,
+        repositories.length ? "Referenced repositories: " + repositories.join(", ") + "." : "",
+        references, "Actual test results, deployments and completion are not verified."
+      ].filter(Boolean).join(" ");
+      return {
+        sessionId: session.sessionId,
+        lastObservedAt: session.lastObservedAt,
+        requests, historicalRequests, newRequests,
+        topStages, repositories, commitReferenceCount: session.commitKeys.size,
+        patchedCommitCount: patchedCommits.length,
+        repeatedSignals: matchingPatterns,
+        overview,
+        limitation: "Based on locally captured metadata and available GitHub patches, not a full chat transcript. Earlier messages not rendered by ChatGPT cannot be included."
+      };
+    }).sort((a, b) => a.lastObservedAt.localeCompare(b.lastObservedAt)).slice(-30);
+  }
+
   function analyze(evidence) {
     const rawEvents = Array.isArray(evidence?.events) ? evidence.events : [];
     const events = rawEvents.map(e => e?.attribution ? { ...e, attribution: { ...e.attribution,
@@ -511,6 +595,7 @@
         recurringPatternsMeetingTwoEpisodeThreshold: patterns.length
       },
       tasks,
+      conversationSummaries: conversationSummaries(events, tasks, patterns, commits),
       unattributedCommits: unresolved,
       patterns,
       limitations: [
