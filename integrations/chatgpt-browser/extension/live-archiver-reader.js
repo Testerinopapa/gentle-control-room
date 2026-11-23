@@ -251,12 +251,17 @@
     mergeRows(rows, direction);
     return rows;
   }
-  async function collect(allowed = () => true) {
+  async function collect(allowed = () => true, onWindow = () => {}) {
     if (collecting) return { ok: false, error: "Conversation capture is already running." };
     collecting = true;
     const scrolling = scroller();
     const startedAt = Date.now();
-    const initialCount = observe("down").length;
+    const captureWindow = direction => {
+      const rows = observe(direction);
+      try { onWindow(); } catch { /* Supplemental reader must not interrupt capture. */ }
+      return rows;
+    };
+    const initialCount = captureWindow("down").length;
     const initialHeight = scrolling?.scrollHeight || 0;
     const oldTop = scrolling?.scrollTop || 0;
     const bottomDistance = scrolling ? scrolling.scrollHeight - scrolling.scrollTop : 0;
@@ -270,7 +275,7 @@
         for (let i = 0; i < 55 && allowed(); i++) {
           scrolling.scrollTop = 0;
           await delay(160);
-          const rows = observe("up");
+          const rows = captureWindow("up");
           const head = rows[0]?.key || "";
           const isStable = scrolling.scrollTop <= 1 &&
             scrolling.scrollHeight === oldHeight && head === oldFirst;
@@ -282,7 +287,7 @@
         }
         let lastTop = -1, idle = 0;
         for (let i = 0; i < 140 && allowed(); i++) {
-          observe("down");
+          captureWindow("down");
           const end = scrolling.scrollTop + scrolling.clientHeight >= scrolling.scrollHeight - 3;
           if (end) {
             atBottom = true;
@@ -295,7 +300,7 @@
           lastTop = scrolling.scrollTop;
           if (idle >= 4) { stoppedEarly = true; break; }
         }
-        observe("down");
+        captureWindow("down");
       }
       if (!allowed()) return { ok: false, error: "Conversation changed during capture." };
       if (!scrolling) { atTop = false; atBottom = false; }
