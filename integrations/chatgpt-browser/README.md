@@ -1,10 +1,25 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.8)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.9)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Browser transcript duplicate cleanup (v0.9.9)
+
+Following a real Edge export on November 23, the browser reader now prefers
+actual assistant Markdown content instead of a longer wrapper that can include
+tool-progress/activity labels. When the same assistant reply appears twice
+with different markup, saved snapshots are cleaned **on read**, as well as
+during the next capture. The deduplicator uses substantial overlapping
+five-word sequences and only collapses adjacent assistant messages; unrelated
+answers remain separate. If one rendering is only progress notes plus the
+final response, the cleaner final response is preferred.
+
+This does **not** imply the five reported possible reply gaps are fixed.
+Messages not loaded by ChatGPT's DOM remain unavailable to the extension.
+The side panel continues to report possible gaps and incomplete coverage.
 
 ## Simple side panel (v0.9.8)
 
@@ -25,7 +40,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.8**. Reload the ChatGPT tab itself as well.
+   **0.9.9**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -72,7 +87,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.8).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.9).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -159,7 +174,7 @@ Use the same existing unpacked Edge extension folder. No build, npm install,
 additional API key, new permissions, or separate Live Archiver installation
 is required.
 
-### v0.9.8 response recovery
+### v0.9.9 response recovery
 
 A regression in v0.9.6 could lose assistant replies even while user prompts
 were present. The revised reader checks alternate assistant message units
