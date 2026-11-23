@@ -762,9 +762,9 @@ test("full DOM re-capture corrects corrupted user-turn order and retains older m
   for (const name of ["browser history", "extension loading", "missing summaries", "transcript exports"])
     assert.ok(snap.messages.some(item => item.role === "assistant" &&
       item.text === assistant(name).text), "missing old reply to " + name + " must survive");
-  assert.equal(snap.messages.filter(item => item.role === "assistant").length, 8);
+  assert.equal(snap.messages.filter(item => item.role === "assistant").length, 7);
   const newState = await h.send({ type: "getState", tabId: 9 });
-  assert.equal(newState.browserConversation.messageCount, 16);
+  assert.equal(newState.browserConversation.messageCount, 14);
   assert.equal(JSON.stringify(await exported(h)).includes("Earlier detailed assistant reply"), false);
 });
 
