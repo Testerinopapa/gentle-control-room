@@ -422,7 +422,7 @@
       void reportCounts(counts);
     // Do not block consented workflow/commit evidence because a cosmetic
     // message-count detector failed to recognize ChatGPT's latest DOM.
-    if (workflowEnabled) { rememberRenderedTurns(); void scanEvidence(); }
+    if (workflowEnabled) { globalThis.GcrLiveArchiverReader?.observe(); rememberRenderedTurns(); void scanEvidence(); }
   }
 
   function stop() {
@@ -553,6 +553,14 @@
 
   async function capturedConversation() {
     if (!validPage()) return { ok: false, error: "Start recording this conversation first." };
+    // Use the Live Archiver-derived top/down DOM collector for the transcript.
+    // Existing workflow classification and commit analysis stay independent.
+    if (globalThis.GcrLiveArchiverReader) {
+      const result = await globalThis.GcrLiveArchiverReader.collect(validPage);
+      if (!result.ok) return result;
+      if (result.messages.length) return result;
+    }
+    // Fallback for an unpacked installation lacking the new reader.
     rememberRenderedTurns();
     await scanOlderBrowserTurns();
     if (!validPage()) return { ok: false, error: "Conversation changed during capture." };
@@ -580,7 +588,7 @@
         identities.clear(); nodes = new WeakMap();
       }
       workflowEnabled = message.enabled;
-      if (workflowEnabled) { rememberRenderedTurns(); void scanEvidence(); }
+      if (workflowEnabled) { globalThis.GcrLiveArchiverReader?.observe(); rememberRenderedTurns(); void scanEvidence(); }
     }
   }
 
