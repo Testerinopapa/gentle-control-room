@@ -1,10 +1,23 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.10)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.11)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Slower browser history scanning (v0.9.11)
+
+The Live Archiver-derived DOM collector now pauses longer after each scroll
+(650 ms on the downward pass plus 300 ms between stability checks, compared
+with 160 ms and 125 ms previously). It advances by half a viewport instead
+of 70%, gives the top-of-history loading pass more time, and permits up to
+220 downward steps so the smaller hops do not reduce coverage.
+
+This deliberately makes capture take longer, giving ChatGPT more time to
+render replies before leaving each section. It is still limited to
+browser-rendered messages; slower scanning alone does not guarantee a
+complete history.
 
 ## Browser history ordering and reply retention (v0.9.10)
 
@@ -67,7 +80,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.10**. Reload the ChatGPT tab itself as well.
+   **0.9.11**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -114,7 +127,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.10).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.11).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
