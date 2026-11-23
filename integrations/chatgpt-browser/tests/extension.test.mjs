@@ -741,6 +741,10 @@ test("full DOM re-capture corrects corrupted user-turn order and retains older m
   const h = harness(undefined, null, null, render);
   await enable(h);
   assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  // Earlier versions had flagged the incorrect order as uncertain.
+  const store = h.local.get("gcrBrowserConversationV1");
+  store.snapshots[0].orderUncertain = true;
+  h.local.set("gcrBrowserConversationV1", store);
 
   // The old snapshot had an incorrect ordering of "late sidebar changes".
   // The fresh browser scan visits all the rendered user turns in the true
@@ -766,6 +770,8 @@ test("full DOM re-capture corrects corrupted user-turn order and retains older m
     assert.ok(snap.messages.some(item => item.role === "assistant" &&
       item.text === assistant(name).text), "missing old reply to " + name + " must survive");
   assert.equal(snap.messages.filter(item => item.role === "assistant").length, 7);
+  assert.equal(snap.orderUncertain, false,
+    "a complete fresh DOM pass must clear obsolete ordering warnings");
   const newState = await h.send({ type: "getState", tabId: 9 });
   assert.equal(newState.browserConversation.messageCount, 14);
   assert.equal(JSON.stringify(await exported(h)).includes("Earlier detailed assistant reply"), false);
