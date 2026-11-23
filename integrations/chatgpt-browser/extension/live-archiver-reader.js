@@ -10,6 +10,10 @@
 (() => {
   if (globalThis.GcrLiveArchiverReader) return;
   const MAX_MESSAGES = 160, MAX_CHARS = 350000, MAX_MESSAGE_CHARS = 8000;
+  // Deliberately slower history scan: give lazy-loaded assistant replies time
+  // to mount and stabilize before the next scroll.
+  const TOP_WAIT_MS = 500, DOWN_WAIT_MS = 650, RECHECK_WAIT_MS = 300;
+  const SCROLL_FRACTION = 0.5, MAX_DOWN_STEPS = 220;
   const entries = [];
   let limited = false, uncertain = false, collecting = false;
   let lastCoverage = null;
@@ -287,7 +291,7 @@
     const settleWindow = async (direction, firstWait) => {
       let previous = null, rows = [];
       for (let attempt = 0; attempt < 4 && allowed(); attempt++) {
-        await delay(attempt ? 125 : firstWait);
+        await delay(attempt ? RECHECK_WAIT_MS : firstWait);
         rows = captureWindow(direction);
         const signature = rows.map(row => row.key + ":" + row.text.length).join("|");
         if (previous !== null && signature === previous) break;
@@ -308,7 +312,7 @@
         let stable = 0, oldHeight = -1, oldFirst = "";
         for (let i = 0; i < 55 && allowed(); i++) {
           scrolling.scrollTop = 0;
-          const rows = await settleWindow("up", 190);
+          const rows = await settleWindow("up", TOP_WAIT_MS);
           const head = rows[0]?.key || "";
           const isStable = scrolling.scrollTop <= 1 &&
             scrolling.scrollHeight === oldHeight && head === oldFirst;
@@ -316,7 +320,10 @@
           oldHeight = scrolling.scrollHeight;
           oldFirst = head;
           if (stable >= 3) { atTop = true; break; }
-          if (stable === 2) { scrolling.scrollTop = Math.min(220, scrolling.scrollHeight); await delay(90); }
+          if (stable === 2) {
+            scrolling.scrollTop = Math.min(220, scrolling.scrollHeight);
+            await delay(RECHECK_WAIT_MS);
+          }
         }
         if (atTop && allowed()) {
           // The upward pass discovers where to begin, but its partial and
@@ -326,7 +333,7 @@
           captureWindow("down");
         }
         let lastTop = -1, idle = 0;
-        for (let i = 0; i < 140 && allowed(); i++) {
+        for (let i = 0; i < MAX_DOWN_STEPS && allowed(); i++) {
           captureWindow("down");
           const end = scrolling.scrollTop + scrolling.clientHeight >= scrolling.scrollHeight - 3;
           if (end) {
@@ -334,8 +341,8 @@
             break;
           }
           const before = scrolling.scrollTop;
-          scrolling.scrollTop = before + Math.max(200, scrolling.clientHeight * 0.7);
-          await settleWindow("down", 160);
+          scrolling.scrollTop = before + Math.max(180, scrolling.clientHeight * SCROLL_FRACTION);
+          await settleWindow("down", DOWN_WAIT_MS);
           idle = scrolling.scrollTop === lastTop ? idle + 1 : 0;
           lastTop = scrolling.scrollTop;
           if (idle >= 4) { stoppedEarly = true; break; }
