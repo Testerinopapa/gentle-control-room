@@ -271,6 +271,50 @@
     mergeRows(rows, direction, trustedDirection);
     return rows;
   }
+  // The first (upward) pass can observe assistant text that gets unmounted
+  // during the second (downward) pass. Preserve ONLY replies for user turns
+  // anchored in the canonical downward transcript; never insert unanchored
+  // old windows or invent their ordering.
+  function recoverUpwardReplies(upwardRows) {
+    let recovered = 0;
+    const sameUser = (a, b) => a?.role === "user" && b?.role === "user" &&
+      (a.key === b.key || (a.text.length >= 14 &&
+        a.text.replace(/\s+/g, " ").trim() === b.text.replace(/\s+/g, " ").trim()));
+    const oldBlocks = [];
+    for (const row of upwardRows) {
+      if (row.role === "user") oldBlocks.push({ user: row, replies: [] });
+      else if (row.role === "assistant" && oldBlocks.length)
+        oldBlocks[oldBlocks.length - 1].replies.push(row);
+    }
+    for (const block of oldBlocks) {
+      if (!block.replies.length) continue;
+      const candidates = entries.map((row, i) => sameUser(row, block.user) ? i : -1)
+        .filter(i => i >= 0);
+      if (candidates.length !== 1) continue;
+      const index = candidates[0];
+      let nextUser = index + 1;
+      while (nextUser < entries.length && entries[nextUser].role !== "user")
+        nextUser++;
+      for (const reply of block.replies) {
+        const matching = entries.slice(index + 1, nextUser).findIndex(row =>
+          row.role === "assistant" && (row.key === reply.key ||
+            row.text === reply.text ||
+            (Math.min(row.text.length, reply.text.length) > 75 &&
+              (row.text.includes(reply.text) || reply.text.includes(row.text)))));
+        if (matching !== -1) {
+          const idx = index + 1 + matching;
+          if (reply.text.length > entries[idx].text.length)
+            entries[idx] = reply;
+        } else {
+          entries.splice(nextUser, 0, reply);
+          nextUser++;
+          recovered++;
+        }
+      }
+    }
+    return recovered;
+  }
+
   async function collect(allowed = () => true, onWindow = () => {}) {
     if (collecting) return { ok: false, error: "Conversation capture is already running." };
     collecting = true;
@@ -305,6 +349,7 @@
     const bottomDistance = scrolling ? scrolling.scrollHeight - scrolling.scrollTop : 0;
     const wasAtBottom = scrolling && scrolling.scrollHeight - scrolling.clientHeight - oldTop < 60;
     let atTop = false, atBottom = false, stoppedEarly = false;
+    let recoveredFromUpwardPass = 0, upwardRows = [];
     try {
       if (scrolling && allowed()) {
         // Live Archiver's two-pass harvesting idea: force the real top, let
@@ -326,9 +371,10 @@
           }
         }
         if (atTop && allowed()) {
-          // The upward pass discovers where to begin, but its partial and
-          // disconnected windows are not guaranteed to be in global order.
-          // Start a canonical pass at the top and traverse forward.
+          // Keep the first pass for rescuing answers that ChatGPT unmounts
+          // before the canonical downward scan can revisit them.
+          upwardRows = entries.map(item => ({ ...item }));
+          // Upward windows are NOT allowed to control final chronology.
           entries.length = 0; uncertain = false;
           captureWindow("down");
         }
@@ -348,12 +394,15 @@
           if (idle >= 4) { stoppedEarly = true; break; }
         }
         captureWindow("down");
+        if (atTop && upwardRows.length)
+          recoveredFromUpwardPass = recoverUpwardReplies(upwardRows);
       }
       if (!allowed()) return { ok: false, error: "Conversation changed during capture." };
       if (!scrolling) { atTop = false; atBottom = false; }
       lastCoverage = { observedMessageCount: entries.length, initiallyRendered: initialCount,
         atTop, atBottom, scrolling: !!scrolling, stoppedEarly, capped: limited,
-        durationMs: Date.now() - startedAt, initialScrollHeight: initialHeight };
+        durationMs: Date.now() - startedAt, initialScrollHeight: initialHeight,
+        recoveredFromUpwardPass };
       return { ok: true, messages: entries.map(({ role, text, key }) => ({ role, text, key })),
         renderedCount: readRows().length, truncated: limited,
         orderUncertain: uncertain, coverage: lastCoverage };
