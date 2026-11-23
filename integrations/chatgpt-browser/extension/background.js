@@ -296,7 +296,8 @@ async function fromPage(message, sender) {
         e.type === "request_boundary" && e.requestId === message.requestId);
       data.events.push({ timestamp: new Date().toISOString(), source: "chatgpt_browser", sessionId: session.id,
         type, [field]: id, taskId: isRequest ? session.id + ":" + id : request?.taskId || null,
-        ...(isRequest ? { confidence: message.confidence === "supported" ? "supported" : "uncertain" } :
+        ...(isRequest ? { confidence: message.confidence === "supported" && message.historical !== true
+           ? "supported" : "uncertain", historical: message.historical === true } :
           { requestId: request?.requestId || null, historical: message.historical === true }) });
       return { ok: true };
     });
@@ -318,8 +319,7 @@ async function fromPage(message, sender) {
         commands.some(command => !COMMAND_FAMILIES.has(command))) return { ok: false };
     return mutateEvidence(data => {
       const response = data.events.find(e => e.sessionId === session.id &&
-        e.type === "assistant_response" && e.responseId === message.responseId &&
-        e.historical !== true);
+        e.type === "assistant_response" && e.responseId === message.responseId);
       if (!response) return { ok: false };
       const current = data.events.find(e => e.sessionId === session.id &&
         e.type === "assistant_evidence" && e.responseId === message.responseId);
