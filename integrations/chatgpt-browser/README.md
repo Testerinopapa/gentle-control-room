@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.2)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.3)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.2**. Reload the ChatGPT tab itself as well.
+   **0.9.3**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -57,7 +57,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.2).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.3).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -106,6 +106,34 @@ markup. A clickable control that does not expose its GitHub URL cannot be
 reconstructed by the extension. Existing links when recording begins remain
 historical. To test multiple-link capture, start recording before requesting
 code edits and have the *new assistant reply* display complete commit URLs.
+
+## Read the real conversation directly from the browser
+
+The extension can now capture the **actual text of rendered ChatGPT messages**,
+including user requests, assistant replies and visible code blocks.
+
+1. Open the ChatGPT conversation and select **Start for this conversation**.
+2. In the Edge side panel, select **Capture conversation from browser**.
+3. Read the text in **Conversation from browser**, or select
+   **Download conversation (.txt)**.
+4. To erase it, select **Delete captured conversation**. The global
+   **Delete stored evidence** action also erases captured conversations.
+
+This extra click is deliberate: normal recording still stores only coding
+metadata. Only **Capture conversation from browser** transfers raw message
+text from the content script to the extension's **local Edge storage**,
+under `gcrBrowserConversationV1`. Conversation snapshots are kept separate
+from `gcrEvidenceV1` and **never included in the Codex evidence payload**.
+No provider API, Codex, remote server or external storage is involved.
+
+Only messages currently loaded in the page DOM are available. A capture is
+bounded to at most 160 messages / 350,000 characters (8,000 characters per
+message), with older snapshots overwritten for the same recording. If messages
+are unloaded, scrolling them into view and capturing again will **replace**
+the prior snapshot; it does not claim to recover all history. Up to six
+snapshots are retained for up to 30 days, subject to a storage-size limit.
+The exported text may include secrets and other sensitive content; handle
+downloaded files accordingly.
 
 ## Conversation summary
 
