@@ -22,8 +22,9 @@ Gentle Control Room now:
   All capture data remains in `gcrBrowserConversationV1`; raw conversation
   text is not added to the Codex evidence payload.
 - Stores scan diagnostics (observed windows, disconnected windows,
-  first-pass recovery counts, and uncertain placements) and includes them
-  in the side panel and downloaded text transcript.
+  first-pass recovery counts, uncertain placements, and whether the
+  ChatGPT tab was backgrounded) and includes them in the side panel and
+  downloaded text transcript.
 
 **A scan reaching the top and bottom of the scrollbar is not proof that
 every ChatGPT message was loaded.** The extension explicitly reports
