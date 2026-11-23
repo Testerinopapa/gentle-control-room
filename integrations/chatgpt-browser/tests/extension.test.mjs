@@ -908,6 +908,9 @@ test("two-pass capture recovers assistant text lost between the upward and downw
   ].join("");
   const d = domHarness(null, turn("C", "Answer C"));
   const root = d.root;
+  // jsdom does not lay out elements; explicitly mark the mocked scroll host
+  // visible, as in the adjacent virtualization test.
+  root.checkVisibility = () => true;
   let scroll = 1200, topVisits = 0;
   Object.defineProperty(root, "scrollHeight", { configurable: true, get: () => 1700 });
   Object.defineProperty(root, "clientHeight", { configurable: true, get: () => 500 });
