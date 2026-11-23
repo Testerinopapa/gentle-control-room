@@ -143,7 +143,8 @@ function confirmsSameChat(previous, incoming) {
     if (entry.role === "user") user++;
     if (entry.role === "assistant" && entry.text.length >= 80) assistant++;
   }
-  return (user >= 1 && assistant >= 1) || user >= 3 || assistant >= 3;
+  return (user >= 2 && assistant >= 1) || (user >= 1 && assistant >= 2) ||
+    user >= 4 || assistant >= 4;
 }
 
 function boundChatMessages(messages) {
