@@ -481,6 +481,71 @@ test("browser capture strips ChatGPT speaker labels and skips empty placeholders
   ]);
 });
 
+test("earlier browser replies survive extension reload and old snapshot migration", async () => {
+  const longA = "Detailed explanation of the folder where the browser extension is loaded and how it works.";
+  const longB = "Troubleshooting instructions for a browser extension load failure with checks of the manifest.";
+  const messages = [
+    { role: "user", text: "Where did we stop on the extension that analyzes coding and produces patterns?" },
+    { role: "assistant", text: longA },
+    { role: "user", text: "Can you also read the already loaded history when the browser extension starts?" },
+    { role: "assistant", text: longB },
+    { role: "user", text: "Where do I load the extension folder in Edge again?" },
+    { role: "assistant", text: "Open edge extensions, enable developer mode and load unpacked." },
+    { role: "user", text: "It's failing to load, please check the problem." },
+    { role: "assistant", text: "Check the exact loading error." }
+  ];
+  const visible = { ok: true, messages: [
+    messages[0], messages[2], messages[4], messages[6]
+  ], renderedCount: 4, truncated: false };
+  const h = harness(undefined, null, null, visible);
+  await enable(h);
+  // This snapshot predates the persistent per-conversation identity feature.
+  h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
+    sessionId: "previous-recording-uuid", capturedAt: new Date().toISOString(),
+    messages, renderedCount: messages.length, truncated: false
+  }] });
+  // The new capture omits answers that were available to an earlier version.
+  // Migrating matching legacy captures must bring those answers back.
+  const captured = await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  assert.equal(captured.ok, true);
+  const restored = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.deepEqual(Array.from(restored.messages, message => message.text),
+    messages.map(message => message.text));
+  assert.equal(typeof restored.conversationKey, "string");
+  assert.equal(h.local.get("gcrBrowserConversationV1").snapshots.length, 1);
+  await h.send({ type: "stop", tabId: 9 });
+  await h.send({ type: "start", tabId: 9 });
+  const restarted = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(restarted.messages.length, 8,
+    "old saved messages must be accessible before any new capture");
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  const recaptured = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(recaptured.messages.length, 8,
+    "missing visible replies cannot erase previously captured replies");
+  assert.equal(h.local.get("gcrBrowserConversationV1").snapshots.length, 1,
+    "subsequent sessions in one conversation should not consume extra snapshot slots");
+});
+
+test("legacy transcript migration does not merge unrelated chats with generic overlap", async () => {
+  const shared = { role: "user", text: "Please explain the next steps for the project in detail." };
+  const h = harness(undefined, null, null, {
+    ok: true, renderedCount: 2, truncated: false,
+    messages: [shared, { role: "assistant", text: "Everything looks good." }]
+  });
+  await enable(h);
+  h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
+    sessionId: "different-conversation", capturedAt: new Date().toISOString(),
+    messages: [shared, { role: "assistant", text:
+      "This old conversation covers an unrelated topic with a much longer answer." }],
+    renderedCount: 2, truncated: false
+  }] });
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  const saved = h.local.get("gcrBrowserConversationV1").snapshots;
+  assert.equal(saved.length, 2);
+  const current = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(current.messages.length, 2);
+});
+
 test("browser capture keeps already observed turns after DOM virtualization", async () => {
   const d = domHarness(null,
     userTurn("latest-u", "Please review the implementation") +
