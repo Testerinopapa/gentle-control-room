@@ -460,7 +460,9 @@
           continue;
         }
         if (e.taskId && explicit.has(e.taskId)) { explicit.get(e.taskId).push(item); continue; }
-        if (e.type === "assistant_response") continue;
+        // Unlinked assistant metadata is not a user coding task. Keeping it
+        // as a fallback episode inflated task counts and polluted patterns.
+        if (e.type === "assistant_response" || e.type === "assistant_evidence") continue;
         if (last !== null && item.time - last > GAP_MS) finish();
         episode.push(item); last = item.time;
       }
