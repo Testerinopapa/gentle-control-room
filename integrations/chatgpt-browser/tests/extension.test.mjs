@@ -438,15 +438,68 @@ test("content script reads actual text only on explicit capture request", async 
   await d.enable();
   assert.ok(!JSON.stringify(d.sent).includes("PRIVATE_ASSISTANT_RESPONSE"),
     "recording normally should not send the raw transcript");
-  let reply = null;
-  d.command({ type: "gcrCaptureConversation" }, null, result => { reply = result; });
+  const getReply = () => new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  let reply = await getReply();
   assert.equal(reply.ok, true);
   assert.deepEqual(Array.from(reply.messages, item => item.role), ["user", "assistant"]);
   assert.ok(reply.messages[0].text.includes("PRIVATE_USER_MESSAGE"));
   assert.ok(reply.messages[1].text.includes("PRIVATE_ASSISTANT_RESPONSE"));
   d.location.pathname = "/c/another-chat";
-  d.command({ type: "gcrCaptureConversation" }, null, result => { reply = result; });
+  reply = await getReply();
   assert.equal(reply.ok, false, "cannot capture a different conversation than the approved tab");
+});
+
+test("browser capture keeps already observed turns after DOM virtualization", async () => {
+  const d = domHarness(null,
+    userTurn("latest-u", "Please review the implementation") +
+    assistantTurn("latest-a", "<p>ChatGPT said:</p><p>Latest reply</p>"));
+  await d.enable();
+  let first = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(first.messages.length, 2);
+  // Simulate ChatGPT unmounting the latest turns while scrolling upward.
+  d.root.innerHTML = userTurn("older-u", "Earlier debugging request") +
+    assistantTurn("older-a", "<p>Earlier response</p>");
+  await d.mutate();
+  const second = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(second.messages.length, 4);
+  assert.deepEqual(Array.from(second.messages, item => item.role),
+    ["user", "assistant", "user", "assistant"]);
+  assert.ok(second.messages[0].text.includes("Earlier debugging"));
+  assert.ok(second.messages[3].text.includes("Latest reply"));
+});
+
+test("repeated browser captures merge previous snapshots instead of overwriting them", async () => {
+  const firstWindow = { ok: true, renderedCount: 2, truncated: false, messages: [
+    { role: "user", key: "user:older-u", text: "Fix the issue" },
+    { role: "assistant", key: "assistant:older-a", text: "Done" }
+  ] };
+  const h = harness(undefined, null, null, firstWindow);
+  await enable(h);
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  firstWindow.messages = [
+    { role: "assistant", key: "assistant:older-a", text: "Done" },
+    { role: "user", key: "user:new-u", text: "Please test it" },
+    { role: "assistant", key: "assistant:new-a", text: "Tests reviewed" }
+  ];
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  const current = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(current.messages.length, 4);
+  assert.deepEqual(Array.from(current.messages, item => item.text),
+    ["Fix the issue", "Done", "Please test it", "Tests reviewed"]);
+  assert.equal(current.orderUncertain, false);
+  firstWindow.messages = [{ role: "assistant", key: "assistant:oldest", text:
+    "ChatGPT said:\\n\\nFirst analysis" }];
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  const merged = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(merged.messages.length, 5);
+  assert.equal(merged.messages[0].text, "First analysis");
+  assert.equal(merged.orderUncertain, true,
+    "non-overlapping DOM windows must disclose uncertain chronology");
+  const evidence = await exported(h);
+  assert.equal(JSON.stringify(evidence).includes("First analysis"), false);
 });
 
 test("GitHub capture works without message counts, with streamed text and rerendered nested wrappers", async () => {
