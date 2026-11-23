@@ -502,9 +502,55 @@
   }
   // A separate, user-triggered read of actual rendered ChatGPT turns.
   // This is NOT an API/history fetch. Unmounted messages are inaccessible.
-  function capturedConversation() {
+  function chatScrollHost() {
+    const timeline = document.querySelector(
+      '[data-app-action-timeline-scroll][role="region"]');
+    let candidate = timeline;
+    while (candidate && candidate !== document.documentElement) {
+      if (candidate.scrollHeight > candidate.clientHeight + 60 &&
+          candidate.clientHeight > 100) return candidate;
+      candidate = candidate.parentElement;
+    }
+    const page = document.scrollingElement;
+    return page && page.scrollHeight > page.clientHeight + 60 ? page : null;
+  }
+
+  async function scanOlderBrowserTurns() {
+    const scrolling = chatScrollHost();
+    if (!scrolling) return;
+    const oldTop = scrolling.scrollTop;
+    const wasNearBottom = scrolling.scrollHeight - scrolling.clientHeight - oldTop < 100;
+    let lastSeen = rememberedTurns.length, stale = 0;
+    try {
+      // Browsers with a virtualized ChatGPT timeline may only render earlier
+      // turns after scrolling up. Inspect each window, not an undocumented API.
+      for (let step = 0; step < 36 && validPage(); step++) {
+        const before = scrolling.scrollTop;
+        scrolling.scrollTop = Math.max(0, before -
+          Math.max(350, Math.floor(scrolling.clientHeight * 0.85)));
+        await new Promise(resolve => setTimeout(resolve, 180));
+        if (!validPage()) break;
+        rememberRenderedTurns();
+        if (rememberedTurns.length > lastSeen) {
+          stale = 0;
+          lastSeen = rememberedTurns.length;
+        } else stale++;
+        if (stale >= 4 && (scrolling.scrollTop <= 2 ||
+            Math.abs(scrolling.scrollTop - before) < 3)) break;
+      }
+    } finally {
+      if (validPage()) {
+        scrolling.scrollTop = wasNearBottom ? scrolling.scrollHeight : oldTop;
+        rememberRenderedTurns();
+      }
+    }
+  }
+
+  async function capturedConversation() {
     if (!validPage()) return { ok: false, error: "Start recording this conversation first." };
     rememberRenderedTurns();
+    await scanOlderBrowserTurns();
+    if (!validPage()) return { ok: false, error: "Conversation changed during capture." };
     return {
       ok: true, messages: rememberedTurns.map(({ role, text, key }) =>
         ({ role, text, key })),
@@ -516,8 +562,9 @@
 
   function onCommand(message, _sender, respond) {
     if (message?.type === "gcrCaptureConversation") {
-      respond(capturedConversation());
-      return;
+      void capturedConversation().then(respond).catch(() =>
+        respond({ ok: false, error: "Could not read loaded ChatGPT messages." }));
+      return true;
     }
     if (message?.type === "gcrStop") stop();
     if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
