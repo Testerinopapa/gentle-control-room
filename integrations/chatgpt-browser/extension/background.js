@@ -95,11 +95,40 @@ function cleanChatText(role, text) {
     ? value.replace(/^(?:ChatGPT said:\s*)+/i, "").trim()
     : role === "user" ? value.replace(/^(?:You said:\s*)+/i, "").trim() : value;
 }
+// Normalize GitHub identifiers from captured DOM metadata, never trust raw URLs.
+function normalizeChatGithub(github) {
+  const repos = Array.isArray(github?.repositories) ? github.repositories : [];
+  const refs = Array.isArray(github?.commits) ? github.commits : [];
+  const repositories = [...new Set(repos.filter(repo => typeof repo === "string" &&
+    REPOSITORY.test(repo)).map(repo => repo.toLowerCase()))].slice(0, 8);
+  const commits = [];
+  const seen = new Set();
+  for (const ref of refs.slice(0, 12)) {
+    if (typeof ref?.repository !== "string" || typeof ref?.sha !== "string" ||
+        !REPOSITORY.test(ref.repository) || !COMMIT_SHA.test(ref.sha)) continue;
+    const repository = ref.repository.toLowerCase(), sha = ref.sha.toLowerCase();
+    const key = repository + "@" + sha;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    commits.push({ repository, sha, url: "https://github.com/" + repository + "/commit/" + sha });
+    if (!repositories.includes(repository) && repositories.length < 8)
+      repositories.push(repository);
+  }
+  return { repositories, commits };
+}
+function unionChatGithub(a, b) {
+  return normalizeChatGithub({
+    repositories: [...(a?.repositories || []), ...(b?.repositories || [])],
+    commits: [...(a?.commits || []), ...(b?.commits || [])]
+  });
+}
 function normalizeChatTurn(message) {
   const text = cleanChatText(message.role, message.text);
   const key = typeof message.key === "string" && message.key.length <= 220 &&
     /^[a-z]+:[^\r\n]{1,210}$/.test(message.key) ? message.key : null;
-  return { role: message.role, text, ...(key ? { key } : {}) };
+  const github = normalizeChatGithub(message.github);
+  return { role: message.role, text, ...(key ? { key } : {}),
+    ...((github.repositories.length || github.commits.length) ? { github } : {}) };
 }
 // Re-captures can contain two renderings of the same assistant turn:
 // one includes status/tool progress, the other is the final reply. Only
@@ -143,7 +172,10 @@ function collapseDuplicateAssistantReplies(messages) {
   for (const item of messages) {
     const previous = result.at(-1);
     if (duplicateAssistantReplies(previous, item)) {
-      result[result.length - 1] = preferCompleteAssistantReply(previous, item);
+      result[result.length - 1] = {
+        ...preferCompleteAssistantReply(previous, item),
+        github: unionChatGithub(previous.github, item.github)
+      };
     } else result.push(item);
   }
   return result;
@@ -192,9 +224,12 @@ function mergeChatReplies(previous, incoming) {
     const match = out.findIndex(saved => sameChatTurn(saved, next) ||
       duplicateAssistantReplies(saved, next));
     if (match >= 0) {
+      const github = unionChatGithub(out[match].github, next.github);
       if (duplicateAssistantReplies(out[match], next))
-        out[match] = preferCompleteAssistantReply(out[match], next);
-      else if (next.text.length >= out[match].text.length) out[match] = next;
+        out[match] = { ...preferCompleteAssistantReply(out[match], next), github };
+      else if (next.text.length >= out[match].text.length)
+        out[match] = { ...next, github };
+      else out[match] = { ...out[match], github };
     } else out.push(next);
   }
   return collapseDuplicateAssistantReplies(out);
@@ -224,8 +259,10 @@ function mergeChatWindows(previous, incoming, options = {}) {
       if (earlierMatch > currentIndex && !preferIncomingOrder) uncertain = true;
       const current = base[currentIndex];
       // The freshest scan's user identity is retained when its ordering wins.
+      const github = unionChatGithub(current.user.github, block.user.github);
       if (!preferIncomingOrder && block.user.text.length >= current.user.text.length)
-        current.user = block.user;
+        current.user = { ...block.user, github };
+      else current.user = { ...current.user, github };
       current.replies = preferIncomingOrder
         ? mergeChatReplies(block.replies, current.replies)
         : mergeChatReplies(current.replies, block.replies);
@@ -482,12 +519,15 @@ async function recordCommit(tabId, session, repository, sha, discovery, details 
     .find(task => task.taskId === details.taskId && task.requestId);
   if (details.taskId && !manualTask) return { ok: false };
   const state = discovery === "manual" ? (manualTask ? "manual" : "unattributed") :
+    discovery === "conversation_scan" || discovery === "repository_history" ? "unattributed" :
     details.historical === true ? "historical" :
       request?.confidence === "supported" ? "automatic" : "unattributed";
   if (state !== "historical" && !(current.commitRefs || []).includes(key) &&
       (current.commitRefs || []).length >= MAX_COMMITS) return { ok: false };
   const taskId = state === "manual" ? manualTask.taskId : state === "automatic" ? request.taskId : null;
-  const association = { state, method: discovery === "manual" ? "user_selection" : "assistant_response",
+  const association = { state, method: discovery === "manual" ? "user_selection" :
+      discovery === "conversation_scan" ? "captured_conversation_link" :
+      discovery === "repository_history" ? "public_repository_history" : "assistant_response",
     confidence: taskId ? "supported" : "uncertain",
     requestId: state === "automatic" ? request.requestId : null,
     responseId: response?.responseId || null,
@@ -509,6 +549,56 @@ async function recordCommit(tabId, session, repository, sha, discovery, details 
     commitRefs: state === "historical" ? (next.commitRefs || []) : [...new Set([...(next.commitRefs || []), key])] } });
   return { ok: true, retrieval: state !== "historical"
     ? collectCommit(repository, sha, session.id, clearGeneration, session.consentEpoch || 0) : null };
+}
+// Import real commit references retained by the two-pass transcript reader.
+ // If no commit address was shown for an identified repository, inspect only
+ // a few recent public default-branch commits. Discovery is NEVER authorship
+ // or evidence that a commit implemented a particular chat request.
+async function recentPublicCommits(repository) {
+  if (!REPOSITORY.test(repository)) return [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("https://api.github.com/repos/" + repository + "/commits?per_page=4",
+      { headers: { Accept: "application/vnd.github+json" }, signal: controller.signal,
+        redirect: "error", credentials: "omit" });
+    if (!response.ok) return [];
+    const length = Number(response.headers?.get?.("content-length") || 0);
+    if (length > 32000) return [];
+    const body = await response.text();
+    if (body.length > 32000) return [];
+    const data = JSON.parse(body);
+    if (!Array.isArray(data) || data.length > 4) return [];
+    return [...new Set(data.map(item => item?.sha?.toLowerCase())
+      .filter(sha => typeof sha === "string" && COMMIT_SHA.test(sha)))];
+  } catch { return []; }
+  finally { clearTimeout(timeout); }
+}
+async function collectConversationGithub(tabId, session, messages) {
+  const explicit = new Map(), repos = new Map();
+  for (const message of messages) {
+    const github = normalizeChatGithub(message.github);
+    for (const repo of github.repositories)
+      repos.set(repo, (repos.get(repo) || 0) + 1);
+    for (const ref of github.commits) explicit.set(ref.repository + "@" + ref.sha, ref);
+  }
+  // Explicit commit links take precedence, including older messages already
+  // present when recording began. Do not infer authorship or task association.
+  for (const ref of [...explicit.values()].slice(0, 12)) {
+    if (!(await getSession(tabId))?.workflowEnabled) return;
+    await recordCommit(tabId, session, ref.repository, ref.sha, "conversation_scan");
+  }
+  const reposWithCommits = new Set([...explicit.values()].map(ref => ref.repository));
+  const possibleRepos = [...repos.entries()]
+    .filter(([repository]) => !reposWithCommits.has(repository))
+    .sort((a, b) => b[1] - a[1]).slice(0, 2);
+  for (const [repository] of possibleRepos) {
+    if (!(await getSession(tabId))?.workflowEnabled) return;
+    for (const sha of await recentPublicCommits(repository)) {
+      if (!(await getSession(tabId))?.workflowEnabled) return;
+      await recordCommit(tabId, session, repository, sha, "repository_history");
+    }
+  }
 }
 function parseCommitUrl(input) {
   if (typeof input !== "string" || input.length > 300) return null;
@@ -835,6 +925,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       chats.snapshots = chats.snapshots.filter(item => !linked.has(item));
       chats.snapshots.push(snapshot);
       await chrome.storage.local.set({ [BROWSER_CHAT_KEY]: boundedBrowserChats(chats) });
+      // Import only structured GitHub addresses, not conversation text.
+      // Do not delay the user-visible capture result while GitHub responds.
+      void collectConversationGithub(tabId, session, snapshot.messages).catch(() => {});
       return { ok: true, meta: browserChatMeta(snapshot) };
     }
     if (message.type === "getState") {
