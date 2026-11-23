@@ -32,7 +32,6 @@ const codexPrepare = document.getElementById("prepare-codex");
 const codexReview = document.getElementById("codex-review");
 const codexPreview = document.getElementById("codex-preview");
 const codexApproval = document.getElementById("codex-approval");
-const codexAnalyze = document.getElementById("analyze-codex");
 const codexStatus = document.getElementById("codex-status");
 const codexOutput = document.getElementById("codex-output");
 const CODEX_HOST = "org.gentlecontrolroom.chatgpt";
@@ -439,6 +438,9 @@ async function clearEvidence() {
     renderBrowserConversation(null);
     reviewedEvidence = null;
     codexReview.hidden = true;
+    codexApproval.checked = false;
+    codexPreview.value = "";
+    codexPrepare.textContent = "Analyze coding activity";
     codexOutput.hidden = true;
     codexOutput.textContent = "";
     codexStatus.textContent = "No Codex insights yet.";
@@ -451,17 +453,18 @@ async function reviewCodexEvidence() {
   if (busy) return;
   busy = true;
   codexPrepare.disabled = true;
+  codexPrepare.textContent = "Reviewing coding evidence…";
   codexStatus.textContent = "Preparing evidence review…";
   reviewedEvidence = null;
   codexReview.hidden = true;
   codexApproval.checked = false;
-  codexAnalyze.disabled = true;
   try {
     const response = await chrome.runtime.sendMessage({ type: "exportEvidence" });
     if (!response?.ok || !response.data) throw new Error("Unable to read recorded evidence.");
     reviewedEvidence = GcrCodexEvidence.build(response.data);
     codexPreview.value = reviewedEvidence.json;
     codexReview.hidden = false;
+    codexPrepare.textContent = "Cancel review";
     codexStatus.textContent = reviewedEvidence.taskCount + " tasks · " +
       reviewedEvidence.commitCount + " retrieved commits · " +
       reviewedEvidence.patternCount + " patterns. Review the JSON before approving.";
@@ -470,6 +473,7 @@ async function reviewCodexEvidence() {
   } finally {
     busy = false;
     codexPrepare.disabled = false;
+    if (!reviewedEvidence) codexPrepare.textContent = "Analyze coding activity";
   }
 }
 
@@ -488,8 +492,8 @@ function runNativeCodex(message) {
 async function analyzeWithCodex() {
   if (busy || !reviewedEvidence || !codexApproval.checked) return;
   busy = true;
-  codexAnalyze.disabled = true;
   codexPrepare.disabled = true;
+  codexPrepare.textContent = "Analyzing…";
   codexStatus.textContent = "Codex is analyzing the approved evidence…";
   try {
     const result = await runNativeCodex({
@@ -509,12 +513,14 @@ async function analyzeWithCodex() {
     reviewedEvidence = null;
     codexReview.hidden = true;
     codexApproval.checked = false;
+    codexPrepare.textContent = "Analyze coding activity";
   } catch (error) {
     codexStatus.textContent = error?.message || "Codex analysis failed.";
   } finally {
     busy = false;
     codexPrepare.disabled = false;
-    codexAnalyze.disabled = !reviewedEvidence || !codexApproval.checked;
+    if (reviewedEvidence)
+      codexPrepare.textContent = codexApproval.checked ? "Retry Codex analysis" : "Cancel review";
   }
 }
 
@@ -531,11 +537,27 @@ async function restoreCodexInsights() {
   }
 }
 
-codexPrepare.addEventListener("click", () => void reviewCodexEvidence());
-codexApproval.addEventListener("change", () => {
-  codexAnalyze.disabled = !reviewedEvidence || !codexApproval.checked || busy;
+function closeCodexReview() {
+  reviewedEvidence = null;
+  codexReview.hidden = true;
+  codexApproval.checked = false;
+  codexPreview.value = "";
+  codexPrepare.textContent = "Analyze coding activity";
+  codexStatus.textContent = "Review closed. No evidence was sent.";
+}
+// One action for coding analysis: open review -> approve -> run.
+// When not approved, clicking again closes the review, never sends data.
+codexPrepare.addEventListener("click", () => {
+  if (busy) return;
+  if (!reviewedEvidence) void reviewCodexEvidence();
+  else if (codexApproval.checked) void analyzeWithCodex();
+  else closeCodexReview();
 });
-codexAnalyze.addEventListener("click", () => void analyzeWithCodex());
+codexApproval.addEventListener("change", () => {
+  if (!reviewedEvidence || busy) return;
+  codexPrepare.textContent = codexApproval.checked
+    ? "Run approved Codex analysis" : "Cancel review";
+});
 
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
