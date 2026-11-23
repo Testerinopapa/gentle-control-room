@@ -35,6 +35,11 @@
   const prefix = "m-" + Math.random().toString(36).slice(2, 12);
   let serial = 0, scanning = false, scanAgain = false;
   let baselinePending = false, frontier = null;
+  // Accumulate distinct turns seen during scrolling, even when ChatGPT later
+  // unloads them from its virtualized message list.
+  const rememberedTurns = [];
+  let uncertainTurnOrder = false;
+  let turnCaptureLimited = false;
   const roleSelectors = role => [
     `[data-content-search-unit-key$=":${role}"]`,
     `[data-message-author-role="${role}"]`, `article[data-turn="${role}"]`,
@@ -416,7 +421,7 @@
       void reportCounts(counts);
     // Do not block consented workflow/commit evidence because a cosmetic
     // message-count detector failed to recognize ChatGPT's latest DOM.
-    if (workflowEnabled) { void scanEvidence(); }
+    if (workflowEnabled) { rememberRenderedTurns(); void scanEvidence(); }
   }
 
   function stop() {
@@ -431,28 +436,81 @@
       delete globalThis.__gcrChatGPTObserver;
     }
   }
-  // A separate, user-triggered read of the actual rendered ChatGPT turns.
+  function cleanRenderedText(role, value) {
+    const text = String(value ?? "").trim();
+    return role === "assistant"
+      ? text.replace(/^ChatGPT said:\s*\n+/i, "").trim()
+      : role === "user" ? text.replace(/^You said:\s*\n+/i, "").trim() : text;
+  }
+  function capturedTurnKey(node, role, text) {
+    const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-turn-id], article[id]') || node;
+    const raw = ["data-message-id", "data-content-search-unit-key", "data-turn-id", "id"]
+      .map(name => wrapper.getAttribute(name)).find(Boolean);
+    if (raw) return role + ":" + raw.slice(0, 180);
+    let hash = 2166136261;
+    for (const char of text) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+    return role + ":fallback:" + (hash >>> 0).toString(36) + ":" + text.length;
+  }
+  function mergeObservedTurns(existing, incoming) {
+    if (!incoming.length) return;
+    const known = new Set(existing.map(item => item.key));
+    if (!existing.length) { existing.push(...incoming); return; }
+    if (!incoming.some(item => known.has(item.key))) {
+      // A disconnected window has uncertain order. Newly rendered windows
+      // while scrolling upward are usually earlier than the saved window.
+      existing.unshift(...incoming.filter(item => !known.has(item.key)));
+      uncertainTurnOrder = true;
+      return;
+    }
+    let previousIndex = -1;
+    for (let i = 0; i < incoming.length; i++) {
+      const item = incoming[i];
+      const at = existing.findIndex(saved => saved.key === item.key);
+      if (at >= 0) {
+        if (item.text.length >= existing[at].text.length)
+          existing[at].text = item.text;
+        previousIndex = at;
+        continue;
+      }
+      const next = incoming.slice(i + 1)
+        .map(nextItem => existing.findIndex(saved => saved.key === nextItem.key))
+        .find(index => index >= 0);
+      const insertion = next !== undefined ? next :
+        previousIndex >= 0 ? previousIndex + 1 : 0;
+      existing.splice(insertion, 0, item);
+      previousIndex = insertion;
+    }
+  }
+  function rememberRenderedTurns() {
+    if (!validPage()) return;
+    const incoming = [];
+    for (const node of units().slice(-160)) {
+      const role = node.matches(roleSelectors("user")) ? "user" : "assistant";
+      const full = cleanRenderedText(role, node.innerText ?? node.textContent ?? "");
+      if (!full) continue;
+      const text = full.slice(0, 8000);
+      if (full.length > text.length) turnCaptureLimited = true;
+      incoming.push({ role, text, key: capturedTurnKey(node, role, text) });
+    }
+    mergeObservedTurns(rememberedTurns, incoming);
+    let total = rememberedTurns.reduce((sum, item) => sum + item.text.length, 0);
+    while (rememberedTurns.length > 160 || total > 350000) {
+      const removed = rememberedTurns.splice(Math.floor(rememberedTurns.length / 2), 1)[0];
+      total -= removed.text.length;
+      turnCaptureLimited = true;
+    }
+  }
+  // A separate, user-triggered read of actual rendered ChatGPT turns.
   // This is NOT an API/history fetch. Unmounted messages are inaccessible.
   function capturedConversation() {
     if (!validPage()) return { ok: false, error: "Start recording this conversation first." };
-    const rendered = units().slice(-160);
-    const messages = [];
-    let remaining = 350000;
-    let truncated = false;
-    for (const node of rendered) {
-      const role = node.matches(roleSelectors("user")) ? "user" : "assistant";
-      const body = String(node.innerText ?? node.textContent ?? "").trim();
-      if (!body) continue;
-      const limit = Math.min(8000, remaining);
-      if (!limit) { truncated = true; break; }
-      const text = body.slice(0, limit);
-      if (body.length > text.length) truncated = true;
-      messages.push({ role, text });
-      remaining -= text.length;
-    }
+    rememberRenderedTurns();
     return {
-      ok: true, messages, renderedCount: rendered.length,
-      truncated: truncated || rendered.length >= 160
+      ok: true, messages: rememberedTurns.map(({ role, text, key }) =>
+        ({ role, text, key })),
+      renderedCount: units().length,
+      truncated: turnCaptureLimited,
+      orderUncertain: uncertainTurnOrder
     };
   }
 
@@ -470,7 +528,7 @@
         identities.clear(); nodes = new WeakMap();
       }
       workflowEnabled = message.enabled;
-      if (workflowEnabled) { void scanEvidence(); }
+      if (workflowEnabled) { rememberRenderedTurns(); void scanEvidence(); }
     }
   }
 
