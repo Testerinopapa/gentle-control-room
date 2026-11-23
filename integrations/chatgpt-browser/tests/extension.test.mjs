@@ -701,25 +701,28 @@ test("legacy transcript migration does not merge unrelated chats with generic ov
   assert.equal(current.messages.length, 2);
 });
 
-test("browser capture keeps already observed turns after DOM virtualization", async () => {
+test("each browser capture scans a fresh DOM; background merges old saved turns", async () => {
   const d = domHarness(null,
     userTurn("latest-u", "Please review the implementation") +
     assistantTurn("latest-a", "<p>ChatGPT said:</p><p>Latest reply</p>"));
   await d.enable();
-  let first = await new Promise(resolve =>
+  const first = await new Promise(resolve =>
     d.command({ type: "gcrCaptureConversation" }, null, resolve));
-  assert.equal(first.messages.length, 2);
-  // Simulate ChatGPT unmounting the latest turns while scrolling upward.
+  assert.deepEqual(Array.from(first.messages, row => row.role), ["user", "assistant"]);
+  // An older virtualized window replaces the rendered DOM. The reader
+  // deliberately rebuilds a new ordered pass instead of re-sorting its old
+  // cache by ChatGPT's reused fallback-turn indices. The background worker
+  // merges first/second snapshots and preserves old assistant replies.
   d.root.innerHTML = userTurn("older-u", "Earlier debugging request") +
     assistantTurn("older-a", "<p>Earlier response</p>");
   await d.mutate();
   const second = await new Promise(resolve =>
     d.command({ type: "gcrCaptureConversation" }, null, resolve));
-  assert.equal(second.messages.length, 4);
-  assert.deepEqual(Array.from(second.messages, item => item.role),
-    ["user", "assistant", "user", "assistant"]);
+  assert.deepEqual(Array.from(second.messages, row => row.role), ["user", "assistant"]);
   assert.ok(second.messages[0].text.includes("Earlier debugging"));
-  assert.ok(second.messages[3].text.includes("Latest reply"));
+  assert.ok(second.messages[1].text.includes("Earlier response"));
+  assert.equal(second.messages.some(row => row.text.includes("Latest reply")), false,
+    "transient in-memory history is not allowed to corrupt the fresh scan's order");
 });
 
 test("full DOM re-capture corrects corrupted user-turn order and retains older missing replies", async () => {
