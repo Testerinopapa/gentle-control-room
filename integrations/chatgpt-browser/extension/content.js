@@ -576,10 +576,20 @@
       const answer = normalize(item.text);
       // A message-unit parser can return the full response while the legacy
       // collector returns just an inner paragraph. Don't duplicate it.
-      if (messages.slice(userIndex + 1, after).some(row =>
-        row.role === "assistant" && (normalize(row.text) === answer ||
-          (answer.length >= 35 && normalize(row.text).includes(answer)))))
+      const existing = messages.slice(userIndex + 1, after).findIndex(row => {
+        if (row.role !== "assistant") return false;
+        const current = normalize(row.text);
+        return current === answer ||
+          (answer.length >= 35 && (current.includes(answer) || answer.includes(current)));
+      });
+      if (existing >= 0) {
+        const position = userIndex + 1 + existing;
+        if (answer.length > normalize(messages[position].text).length) {
+          messages[position] = { role: "assistant", text: item.text, key: item.key };
+          recovered++;
+        }
         continue;
+      }
       messages.splice(after, 0, { role: "assistant", text: item.text, key: item.key });
       recovered++;
     }
