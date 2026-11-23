@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.5)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.6)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.5**. Reload the ChatGPT tab itself as well.
+   **0.9.6**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -59,7 +59,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.5).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.6).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -110,11 +110,41 @@ reconstructed by the extension. Existing links when recording begins remain
 historical. To test multiple-link capture, start recording before requesting
 code edits and have the *new assistant reply* display complete commit URLs.
 
-The November 23 v0.9.5 capture cleanup also removes ChatGPT's accessible
+The November 23 v0.9.6 capture cleanup also removes ChatGPT's accessible
 speaker-prefix label ("ChatGPT said:") even when the label is alone or not
 followed by a newline. Empty label-only assistant placeholders are excluded
 from new captures and older stored snapshots. This does not reconstruct
 missing assistant messages that were never exposed in the browser DOM.
+
+## Live Archiver reader integration (v0.9.6)
+
+Gentle Control Room now uses a DOM-only, adapted reader based on
+[Live Archiver](https://github.com/hexnod/live-archiver) by Mark West
+(v1.2.10, Apache 2.0). The adapted source is
+`extension/live-archiver-reader.js`, with the upstream license and copyright
+notice under `extension/third_party/LiveArchiver-LICENSE` and
+`extension/third_party/LiveArchiver-NOTICE`.
+
+**What we reused:** Live Archiver's modern ChatGPT turn/message-unit selectors,
+the paired user/assistant extraction model, the in-memory message cache, a
+bounded two-pass history collection (go to the top, walk down), and scroll-position
+restoration. We keep our pre-existing GitHub commit evidence collector,
+workflow classifications, repeated-pattern detection, consent UI and local
+per-conversation transcript persistence.
+
+**What we deliberately did not import:** Live Archiver's authenticated requests
+to ChatGPT's internal `/api/auth/session` or `/backend-api/conversation/...`
+endpoints, token handling, attachment retrieval, external image downloads, or
+its side-panel UI. Our reader reads only the currently displayed DOM and turns
+loaded while scrolling. It makes **no network requests**. Long chats can still
+be incomplete; the side panel reports whether both ends were reached, which
+is **not proof that every message was loaded**. The older metadata-only
+summary is unchanged; the actual chat text appears in **Conversation from
+browser**, stored separately from Codex evidence.
+
+Use the same existing unpacked Edge extension folder. No build, npm install,
+additional API key, new permissions, or separate Live Archiver installation
+is required.
 
 ## Read the real conversation directly from the browser
 
