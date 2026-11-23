@@ -811,7 +811,20 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
             ? Math.max(0, Math.min(240, rendered.coverage.initiallyRendered)) : null,
           stoppedEarly: rendered.coverage.stoppedEarly === true,
           supplementalReplies: Number.isInteger(rendered.coverage.supplementalReplies)
-            ? Math.max(0, Math.min(160, rendered.coverage.supplementalReplies)) : 0
+            ? Math.max(0, Math.min(160, rendered.coverage.supplementalReplies)) : 0,
+          recoveredFromUpwardPass: Number.isInteger(rendered.coverage.recoveredFromUpwardPass)
+            ? Math.max(0, Math.min(160, rendered.coverage.recoveredFromUpwardPass)) : 0,
+          recoveredUserTurns: Number.isInteger(rendered.coverage.recoveredUserTurns)
+            ? Math.max(0, Math.min(160, rendered.coverage.recoveredUserTurns)) : 0,
+          uncertainPlacements: Number.isInteger(rendered.coverage.uncertainPlacements)
+            ? Math.max(0, Math.min(160, rendered.coverage.uncertainPlacements)) : 0,
+          observedWindows: Number.isInteger(rendered.coverage.observedWindows)
+            ? Math.max(0, Math.min(1500, rendered.coverage.observedWindows)) : 0,
+          disconnectedWindows: Number.isInteger(rendered.coverage.disconnectedWindows)
+            ? Math.max(0, Math.min(1500, rendered.coverage.disconnectedWindows)) : 0,
+          // Reaching the DOM scroll boundaries is not proof that every
+          // historical assistant response ever mounted in those windows.
+          verifiedComplete: false
         } : matches.at(-1)?.coverage || null
       };
       const linked = new Set(matches);
