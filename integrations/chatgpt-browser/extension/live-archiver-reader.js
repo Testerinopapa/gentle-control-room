@@ -281,6 +281,20 @@
       try { onWindow(); } catch { /* Supplemental reader must not interrupt capture. */ }
       return rows;
     };
+    // ChatGPT mounts assistant bodies asynchronously after scrolling. The
+    // previous 90ms hop could leave a user prompt visible but move away before
+    // its assistant reply rendered, creating artificial gaps in the export.
+    const settleWindow = async (direction, firstWait) => {
+      let previous = null, rows = [];
+      for (let attempt = 0; attempt < 4 && allowed(); attempt++) {
+        await delay(attempt ? 125 : firstWait);
+        rows = captureWindow(direction);
+        const signature = rows.map(row => row.key + ":" + row.text.length).join("|");
+        if (previous !== null && signature === previous) break;
+        previous = signature;
+      }
+      return rows;
+    };
     const initialCount = captureWindow("down").length;
     const initialHeight = scrolling?.scrollHeight || 0;
     const oldTop = scrolling?.scrollTop || 0;
@@ -294,8 +308,7 @@
         let stable = 0, oldHeight = -1, oldFirst = "";
         for (let i = 0; i < 55 && allowed(); i++) {
           scrolling.scrollTop = 0;
-          await delay(160);
-          const rows = captureWindow("up");
+          const rows = await settleWindow("up", 190);
           const head = rows[0]?.key || "";
           const isStable = scrolling.scrollTop <= 1 &&
             scrolling.scrollHeight === oldHeight && head === oldFirst;
@@ -322,7 +335,7 @@
           }
           const before = scrolling.scrollTop;
           scrolling.scrollTop = before + Math.max(200, scrolling.clientHeight * 0.7);
-          await delay(90);
+          await settleWindow("down", 160);
           idle = scrolling.scrollTop === lastTop ? idle + 1 : 0;
           lastTop = scrolling.scrollTop;
           if (idle >= 4) { stoppedEarly = true; break; }
