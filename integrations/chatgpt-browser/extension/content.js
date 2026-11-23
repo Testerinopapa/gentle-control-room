@@ -247,7 +247,9 @@
           for (const reference of record.observedCommitKeys) {
             if (!active()) break;
             const [repository, sha] = reference.split("@");
-            const historical = record.historical || baselineCommitLinks.has(reference);
+            // A link newly added to an older answer is NOT a baseline link:
+            // fetch it as unattributed evidence rather than silently skipping it.
+            const historical = baselineCommitLinks.has(reference);
             // Exhausting one quota must not starve valid links in the other.
             if ((historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) continue;
             const key = record.id + ":" + repository + "@" + sha;
