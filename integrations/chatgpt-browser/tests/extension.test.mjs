@@ -827,6 +827,75 @@ test("virtualized browser windows with reused fallback numbers retain top-down o
   assert.equal(top, 1400, "leave the user at their previous scroll position");
 });
 
+test("two-pass capture recovers assistant text lost between the upward and downward passes", async () => {
+  const turn = (id, reply = "") => [
+    '<div data-turn-key="turn-', id, '">',
+      '<div data-chatgpt-search-unit-key="turn-', id, ':user">',
+        '<div data-markdown-text-tone="user-message">Question ', id, '</div>',
+      '</div>',
+      reply ? '<div data-chatgpt-search-unit-key="turn-' + id + ':assistant">' +
+        '<div data-markdown-text-style="assistant-message"><p>' + reply + '</p></div>' +
+        '</div>' : '',
+    '</div>'
+  ].join("");
+  const d = domHarness(null, turn("C", "Answer C"));
+  const root = d.root;
+  let scroll = 1200, topVisits = 0;
+  Object.defineProperty(root, "scrollHeight", { configurable: true, get: () => 1700 });
+  Object.defineProperty(root, "clientHeight", { configurable: true, get: () => 500 });
+  Object.defineProperty(root, "scrollTop", { configurable: true,
+    get: () => scroll,
+    set(value) {
+      scroll = Math.max(0, Math.min(1200, value));
+      if (scroll < 1) {
+        topVisits++;
+        root.innerHTML = turn("A", topVisits < 4 ? "Answer A only loaded on first pass" : "");
+      } else if (scroll < 800) root.innerHTML = turn("B", "Answer B");
+      else root.innerHTML = turn("C", "Answer C");
+    }
+  });
+  await d.enable();
+  const captured = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(captured.ok, true);
+  assert.ok(captured.coverage.atTop && captured.coverage.atBottom);
+  assert.deepEqual(Array.from(captured.messages.filter(row => row.role === "user"),
+    row => row.text), ["Question A", "Question B", "Question C"]);
+  assert.equal(captured.messages.filter(row => row.text.includes("Answer A only")).length, 1);
+  assert.ok(captured.coverage.recoveredFromUpwardPass >= 1);
+  assert.equal(captured.coverage.verifiedComplete, false);
+  assert.equal(scroll, 1200);
+});
+
+test("browser capture records continuity diagnostics and does not claim full conversation coverage", async () => {
+  const h = harness(undefined, null, null, {
+    ok: true, renderedCount: 8, truncated: false, orderUncertain: true,
+    messages: [
+      { role: "user", key: "user:turn-A", text: "Debug browser capture" },
+      { role: "assistant", key: "assistant:turn-A", text: "Investigate DOM extraction" },
+      { role: "user", key: "user:turn-B", text: "Confirm message coverage" }
+    ],
+    coverage: { atTop: true, atBottom: true, initiallyRendered: 2,
+      observedWindows: 18, disconnectedWindows: 3,
+      recoveredUserTurns: 1, recoveredFromUpwardPass: 2,
+      uncertainPlacements: 1, unanchoredReplies: 1,
+      verifiedComplete: false }
+  });
+  await enable(h);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  const snapshot = (await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot;
+  assert.equal(snapshot.coverage.observedWindows, 18);
+  assert.equal(snapshot.coverage.disconnectedWindows, 3);
+  assert.equal(snapshot.coverage.recoveredUserTurns, 1);
+  assert.equal(snapshot.coverage.recoveredFromUpwardPass, 2);
+  assert.equal(snapshot.coverage.uncertainPlacements, 1);
+  assert.equal(snapshot.coverage.unanchoredReplies, 1);
+  assert.equal(snapshot.coverage.verifiedComplete, false);
+  assert.equal(snapshot.messages.length, 3);
+  const exportedData = await exported(h);
+  assert.equal(JSON.stringify(exportedData).includes("Debug browser capture"), false);
+});
+
 test("repeated browser captures merge previous snapshots instead of overwriting them", async () => {
   const firstWindow = { ok: true, renderedCount: 2, truncated: false, messages: [
     { role: "user", key: "user:older-u", text: "Fix the issue" },
