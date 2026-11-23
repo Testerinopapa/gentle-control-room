@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.9.2",
-  "description": "Opt-in local coding evidence, recurring pattern detection, and approved Codex analysis.",
+  "version": "0.9.3",
+  "description": "Opt-in browser conversation capture, local coding patterns, and approved Codex analysis.",
   "permissions": [
     "activeTab",
     "scripting",
