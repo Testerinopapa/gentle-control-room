@@ -1,10 +1,36 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.14)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.15)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Codex bridge failure diagnostics (v0.9.15)
+
+If a native messaging host replies with `ok: true` but no `output`,
+the extension now explains that the installed Windows host may be outdated.
+It also distinguishes a missing native result, an unrecognized response,
+an empty Codex report, and host-reported errors. This replaces the generic
+"Codex could not analyze the evidence" message. No new buttons.
+
+**Updating the Edge extension does not update the installed Windows host.**
+In the repository root on Windows, run:
+
+```powershell
+git pull --ff-only origin main
+.\integrations\chatgpt-browser\install-host.ps1 -ExtensionId YOUR_32_CHARACTER_EDGE_EXTENSION_ID
+codex --version
+codex login status
+```
+
+Find the exact extension ID under `edge://extensions`. The installer needs
+the .NET 8 SDK and updates the native host registered for that Edge extension;
+restart Edge before retrying `Analyze coding activity`.
+
+The native host still deliberately suppresses raw stderr and command output
+from failed Codex calls because they could contain sensitive source material.
+The updated error messages identify safe next steps, not a guaranteed cause.
 
 ## Simplified coding-analysis controls (v0.9.14)
 
@@ -142,7 +168,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.14**. Reload the ChatGPT tab itself as well.
+   **0.9.15**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -189,7 +215,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.14).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.15).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
