@@ -102,6 +102,8 @@ function renderBrowserConversation(snapshot) {
               " window transitions had no shared message identifiers, and " +
               (snapshot.coverage.uncertainPlacements || 0) +
               " recovered turns have uncertain placement." : "") : "") +
+      (snapshot.coverage?.tabWasHidden
+        ? " The ChatGPT tab was backgrounded during this scan; rendering may have been delayed." : "") +
       (Number(snapshot.coverage?.supplementalReplies || 0) > 0
         ? " Recovered " + snapshot.coverage.supplementalReplies +
           " additional assistant replies with the legacy reader." : "") +
@@ -382,6 +384,7 @@ function downloadBrowserConversation() {
         "; disconnected windows=" + (currentBrowserConversation.coverage.disconnectedWindows ?? "unknown") +
         "; restored first-pass turns=" + (currentBrowserConversation.coverage.recoveredUserTurns ?? "unknown") +
         "; restored first-pass replies=" + (currentBrowserConversation.coverage.recoveredFromUpwardPass ?? "unknown") +
+        "; tab backgrounded=" + Boolean(currentBrowserConversation.coverage.tabWasHidden) +
         ".\n"
       : "") +
     "Possible reply gaps: " + possibleReplyGaps(currentBrowserConversation) +
