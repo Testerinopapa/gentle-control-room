@@ -60,8 +60,10 @@ function boundedBrowserChats(store) {
   return store;
 }
 function browserChatForTab(store, session) {
-  return (session && store.snapshots.find(item => item.sessionId === session.id)) ||
-    store.snapshots.at(-1) || null;
+  // Do not show another conversation's saved transcript while a different
+  // conversation is actively being recorded.
+  if (session) return store.snapshots.find(item => item.sessionId === session.id) || null;
+  return store.snapshots.at(-1) || null;
 }
 function browserChatMeta(chat) {
   return chat ? { sessionId: chat.sessionId, capturedAt: chat.capturedAt,
