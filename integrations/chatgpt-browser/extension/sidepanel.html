@@ -64,7 +64,7 @@
       <div id="state" class="status" data-active="false" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="state-label">Checking…</span>
       </div>
-      <p id="note" class="hint">Starting a conversation records coding-work metadata and automatically enables local workflow classification. Detected public GitHub commit patches may be retrieved and stored locally; no chat text is saved.</p>
+      <p id="note" class="hint">Starting a conversation records coding-work metadata and automatically enables local workflow classification. Public GitHub patches may be stored locally. Full chat text is saved only if you explicitly capture the browser conversation.</p>
       <p id="error" class="error" role="alert" hidden></p>
       <div class="buttons">
         <button id="start" class="primary" disabled>Start for this conversation</button>
@@ -146,8 +146,8 @@
   </main>
 
   <footer>
-    <p><strong>Stored in Edge.</strong> No chat text, titles, conversation URLs, cookies or tokens are saved.</p>
-    <p class="muted">Local workflow analysis starts with recording. Public GitHub commit diffs can be fetched while recording is on. Exports remain on your device.</p>
+    <p><strong>Stored in Edge.</strong> Normal recording stores metadata, not chat text. Explicit conversation captures store actual visible messages locally, which you can delete.
+    <p class="muted">Chat captures can contain sensitive information. No browser conversation content is sent to Codex automatically. All downloads stay on your device.</p>
   </footer>
 </div>
 <script src="codex-evidence.js"></script>
