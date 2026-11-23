@@ -53,7 +53,8 @@ async function readBrowserChats() {
   return { ...stored, snapshots: stored.snapshots.map(snapshot => ({
     ...snapshot,
     messages: Array.isArray(snapshot.messages)
-      ? snapshot.messages.map(normalizeChatTurn).filter(item => item.text)
+      ? collapseDuplicateAssistantReplies(
+          snapshot.messages.map(normalizeChatTurn).filter(item => item.text))
       : []
   })) };
 }
@@ -100,6 +101,54 @@ function normalizeChatTurn(message) {
     /^[a-z]+:[^\r\n]{1,210}$/.test(message.key) ? message.key : null;
   return { role: message.role, text, ...(key ? { key } : {}) };
 }
+// Re-captures can contain two renderings of the same assistant turn:
+// one includes status/tool progress, the other is the final reply. Only
+// deduplicate adjacent assistant messages with substantial 5-word overlap.
+// Never merge distinct conversations or unrelated assistant messages.
+function replyTokens(text) {
+  return String(text).toLowerCase().match(/[a-z0-9\u00c0-\u024f]+/g) || [];
+}
+function duplicateAssistantReplies(a, b) {
+  if (a?.role !== "assistant" || b?.role !== "assistant" ||
+      a.text.length < 120 || b.text.length < 120) return false;
+  const first = replyTokens(a.text), second = replyTokens(b.text);
+  if (Math.min(first.length, second.length) < 24) return false;
+  const shingles = words => {
+    const set = new Set();
+    for (let i = 0; i <= words.length - 5; i++)
+      set.add(words.slice(i, i + 5).join(" "));
+    return set;
+  };
+  const sa = shingles(first), sb = shingles(second);
+  if (!sa.size || !sb.size) return false;
+  let common = 0;
+  const smaller = sa.size <= sb.size ? sa : sb;
+  const larger = sa.size <= sb.size ? sb : sa;
+  for (const item of smaller) if (larger.has(item)) common++;
+  return common / smaller.size >= 0.88;
+}
+function preferCompleteAssistantReply(a, b) {
+  const shorter = a.text.length <= b.text.length ? a : b;
+  const longer = a.text.length <= b.text.length ? b : a;
+  const shortWords = replyTokens(shorter.text), longWords = replyTokens(longer.text);
+  const endOfShort = shortWords.slice(-12).join(" ");
+  const tailOfLong = longWords.slice(-Math.max(30, Math.floor(longWords.length * 0.6))).join(" ");
+  // When the entire final reply is at the end of a progress-wrapped version,
+  // keep the cleaner reply instead of retaining status messages as prose.
+  if (tailOfLong.includes(endOfShort)) return shorter;
+  return longer;
+}
+function collapseDuplicateAssistantReplies(messages) {
+  const result = [];
+  for (const item of messages) {
+    const previous = result.at(-1);
+    if (duplicateAssistantReplies(previous, item)) {
+      result[result.length - 1] = preferCompleteAssistantReply(previous, item);
+    } else result.push(item);
+  }
+  return result;
+}
+
 function sameChatTurn(a, b) {
   // Older v0.9.3 snapshots have no stable keys. Compare their cleaned
   // content when merging an upgraded recording.
@@ -655,7 +704,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const limited = boundChatMessages(merged.messages);
       const snapshot = {
         sessionId: session.id, conversationKey, capturedAt: new Date().toISOString(),
-        messages: limited.messages,
+        messages: collapseDuplicateAssistantReplies(limited.messages),
         renderedCount: Number.isInteger(rendered.renderedCount) ?
           Math.min(240, Math.max(0, rendered.renderedCount)) : messages.length,
         truncated: truncated || limited.limited,
