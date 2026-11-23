@@ -462,7 +462,7 @@ test("browser history scan waits longer and takes smaller scrolling steps", () =
 
 test("Live Archiver reader runs without internal ChatGPT network requests", async () => {
   assert.ok(liveReader.includes("top"));
-  assert.ok(liveReader.includes("scroller.scrollTop"));
+  assert.match(liveReader, /\bscrolling\.scrollTop\b|\bscroller\.scrollTop\b/);
   assert.ok(!/fetch\(['"]\/backend-api/.test(liveReader));
   assert.ok(!liveReader.includes("/api/auth/session"));
   assert.ok(background.includes('"live-archiver-reader.js", "content.js"'));
