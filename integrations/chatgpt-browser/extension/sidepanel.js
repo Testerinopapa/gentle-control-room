@@ -19,6 +19,10 @@ const unresolvedNode = document.getElementById("unresolved-commits");
 const importStatus = document.getElementById("import-status");
 const patternsNode = document.getElementById("code-patterns");
 const codeCountNode = document.getElementById("code-count");
+const historySummaryNode = document.getElementById("history-summary");
+const historySummaryScope = document.getElementById("history-summary-scope");
+const historySummaryPatterns = document.getElementById("history-summary-patterns");
+const downloadHistoryButton = document.getElementById("download-history-summary");
 const codexPrepare = document.getElementById("prepare-codex");
 const codexReview = document.getElementById("codex-review");
 const codexPreview = document.getElementById("codex-preview");
@@ -34,6 +38,7 @@ let workflowEnabled = false;
 let selectedTab = null;
 let busy = false;
 let lastError = "";
+let currentHistorySummary = null;
 
 async function activeTab() {
   // The sidebar lives inside the current Edge window. Do not blindly use the
@@ -47,6 +52,23 @@ async function activeTab() {
 function showError(message) {
   errorNode.textContent = message;
   errorNode.hidden = !message;
+}
+
+function renderHistorySummary(summary, isCurrent) {
+  currentHistorySummary = summary || null;
+  downloadHistoryButton.disabled = !summary || !summary.requests;
+  historySummaryNode.textContent = summary?.overview ||
+    "No recorded coding conversation summary yet. Start recording to scan visible history.";
+  historySummaryScope.textContent = summary
+    ? (isCurrent ? "Current recording" : "Most recently recorded conversation") +
+      " · Local metadata summary, not a transcript. Older unloaded messages are not included."
+    : "Derived from local metadata only. Conversation text is never stored.";
+  historySummaryPatterns.replaceChildren();
+  for (const pattern of summary?.repeatedSignals || []) {
+    const item = document.createElement("li");
+    item.textContent = pattern;
+    historySummaryPatterns.append(item);
+  }
 }
 
 function renderPatterns(patterns) {
@@ -86,6 +108,7 @@ async function refresh() {
     if (!result?.ok) throw new Error(result?.error || "Unable to read the current tab.");
 
     renderPatterns(result.patterns);
+    renderHistorySummary(result.conversationSummary, Boolean(result.active));
     const selection = taskSelect.value;
     taskSelect.replaceChildren(new Option("Unattributed", ""));
     for (const task of result.attributionTasks || [])
@@ -147,6 +170,7 @@ async function refresh() {
     stopButton.disabled = true;
     importButton.disabled = true;
     workflowEnabled = false;
+    renderHistorySummary(null, false);
     codeCountNode.textContent = "—";
     userNode.textContent = "—";
     assistantNode.textContent = "—";
@@ -201,6 +225,35 @@ async function importCommit() {
   } finally {
     busy = false;
     await refresh();
+  }
+}
+
+function downloadHistorySummary() {
+  const summary = currentHistorySummary;
+  if (!summary || !summary.requests) return;
+  const content = [
+    "Gentle Control Room — Conversation Summary",
+    "",
+    summary.overview,
+    "",
+    "Recurring signals:",
+    ...(summary.repeatedSignals.length
+      ? summary.repeatedSignals.map(label => "- " + label)
+      : ["- None identified"]),
+    "",
+    summary.limitation,
+    "",
+    "This is a local metadata-based activity overview, not a full conversation recap."
+  ].join("\n");
+  const blob = new Blob([content + "\n"], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "gentle-control-room-conversation-summary.txt";
+    link.click();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }
 
@@ -333,6 +386,7 @@ startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
 importButton.addEventListener("click", () => void importCommit());
 exportButton.addEventListener("click", () => void exportEvidence());
+downloadHistoryButton.addEventListener("click", downloadHistorySummary);
 clearButton.addEventListener("click", () => void clearEvidence());
 
 // Edge keeps a side panel open across tab switches; never leave stale controls
