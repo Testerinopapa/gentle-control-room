@@ -666,8 +666,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           atBottom: rendered.coverage.atBottom === true,
           initiallyRendered: Number.isInteger(rendered.coverage.initiallyRendered)
             ? Math.max(0, Math.min(240, rendered.coverage.initiallyRendered)) : null,
-          stoppedEarly: rendered.coverage.stoppedEarly === true
-        } : previous?.coverage || null
+          stoppedEarly: rendered.coverage.stoppedEarly === true,
+          supplementalReplies: Number.isInteger(rendered.coverage.supplementalReplies)
+            ? Math.max(0, Math.min(160, rendered.coverage.supplementalReplies)) : 0
+        } : matches.at(-1)?.coverage || null
       };
       const linked = new Set(matches);
       chats.snapshots = chats.snapshots.filter(item => !linked.has(item));
