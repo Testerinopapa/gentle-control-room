@@ -129,6 +129,7 @@
     };
     return {
       id: taskId, taskId,
+      historical: boundary?.event.historical === true,
       completedAt: null,
       workflowStages: uniqueStages,
       attribution: { method: boundary ? "request_boundary" : "inactivity_fallback",
@@ -503,6 +504,7 @@
         retainedEvents: events.length,
         sessionsWithCodingSignals: sessions.size,
         inferredCodingEpisodes: tasks.length,
+        historicalRenderedTasks: tasks.filter(task => task.historical).length,
         discardedOlderEpisodes: truncated ? allTasks.length - tasks.length : 0,
         episodesWithCommitReferences: tasks.filter(task => task.commitReferences.length).length,
         episodesWithActualDiffPatches: tasks.filter(task => task.evidence.retrievedCommitPatches).length,
@@ -516,6 +518,8 @@
         "Request-stage labels are inferred from visible user text and are not evidence an action happened.",
         "A GitHub link is not proof the assistant authored the commit or that the changes worked.",
         "Tests, execution, deployment, authorship, and outcomes are unverified unless separate evidence is provided.",
+        "Start classifies rendered conversation history; virtualized or unrendered older messages are inaccessible.",
+        "Historical classifications do not recover original timestamps or prove actions occurred; old commit links are not automatically fetched.",
         "Only currently retained and consented browser events and available public GitHub patches are analyzed.",
         "No data is sent to DeepSeek or other AI services by this analysis."
       ]
