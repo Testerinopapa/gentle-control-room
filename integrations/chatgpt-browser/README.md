@@ -1,10 +1,37 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.9)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.10)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Browser history ordering and reply retention (v0.9.10)
+
+A real Edge export on November 23 showed eight possible reply gaps and user
+prompts out of chronological order. This release fixes two underlying causes:
+
+- ChatGPT's `fallback-turn-N` numbers are relative to the currently rendered
+  window. They must **not** be used to globally sort a virtualized transcript.
+  The reader now rebuilds a fresh top-to-bottom DOM pass on each capture,
+  follows scroll direction for passive observations, and restores the prior
+  scroll position.
+- Previously the background worker merged arbitrary individual message
+  windows, sometimes prepending newer user turns ahead of older ones.
+  Snapshots now merge **by user turn**, using stable message identifiers or
+  unambiguous matching prompt text. When the new DOM scan reaches both ends,
+  its observed user-turn order takes precedence, while old assistant replies
+  are retained under their matching prompts.
+
+The DOM reader also pauses until each scroll window's message units settle
+before advancing, reducing the chance of capturing a prompt before its reply
+has appeared.
+
+A complete DOM pass does not guarantee that ChatGPT loaded every historical
+reply. Missing texts that were **already erased from Edge storage** cannot be
+reconstructed from the browser alone; previously downloaded transcript files
+remain separate backups. The sidebar still reports potential gaps and capture
+limits. No remote ChatGPT API or new permission was added.
 
 ## Browser transcript duplicate cleanup (v0.9.9)
 
@@ -40,7 +67,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.9**. Reload the ChatGPT tab itself as well.
+   **0.9.10**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -87,7 +114,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.9).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.10).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
