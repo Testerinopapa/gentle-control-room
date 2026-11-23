@@ -66,6 +66,14 @@ function browserConversationText(snapshot) {
     (item.role === "user" ? "YOU" : "CHATGPT") + "\n" + item.text).join("\n\n---\n\n");
 }
 
+function possibleReplyGaps(snapshot) {
+  const messages = snapshot?.messages || [];
+  let gaps = 0;
+  for (let i = 1; i < messages.length; i++)
+    if (messages[i - 1].role === "user" && messages[i].role === "user") gaps++;
+  return gaps;
+}
+
 function renderBrowserConversation(snapshot) {
   currentBrowserConversation = snapshot || null;
   loadedBrowserSnapshotKey = snapshot
@@ -83,6 +91,12 @@ function renderBrowserConversation(snapshot) {
           (snapshot.coverage.atTop && snapshot.coverage.atBottom
             ? "reached both ends of the rendered conversation." :
               "may not have loaded all historical turns.") : "") +
+      (Number(snapshot.coverage?.supplementalReplies || 0) > 0
+        ? " Recovered " + snapshot.coverage.supplementalReplies +
+          " additional assistant replies with the legacy reader." : "") +
+      (possibleReplyGaps(snapshot)
+        ? " " + possibleReplyGaps(snapshot) +
+          " possible reply gaps (consecutive user messages); capture may be incomplete." : "") +
       (snapshot.orderUncertain ? " Some older and newer windows had no overlap; message order may be incomplete." : "") +
       (snapshot.truncated ? " Capture limits were reached; this may not be the full conversation." : "")
     : "No browser conversation has been captured yet.";
@@ -343,7 +357,9 @@ function downloadBrowserConversation() {
   const text = "Gentle Control Room — Captured Browser Conversation\n" +
     "Captured: " + currentBrowserConversation.capturedAt + "\n" +
     "Captured from rendered ChatGPT messages with Live Archiver DOM scanning.\n" +
-    "Some unrendered messages may remain inaccessible.\n\n" +
+    "Some unrendered messages may remain inaccessible.\n" +
+    "Possible reply gaps: " + possibleReplyGaps(currentBrowserConversation) +
+    " (consecutive user messages do not prove a missing reply).\n\n" +
     browserConversationText(currentBrowserConversation) + "\n";
   const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
   try {
