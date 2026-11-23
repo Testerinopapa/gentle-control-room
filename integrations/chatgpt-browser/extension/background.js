@@ -237,6 +237,13 @@ function mergeChatReplies(previous, incoming) {
   return collapseDuplicateAssistantReplies(out);
 }
 function mergeChatWindows(previous, incoming, options = {}) {
+  // A first capture has no prior chronology to contradict. Only an orphan
+  // assistant reply with no preceding user turn has uncertain placement.
+  if (!previous.length) {
+    const normalized = incoming.map(normalizeChatTurn).filter(item => item.text);
+    return { messages: normalized,
+      uncertain: normalized.length > 0 && normalized[0].role === "assistant" };
+  }
   const old = chatTurnBlocks(previous);
   const fresh = chatTurnBlocks(incoming);
   const preferIncomingOrder = options.preferIncomingOrder === true && fresh.turns.length > 0;
