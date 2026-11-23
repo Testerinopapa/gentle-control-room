@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.4)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.5)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.4**. Reload the ChatGPT tab itself as well.
+   **0.9.5**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -59,7 +59,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.4).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.5).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -109,6 +109,12 @@ markup. A clickable control that does not expose its GitHub URL cannot be
 reconstructed by the extension. Existing links when recording begins remain
 historical. To test multiple-link capture, start recording before requesting
 code edits and have the *new assistant reply* display complete commit URLs.
+
+The November 23 v0.9.5 capture cleanup also removes ChatGPT's accessible
+speaker-prefix label ("ChatGPT said:") even when the label is alone or not
+followed by a newline. Empty label-only assistant placeholders are excluded
+from new captures and older stored snapshots. This does not reconstruct
+missing assistant messages that were never exposed in the browser DOM.
 
 ## Read the real conversation directly from the browser
 
