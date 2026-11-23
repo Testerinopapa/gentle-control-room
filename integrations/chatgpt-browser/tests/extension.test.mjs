@@ -1635,7 +1635,11 @@ test("assistant response metadata is updated during streaming and rejects raw pa
   await d.change(userTurn("new-u", "Implement an update"));
   await d.change(assistantTurn("new-a", '<pre>const safe = true;</pre>'));
   let data = await exported(h);
-  assert.equal(data.events.filter(e => e.type === "assistant_evidence").length, 2);
+  assert.equal(data.events.filter(e => e.type === "assistant_evidence").length, 2,
+    "Expected one snapshot per assistant turn: " + JSON.stringify(data.events
+      .filter(e => ["assistant_response", "assistant_evidence"].includes(e.type))
+      .map(e => ({ type: e.type, responseId: e.responseId, taskId: e.taskId,
+        observedCodeBlocks: e.observedCodeBlocks }))));
   assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 1);
   const responseId = data.analysis.tasks[0].responseIds[0];
   assert.equal((await h.send({ type: "assistantEvidence", responseId,
