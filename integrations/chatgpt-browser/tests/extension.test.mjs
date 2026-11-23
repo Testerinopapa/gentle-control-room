@@ -370,6 +370,68 @@ test("Live Archiver DOM reader extracts modern ChatGPT paired turns without UI l
   assert.equal(answer.messages[1].key, "assistant:turn-uuid-1:assistant");
 });
 
+test("assistant body in sibling unit is recovered when explicit wrapper holds only a label", async () => {
+  const html = [
+    '<div data-turn-key="turn-checkout">',
+    '<div data-content-search-turn-key="fallback-turn-7"></div>',
+    '<div data-chatgpt-search-unit-key="turn-checkout:user">',
+      '<div data-markdown-text-tone="user-message">Fix the checkout flow</div>',
+    '</div>',
+    '<div data-chatgpt-search-unit-key="turn-checkout:assistant">',
+      '<h4 data-conversation-role="assistant">ChatGPT said:</h4>',
+    '</div>',
+    '<div data-chatgpt-search-message-ids="reply-real-body">',
+      '<div data-markdown-text-style="assistant-message">',
+        '<p>Updated the checkout handler.</p><p>Validated form submissions.</p>',
+      '</div>',
+    '</div>',
+    '</div>'
+  ].join("");
+  const d = domHarness(null, html);
+  await d.enable();
+  const result = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.messages, item => item.role), ["user", "assistant"]);
+  assert.ok(result.messages[1].text.includes("Updated the checkout handler."));
+  assert.ok(result.messages[1].text.includes("Validated form submissions."));
+  assert.ok(result.messages[1].text.includes("\n"));
+  assert.ok(!result.messages[1].text.includes("ChatGPT said:"));
+});
+
+test("legacy out-of-turn response is added to the correct modern user turn", async () => {
+  const html = [
+    '<div data-turn-key="turn-one">',
+    '<div data-chatgpt-search-unit-key="turn-one:user">',
+    '<div data-markdown-text-tone="user-message">Where do we install the extension?</div>',
+    '</div>',
+    '</div>',
+    '<div data-message-author-role="assistant" data-message-id="reply-one">',
+      '<p>Choose Load unpacked and select the extension directory.</p>',
+    '</div>',
+    '<div data-turn-key="turn-two">',
+    '<div data-chatgpt-search-unit-key="turn-two:user">',
+      '<div data-markdown-text-tone="user-message">Can we analyze patterns?</div>',
+    '</div>',
+    '<div data-chatgpt-search-unit-key="turn-two:assistant">',
+      '<div data-markdown-text-style="assistant-message">',
+        '<p>Pattern analysis requires verified commit evidence.</p>',
+      '</div>',
+    '</div>',
+    '</div>'
+  ].join("");
+  const d = domHarness(null, html);
+  await d.enable();
+  const result = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.messages, item => item.role),
+    ["user", "assistant", "user", "assistant"]);
+  assert.ok(result.messages[1].text.includes("Load unpacked"));
+  assert.ok(result.messages[3].text.includes("verified commit evidence"));
+  assert.equal(result.coverage.supplementalReplies, 1);
+});
+
 test("Live Archiver reader runs without internal ChatGPT network requests", async () => {
   assert.ok(liveReader.includes("top"));
   assert.ok(liveReader.includes("scroller.scrollTop"));
