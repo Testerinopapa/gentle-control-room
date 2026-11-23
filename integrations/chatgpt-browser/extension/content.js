@@ -39,6 +39,7 @@
   // unloads them from its virtualized message list.
   const rememberedTurns = [];
   let uncertainTurnOrder = false;
+  let scanningOlderHistory = false;
   let turnCaptureLimited = false;
   const roleSelectors = role => [
     `[data-content-search-unit-key$=":${role}"]`,
@@ -75,7 +76,7 @@
     let record = key && identities.get(key);
     if (!record) {
       record = { id: prefix + "-" + (++serial), stable: Boolean(raw), role,
-        historical: baselinePending, sent: false, stages: new Set(), taskId: null,
+        historical: baselinePending || scanningOlderHistory, sent: false, stages: new Set(), taskId: null,
         lastEvidenceSignature: null, lastEvidenceAt: 0,
         lastAcknowledgedCommitCount: 0, observedCommitKeys: new Set() };
       if (key && identities.size < 1000) identities.set(key, record);
@@ -245,7 +246,7 @@
           for (const reference of record.observedCommitKeys) {
             if (!active()) break;
             const [repository, sha] = reference.split("@");
-            const historical = baselineCommitLinks.has(reference);
+            const historical = record.historical || baselineCommitLinks.has(reference);
             // Exhausting one quota must not starve valid links in the other.
             if ((historical ? historicalCommitLinks : newCommitLinks) >= maxCommitLinks) continue;
             const key = record.id + ":" + repository + "@" + sha;
@@ -521,6 +522,7 @@
     const oldTop = scrolling.scrollTop;
     const wasNearBottom = scrolling.scrollHeight - scrolling.clientHeight - oldTop < 100;
     let lastSeen = rememberedTurns.length, stale = 0;
+    scanningOlderHistory = true;
     try {
       // Browsers with a virtualized ChatGPT timeline may only render earlier
       // turns after scrolling up. Inspect each window, not an undocumented API.
@@ -543,6 +545,7 @@
         scrolling.scrollTop = wasNearBottom ? scrolling.scrollHeight : oldTop;
         rememberRenderedTurns();
       }
+      scanningOlderHistory = false;
     }
   }
 
