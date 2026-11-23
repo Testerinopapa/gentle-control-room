@@ -7,6 +7,7 @@ importScripts("analysis.js");
 // provider, or privileged filesystem access is required.
 const KEY = tabId => "gcrChatGPTTab:" + tabId;
 const LOCAL_KEY = "gcrEvidenceV1";
+const BROWSER_CHAT_KEY = "gcrBrowserConversationV1";
 const CHATGPT = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 const DETECTORS = new Set(["current", "legacy", "waiting", "unsupported"]);
 const REPOSITORY = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}$/i;
@@ -40,6 +41,34 @@ async function getSession(tabId) {
   const data = await chrome.storage.session.get(KEY(tabId));
   return data[KEY(tabId)] || null;
 }
+// Full message text is kept separately from coding evidence, and only after
+// an explicit side-panel click. It is never included in evidence/Codex exports.
+async function readBrowserChats() {
+  const stored = (await chrome.storage.local.get(BROWSER_CHAT_KEY))[BROWSER_CHAT_KEY];
+  return stored?.version === 1 && Array.isArray(stored.snapshots)
+    ? stored : { version: 1, snapshots: [] };
+}
+function boundedBrowserChats(store) {
+  const cutoff = Date.now() - RETENTION_MS;
+  store.snapshots = store.snapshots.filter(item =>
+    item && Number.isFinite(Date.parse(item.capturedAt)) &&
+    Date.parse(item.capturedAt) >= cutoff &&
+    Array.isArray(item.messages)).sort((a, b) =>
+    a.capturedAt.localeCompare(b.capturedAt)).slice(-6);
+  while (JSON.stringify(store).length > 1600000 && store.snapshots.length > 1)
+    store.snapshots.shift();
+  return store;
+}
+function browserChatForTab(store, session) {
+  return (session && store.snapshots.find(item => item.sessionId === session.id)) ||
+    store.snapshots.at(-1) || null;
+}
+function browserChatMeta(chat) {
+  return chat ? { sessionId: chat.sessionId, capturedAt: chat.capturedAt,
+    messageCount: chat.messages.length, truncated: chat.truncated,
+    renderedCount: chat.renderedCount } : null;
+}
+
 async function readEvidence() {
   const found = await chrome.storage.local.get(LOCAL_KEY);
   const data = found[LOCAL_KEY];
@@ -447,17 +476,75 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         attribution: "Observed links and request-stage labels are not proof of authorship, execution, success, or deployment."
       } };
     }
+    if (message.type === "clearBrowserConversation") {
+      if (sender.tab) return { ok: false };
+      await chrome.storage.local.set({
+        [BROWSER_CHAT_KEY]: { version: 1, snapshots: [] }
+      });
+      return { ok: true };
+    }
     if (message.type === "clearEvidence") {
       await mutateEvidence(data => {
         data.events = [];
         data.commits = {};
         data.clearGeneration = (data.clearGeneration || 0) + 1;
       });
+      await chrome.storage.local.set({
+        [BROWSER_CHAT_KEY]: { version: 1, snapshots: [] }
+      });
       return { ok: true };
     }
     const tabId = message.tabId;
     if (!Number.isInteger(tabId)) throw Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
+    if (message.type === "getBrowserConversation") {
+      if (sender.tab) return { ok: false };
+      const session = await getSession(tabId);
+      const chats = boundedBrowserChats(await readBrowserChats());
+      return { ok: true, snapshot: browserChatForTab(chats, session) };
+    }
+    if (message.type === "captureBrowserConversation") {
+      if (sender.tab) return { ok: false };
+      const session = await getSession(tabId);
+      if (!session?.workflowEnabled || !eligible(tab.url) ||
+          session.page !== new URL(tab.url).pathname)
+        return { ok: false, error: "Start recording this ChatGPT conversation first." };
+      let rendered;
+      try {
+        rendered = await chrome.tabs.sendMessage(tabId, { type: "gcrCaptureConversation" });
+      } catch {
+        return { ok: false, error: "Cannot read the ChatGPT page. Refresh it and restart recording." };
+      }
+      if (!rendered?.ok || !Array.isArray(rendered.messages) ||
+          rendered.messages.length > 160)
+        return { ok: false, error: rendered?.error || "Browser conversation was unavailable." };
+      let chars = 0;
+      const messages = [];
+      for (const entry of rendered.messages) {
+        if (!entry || !["user", "assistant"].includes(entry.role) ||
+            typeof entry.text !== "string" || entry.text.length > 8000)
+          return { ok: false, error: "Invalid browser conversation content." };
+        chars += entry.text.length;
+        if (chars > 350000) return { ok: false, error: "Conversation snapshot is too large." };
+        messages.push({ role: entry.role, text: entry.text });
+      }
+      // Consent can be revoked while the browser is preparing its reply.
+      const current = await getSession(tabId);
+      if (!current || current.id !== session.id ||
+          current.page !== session.page || !current.workflowEnabled)
+        return { ok: false, error: "Recording ended before capture completed." };
+      const snapshot = {
+        sessionId: session.id, capturedAt: new Date().toISOString(),
+        messages, renderedCount: Number.isInteger(rendered.renderedCount) ?
+          Math.min(240, Math.max(0, rendered.renderedCount)) : messages.length,
+        truncated: rendered.truncated === true
+      };
+      const chats = await readBrowserChats();
+      chats.snapshots = chats.snapshots.filter(item => item.sessionId !== session.id);
+      chats.snapshots.push(snapshot);
+      await chrome.storage.local.set({ [BROWSER_CHAT_KEY]: boundedBrowserChats(chats) });
+      return { ok: true, meta: browserChatMeta(snapshot) };
+    }
     if (message.type === "getState") {
       const session = await getSession(tabId);
       const allowed = eligible(tab.url);
@@ -465,6 +552,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (session && !samePage) await stop(tabId);
       const local = await readEvidence();
       const analysis = globalThis.GentleCodingAnalysis.analyze(local);
+      const savedChat = browserChatForTab(boundedBrowserChats(await readBrowserChats()),
+        samePage ? session : null);
       return {
         ok: true, allowed, reason: allowed ? null : "Open ChatGPT in the active tab.",
         active: Boolean(session && samePage),
@@ -481,6 +570,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           taskId: task.taskId, startedAt: task.startedAt, stages: task.stages })),
         unresolvedCommits: analysis.unattributedCommits,
         patterns: analysis.patterns,
+        browserConversation: browserChatMeta(savedChat),
         conversationSummary: (samePage && session
           ? analysis.conversationSummaries.find(item => item.sessionId === session.id)
           : null) || analysis.conversationSummaries.at(-1) || null,
