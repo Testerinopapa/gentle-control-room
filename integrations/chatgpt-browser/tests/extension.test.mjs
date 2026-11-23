@@ -433,8 +433,8 @@ test("legacy out-of-turn response is added to the correct modern user turn", asy
 });
 
 test("browser history scan waits longer and takes smaller scrolling steps", () => {
-  assert.match(liveReader, /TOP_WAIT_MS = 500, DOWN_WAIT_MS = 650, RECHECK_WAIT_MS = 300/);
-  assert.match(liveReader, /SCROLL_FRACTION = 0\.5, MAX_DOWN_STEPS = 220/);
+  assert.match(liveReader, /TOP_WAIT_MS = 900, DOWN_WAIT_MS = 1600, RECHECK_WAIT_MS = 650/);
+  assert.match(liveReader, /SCROLL_FRACTION = 0\.35, MAX_DOWN_STEPS = 340/);
   assert.match(liveReader, /await settleWindow\("up", TOP_WAIT_MS\)/);
   assert.match(liveReader, /await settleWindow\("down", DOWN_WAIT_MS\)/);
   assert.match(liveReader, /scrolling\.clientHeight \* SCROLL_FRACTION/);
