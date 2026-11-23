@@ -371,6 +371,25 @@ test("Live Archiver DOM reader extracts modern ChatGPT paired turns without UI l
   assert.equal(answer.messages[1].key, "assistant:turn-uuid-1:assistant");
 });
 
+test("two-pass reader retains GitHub commit href when link text hides the URL", async () => {
+  const href = "https://github.com/example/repo/commit/" + HASH;
+  const markup = '<div data-turn-key="gh-turn">' +
+    '<div data-content-search-unit-key="gh-turn:user">' +
+    '<div data-markdown-text-tone="user-message">Please inspect the change</div></div>' +
+    '<div data-content-search-unit-key="gh-turn:assistant">' +
+    '<div data-markdown-text-style="assistant-message">' +
+    '<p>Repository: example/repo</p><a href="' + href + '">View commit</a>' +
+    '</div></div></div>';
+  const d = domHarness(null, markup);
+  await d.enable();
+  const captured = await new Promise(resolve =>
+    d.command({ type: "gcrCaptureConversation" }, null, resolve));
+  assert.equal(captured.ok, true);
+  assert.equal(captured.messages[1].github.commits[0].sha, HASH);
+  assert.equal(captured.messages[1].github.commits[0].url, href);
+  assert.ok(captured.messages[1].github.repositories.includes("example/repo"));
+});
+
 test("assistant body in sibling unit is recovered when explicit wrapper holds only a label", async () => {
   const html = [
     '<div data-turn-key="turn-checkout">',
@@ -551,6 +570,54 @@ test("actual browser chat is stored only on explicit capture, separate from evid
     "Delete evidence must delete stored full conversation text as well");
   await h.send({ type: "stop", tabId: 9 });
   assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, false);
+});
+
+test("conversation capture turns stored commit metadata into GitHub patch evidence without tasks", async () => {
+  const h = harness(undefined, null, null, { ok: true, renderedCount: 2, messages: [
+    { role: "user", text: "Please fix it" },
+    { role: "assistant", text: "Fixed in GitHub", github: {
+      repositories: ["testerinopapa/gentle-control-room"],
+      commits: [{ repository: "testerinopapa/gentle-control-room", sha: HASH }]
+    } }
+  ] });
+  await enable(h);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  const exportedData = await exported(h);
+  const key = "testerinopapa/gentle-control-room@" + HASH;
+  assert.equal(exportedData.analysis.tasks.length, 0);
+  assert.equal(exportedData.commits[key].status, "retrieved");
+  assert.equal(exportedData.events.find(e => e.discovery === "conversation_scan").attribution.state,
+    "unattributed");
+  assert.equal(h.requests.filter(r => r.requested.includes("/commits?")).length, 0);
+});
+
+test("repo-only conversation discovers recent public commits without guessing their chat authorship", async () => {
+  const second = "b".repeat(40);
+  const h = harness(undefined, null, async url => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify(url.endsWith("commits?per_page=3")
+      ? [{ sha: HASH }, { sha: second }]
+      : { sha: url.split("/").at(-1), files: [{
+        filename: "src/test.js", status: "modified", additions: 1, deletions: 0,
+        patch: "@@ -0,0 +1 @@\\n+change();"
+      }] })
+  }), { ok: true, renderedCount: 1, messages: [
+    { role: "assistant", text: "Repository: example/repo",
+      github: { repositories: ["example/repo"], commits: [] } }
+  ] });
+  await enable(h);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  const data = await exported(h);
+  assert.equal(data.analysis.tasks.length, 0);
+  assert.equal(Object.values(data.commits).filter(commit => commit.status === "retrieved").length, 2);
+  const refs = data.events.filter(e => e.discovery === "repository_history");
+  assert.deepEqual(refs.map(ref => ref.commitSha).sort(), [HASH, second].sort());
+  assert.ok(refs.every(ref => ref.attribution.state === "unattributed"));
+  assert.equal(h.requests.filter(request =>
+    request.requested.endsWith("commits?per_page=3")).length, 1);
+  assert.equal((await h.send({ type: "captureBrowserConversation", tabId: 9 })).ok, true);
+  assert.equal(h.requests.filter(request =>
+    request.requested.endsWith("commits?per_page=3")).length, 1);
 });
 
 test("content script reads actual text only on explicit capture request", async () => {
