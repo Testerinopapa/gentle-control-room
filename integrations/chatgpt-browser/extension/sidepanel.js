@@ -120,7 +120,7 @@ function renderHistorySummary(summary, isCurrent) {
   historySummaryScope.textContent = summary
     ? (isCurrent ? "Current recording" : "Most recently recorded conversation") +
       " · Local metadata summary, not a transcript. Older unloaded messages are not included."
-    : "Derived from local metadata only. Conversation text is never stored.";
+    : "This metadata summary is separate from your locally saved conversation text.";
   historySummaryPatterns.replaceChildren();
   for (const pattern of summary?.repeatedSignals || []) {
     const item = document.createElement("li");
@@ -187,6 +187,10 @@ async function refresh() {
       : active
         ? "Recording metadata, including rendered history captured at Start. Stop whenever you like."
         : "Start reads the messages currently loaded in this ChatGPT tab and saves a local text snapshot. Coding activity is recorded separately. No chat text is sent to Codex.";
+    // A single recording control is visible at a time. Starting also
+    // captures the transcript, so manual capture stays in Advanced options.
+    startButton.hidden = active;
+    stopButton.hidden = !active;
     startButton.disabled = busy || !allowed || active;
     stopButton.disabled = busy || !active;
     workflowEnabled = active && Boolean(result.workflowEnabled);
@@ -226,6 +230,8 @@ async function refresh() {
     stateNode.dataset.active = "false";
     labelNode.textContent = "Unavailable";
     noteNode.textContent = "The current browser tab could not be checked.";
+    startButton.hidden = false;
+    stopButton.hidden = true;
     startButton.disabled = true;
     stopButton.disabled = true;
     importButton.disabled = true;
@@ -264,7 +270,7 @@ async function command(type) {
         type: "captureBrowserConversation", tabId: selectedTab
       });
       if (capture?.ok) loadedBrowserSnapshotKey = null;
-      else lastError = "Recording started, but the page transcript was not captured. Use Capture conversation from browser to retry.";
+      else lastError = "Recording started, but the transcript could not be captured. Try Re-scan conversation in Advanced options.";
     }
   } catch (error) {
     lastError = error?.message || "Extension storage unavailable.";
