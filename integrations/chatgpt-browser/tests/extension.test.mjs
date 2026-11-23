@@ -1984,6 +1984,23 @@ test("side panel keeps only Start, Download, and Analyze visible by default", as
   dom.window.close();
 });
 
+test("Codex bridge errors identify old host responses rather than generic failure", () => {
+  const start = panel.indexOf("function codexResponseProblem(result) {");
+  const end = panel.indexOf("async function analyzeWithCodex() {", start);
+  assert.ok(start !== -1 && end > start);
+  const responseProblem = new Function(
+    panel.slice(start, end) + "\nreturn codexResponseProblem;"
+  )();
+  assert.match(responseProblem({ ok: true }), /installed Windows host may be outdated/);
+  assert.match(responseProblem({ ok: true, output: "" }), /empty analysis/);
+  assert.match(responseProblem({ ok: false, error: "" }), /rejected the request/);
+  assert.match(responseProblem(null), /returned no usable response/);
+  assert.match(responseProblem({ status: "old-host" }), /unrecognized response/);
+  assert.equal(responseProblem({ ok: false, error: "Codex analysis timed out after 3 minutes." }),
+    "Codex analysis timed out after 3 minutes.");
+  assert.equal(responseProblem({ ok: true, output: "Observed 2 changed files." }), null);
+});
+
 test("single coding action requires explicit review and approval without duplicate buttons", async () => {
   const h = harness();
   await enable(h);
