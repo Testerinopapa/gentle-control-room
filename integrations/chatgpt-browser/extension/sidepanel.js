@@ -61,8 +61,18 @@ function showError(message) {
 }
 
 function browserConversationText(snapshot) {
-  return (snapshot?.messages || []).map(item =>
-    (item.role === "user" ? "YOU" : "CHATGPT") + "\n" + item.text).join("\n\n---\n\n");
+  return (snapshot?.messages || []).map(item => {
+    const github = item.github || {};
+    const links = (github.commits || []).filter(ref =>
+      typeof ref?.url === "string" && !item.text.includes(ref.url))
+      .map(ref => "GitHub commit: " + ref.url);
+    const repos = (github.repositories || []).filter(repo =>
+      typeof repo === "string" && !item.text.includes(repo) &&
+      !(github.commits || []).some(ref => ref.repository === repo))
+      .map(repo => "GitHub repository: " + repo);
+    return (item.role === "user" ? "YOU" : "CHATGPT") + "\n" + item.text +
+      (links.length || repos.length ? "\n\n" + [...links, ...repos].join("\n") : "");
+  }).join("\n\n---\n\n");
 }
 
 function possibleReplyGaps(snapshot) {
