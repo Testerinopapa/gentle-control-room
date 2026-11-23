@@ -271,48 +271,72 @@
     mergeRows(rows, direction, trustedDirection);
     return rows;
   }
-  // The first (upward) pass can observe assistant text that gets unmounted
-  // during the second (downward) pass. Preserve ONLY replies for user turns
-  // anchored in the canonical downward transcript; never insert unanchored
-  // old windows or invent their ordering.
-  function recoverUpwardReplies(upwardRows) {
-    let recovered = 0;
+  // First-pass windows may hold replies (or entire turns) unmounted before
+  // the canonical downward pass. Keep every discovered user turn while
+  // preserving proven order where adjacent stable anchors exist.
+  function recoverUpwardTurns(upwardRows) {
+    let recoveredReplies = 0, recoveredUserTurns = 0, uncertainPlacements = 0;
+    const canonical = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
     const sameUser = (a, b) => a?.role === "user" && b?.role === "user" &&
-      (a.key === b.key || (a.text.length >= 14 &&
-        a.text.replace(/\s+/g, " ").trim() === b.text.replace(/\s+/g, " ").trim()));
-    const oldBlocks = [];
+      (a.key === b.key || (canonical(a.text).length >= 14 &&
+        canonical(a.text) === canonical(b.text)));
+    const blocks = [];
     for (const row of upwardRows) {
-      if (row.role === "user") oldBlocks.push({ user: row, replies: [] });
-      else if (row.role === "assistant" && oldBlocks.length)
-        oldBlocks[oldBlocks.length - 1].replies.push(row);
+      if (row.role === "user") blocks.push({ user: row, replies: [] });
+      else if (row.role === "assistant" && blocks.length)
+        blocks[blocks.length - 1].replies.push(row);
     }
-    for (const block of oldBlocks) {
-      if (!block.replies.length) continue;
-      const candidates = entries.map((row, i) => sameUser(row, block.user) ? i : -1)
-        .filter(i => i >= 0);
-      if (candidates.length !== 1) continue;
-      const index = candidates[0];
-      let nextUser = index + 1;
-      while (nextUser < entries.length && entries[nextUser].role !== "user")
-        nextUser++;
+    const find = user => {
+      const locations = entries.map((row, index) => sameUser(user, row) ? index : -1)
+        .filter(index => index >= 0);
+      return locations.length === 1 ? locations[0] : -1;
+    };
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      let index = find(block.user);
+      if (index < 0) {
+        // Prefer an immediately following matching turn. With both anchors
+        // we know the section's place; with only one it is provisional.
+        let left = -1, right = -1;
+        for (let j = i - 1; j >= 0; j--) {
+          left = find(blocks[j].user);
+          if (left >= 0) break;
+        }
+        for (let j = i + 1; j < blocks.length; j++) {
+          right = find(blocks[j].user);
+          if (right >= 0) break;
+        }
+        if (right >= 0 && (left < 0 || left < right)) index = right;
+        else if (left >= 0) {
+          index = left + 1;
+          while (index < entries.length && entries[index].role !== "user") index++;
+        } else index = entries.length;
+        if (left < 0 || right < 0 || right <= left) {
+          uncertainPlacements++;
+          uncertain = true;
+        }
+        entries.splice(index, 0, block.user);
+        recoveredUserTurns++;
+      }
+      let end = index + 1;
+      while (end < entries.length && entries[end].role !== "user") end++;
       for (const reply of block.replies) {
-        const matching = entries.slice(index + 1, nextUser).findIndex(row =>
+        const match = entries.slice(index + 1, end).findIndex(row =>
           row.role === "assistant" && (row.key === reply.key ||
-            row.text === reply.text ||
+            canonical(row.text) === canonical(reply.text) ||
             (Math.min(row.text.length, reply.text.length) > 75 &&
               (row.text.includes(reply.text) || reply.text.includes(row.text)))));
-        if (matching !== -1) {
-          const idx = index + 1 + matching;
-          if (reply.text.length > entries[idx].text.length)
-            entries[idx] = reply;
+        if (match >= 0) {
+          const at = index + 1 + match;
+          if (reply.text.length > entries[at].text.length) entries[at] = reply;
         } else {
-          entries.splice(nextUser, 0, reply);
-          nextUser++;
-          recovered++;
+          entries.splice(end, 0, reply);
+          end++;
+          recoveredReplies++;
         }
       }
     }
-    return recovered;
+    return { recoveredUserTurns, recoveredReplies, uncertainPlacements };
   }
 
   async function collect(allowed = () => true, onWindow = () => {}) {
@@ -324,8 +348,16 @@
     // Begin a fresh ordered scan rather than reuse a passively observed cache
     // whose order may already have been affected by virtualization.
     entries.length = 0; uncertain = false; limited = false;
+    let observedWindows = 0, disconnectedWindows = 0, previousDownKeys = null;
     const captureWindow = direction => {
       const rows = observe(direction, true);
+      observedWindows++;
+      if (direction === "down" && rows.length) {
+        const keys = new Set(rows.map(row => row.key));
+        if (previousDownKeys && !rows.some(row => previousDownKeys.has(row.key)))
+          disconnectedWindows++;
+        previousDownKeys = keys;
+      }
       try { onWindow(); } catch { /* Supplemental reader must not interrupt capture. */ }
       return rows;
     };
@@ -338,7 +370,12 @@
         await delay(attempt ? RECHECK_WAIT_MS : firstWait);
         rows = captureWindow(direction);
         const signature = rows.map(row => row.key + ":" + row.text.length).join("|");
-        if (previous !== null && signature === previous) break;
+        // A stable user-only window may still be awaiting its assistant body.
+        // Recheck it a few times instead of moving on immediately.
+        const possibleMissingReply = rows.some((row, i) =>
+          row.role === "user" &&
+          (i === rows.length - 1 || rows[i + 1]?.role === "user"));
+        if (previous !== null && signature === previous && !possibleMissingReply) break;
         previous = signature;
       }
       return rows;
@@ -349,7 +386,8 @@
     const bottomDistance = scrolling ? scrolling.scrollHeight - scrolling.scrollTop : 0;
     const wasAtBottom = scrolling && scrolling.scrollHeight - scrolling.clientHeight - oldTop < 60;
     let atTop = false, atBottom = false, stoppedEarly = false;
-    let recoveredFromUpwardPass = 0, upwardRows = [];
+    let recoveredFromUpwardPass = 0, recoveredUserTurns = 0;
+    let uncertainPlacements = 0, upwardRows = [];
     try {
       if (scrolling && allowed()) {
         // Live Archiver's two-pass harvesting idea: force the real top, let
@@ -376,6 +414,7 @@
           upwardRows = entries.map(item => ({ ...item }));
           // Upward windows are NOT allowed to control final chronology.
           entries.length = 0; uncertain = false;
+          previousDownKeys = null; disconnectedWindows = 0;
           captureWindow("down");
         }
         let lastTop = -1, idle = 0;
@@ -394,15 +433,24 @@
           if (idle >= 4) { stoppedEarly = true; break; }
         }
         captureWindow("down");
-        if (atTop && upwardRows.length)
-          recoveredFromUpwardPass = recoverUpwardReplies(upwardRows);
+        if (atTop && upwardRows.length) {
+          const restored = recoverUpwardTurns(upwardRows);
+          recoveredFromUpwardPass = restored.recoveredReplies;
+          recoveredUserTurns = restored.recoveredUserTurns;
+          uncertainPlacements = restored.uncertainPlacements;
+        }
       }
       if (!allowed()) return { ok: false, error: "Conversation changed during capture." };
       if (!scrolling) { atTop = false; atBottom = false; }
+      const possibleReplyGaps = entries.reduce((count, row, i) =>
+        count + (row.role === "user" && entries[i + 1]?.role === "user" ? 1 : 0), 0);
+      if (disconnectedWindows > 0) uncertain = true;
       lastCoverage = { observedMessageCount: entries.length, initiallyRendered: initialCount,
         atTop, atBottom, scrolling: !!scrolling, stoppedEarly, capped: limited,
         durationMs: Date.now() - startedAt, initialScrollHeight: initialHeight,
-        recoveredFromUpwardPass };
+        observedWindows, disconnectedWindows, possibleReplyGaps,
+        recoveredFromUpwardPass, recoveredUserTurns, uncertainPlacements,
+        verifiedComplete: false };
       return { ok: true, messages: entries.map(({ role, text, key }) => ({ role, text, key })),
         renderedCount: readRows().length, truncated: limited,
         orderUncertain: uncertain, coverage: lastCoverage };
