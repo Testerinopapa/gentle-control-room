@@ -559,6 +559,10 @@
     const messages = primary.slice();
     let recovered = 0;
     const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    // Detached DOM textContent joins words across element boundaries, whereas
+    // the primary reader restores line breaks. Treat only equal alphanumeric
+    // content as the same assistant reply, without discarding distinct replies.
+    const compact = value => normalize(value).replace(/[^\p{L}\p{N}]/gu, "");
     const indexOfUser = value => messages.findIndex(item =>
       item.role === "user" && normalize(item.text) === normalize(value));
     for (let i = 0; i < rememberedTurns.length; i++) {
@@ -580,7 +584,7 @@
       const existing = messages.slice(userIndex + 1, after).findIndex(row => {
         if (row.role !== "assistant") return false;
         const current = normalize(row.text);
-        return current === answer ||
+        return current === answer || compact(current) === compact(answer) ||
           (answer.length >= 35 && (current.includes(answer) || answer.includes(current)));
       });
       if (existing >= 0) {
