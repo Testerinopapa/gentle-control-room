@@ -337,8 +337,9 @@ test("content observer reports only categories and local identities; historical 
   await d.change(assistantTurn('new-a', `Done ${COMMIT.replace(HASH, "b".repeat(40))}`));
   const data = await exported(h);
   assert.equal(h.requests.length, 1);
-  assert.equal(data.analysis.tasks.length, 1);
-  assert.equal(data.analysis.tasks[0].commitReferences[0].attribution.state, 'automatic');
+  assert.equal(data.analysis.tasks.length, 2);
+  assert.equal(data.analysis.coverage.historicalRenderedTasks, 1);
+  assert.equal(data.analysis.tasks.find(task => !task.historical).commitReferences[0].attribution.state, 'automatic');
   assert.ok(!JSON.stringify(data).includes('PRIVATE'));
   assert.ok(!JSON.stringify(data).includes('new-u'));
 });
@@ -979,7 +980,7 @@ test("assistant response metadata is updated during streaming and rejects histor
   await d.change(userTurn("new-u", "Implement an update"));
   await d.change(assistantTurn("new-a", '<pre>const safe = true;</pre>'));
   let data = await exported(h);
-  assert.equal(data.events.filter(e => e.type === "assistant_evidence").length, 1);
+  assert.equal(data.events.filter(e => e.type === "assistant_evidence").length, 2);
   assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 1);
   const responseId = data.analysis.tasks[0].responseIds[0];
   assert.equal((await h.send({ type: "assistantEvidence", responseId,
@@ -987,7 +988,7 @@ test("assistant response metadata is updated during streaming and rejects histor
     observedCommitLinks: 1, rawText: "LEAK PRIVATE CHAT" }, origin)).ok, true);
   data = await exported(h);
   const records = data.events.filter(e => e.type === "assistant_evidence");
-  assert.equal(records.length, 1, "one snapshot per assistant turn, not one event per token");
+  assert.equal(records.length, 2, "one snapshot per assistant turn, including historical");
   assert.equal(records[0].observedCodeBlocks, 2);
   assert.equal(records[0].observedCommitLinks, 1);
   assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 2);
