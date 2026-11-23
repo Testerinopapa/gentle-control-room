@@ -95,7 +95,6 @@
       <ul id="code-patterns" class="hint" aria-label="Code patterns"></ul>
       <p id="evidence-count" class="hint" role="status">No local evidence yet.</p>
       <p class="hint">One analysis action. Review the exact evidence and approve before anything is sent to Codex.</p>
-      <button id="prepare-codex" type="button">Analyze coding activity</button>
       <div id="codex-review" hidden>
         <label for="codex-preview" class="hint" style="display:block;margin:10px 0 6px;">Exact evidence to send</label>
         <textarea id="codex-preview" readonly spellcheck="false" style="width:100%;height:180px;resize:vertical;font:14px/1.45 monospace;border:1px solid #cbd5e1;border-radius:8px;padding:10px;"></textarea>
@@ -104,6 +103,7 @@
           <span>I reviewed this evidence and approve sending it to Codex for analysis.</span>
         </label>
       </div>
+      <button id="prepare-codex" type="button" class="primary">Analyze coding activity</button>
       <p id="codex-status" class="hint" role="status" aria-live="polite">Requires the optional local Codex bridge.</p>
       <pre id="codex-output" hidden style="white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 system-ui,'Segoe UI',sans-serif;"></pre>
     </section>
