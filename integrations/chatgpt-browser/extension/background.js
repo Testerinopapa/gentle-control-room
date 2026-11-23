@@ -207,6 +207,15 @@ function mergeChatWindows(previous, incoming, options = {}) {
     ({ user: block.user, replies: block.replies.slice() }));
   const other = (preferIncomingOrder ? old : fresh).turns;
   let uncertain = false, earlierMatch = -1, hasAnchor = false;
+  // A virtualized window can start with the previous turn's assistant reply
+  // but not its user prompt. Use that reply as an ordering anchor when its
+  // stable identity matches an already retained assistant response.
+  const orphanStart = (preferIncomingOrder ? old : fresh).prelude;
+  for (const orphan of orphanStart) {
+    const linked = base.findIndex(block => block.replies.some(reply =>
+      sameChatTurn(reply, orphan) || duplicateAssistantReplies(reply, orphan)));
+    if (linked >= 0) { earlierMatch = linked; hasAnchor = true; }
+  }
   for (let i = 0; i < other.length; i++) {
     const block = other[i];
     const currentIndex = findChatTurn(block, base);
@@ -242,10 +251,13 @@ function mergeChatWindows(previous, incoming, options = {}) {
         !hasAnchor) uncertain = true;
   }
   if (old.turns.length && fresh.turns.length && !hasAnchor) uncertain = true;
-  const olderPrelude = old.prelude, newerPrelude = fresh.prelude;
+  const knownReplies = base.flatMap(block => block.replies);
+  const isKnownReply = orphan => knownReplies.some(reply =>
+    sameChatTurn(reply, orphan) || duplicateAssistantReplies(reply, orphan));
+  const olderPrelude = old.prelude.filter(item => !isKnownReply(item));
+  const newerPrelude = fresh.prelude.filter(item => !isKnownReply(item));
   const prelude = mergeChatReplies(olderPrelude, newerPrelude);
-  if (prelude.length && base.length && (olderPrelude.length || newerPrelude.length))
-    uncertain = true;
+  if (prelude.length && base.length) uncertain = true;
   return { messages: [
     ...prelude,
     ...base.flatMap(block => [block.user, ...collapseDuplicateAssistantReplies(block.replies)])
