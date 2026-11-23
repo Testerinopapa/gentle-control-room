@@ -12,8 +12,8 @@
   const MAX_MESSAGES = 160, MAX_CHARS = 350000, MAX_MESSAGE_CHARS = 8000;
   // Deliberately slower history scan: give lazy-loaded assistant replies time
   // to mount and stabilize before the next scroll.
-  const TOP_WAIT_MS = 500, DOWN_WAIT_MS = 650, RECHECK_WAIT_MS = 300;
-  const SCROLL_FRACTION = 0.5, MAX_DOWN_STEPS = 220;
+  const TOP_WAIT_MS = 900, DOWN_WAIT_MS = 1600, RECHECK_WAIT_MS = 650;
+  const SCROLL_FRACTION = 0.35, MAX_DOWN_STEPS = 340;
   const entries = [];
   let limited = false, uncertain = false, collecting = false;
   let lastCoverage = null;
@@ -341,7 +341,7 @@
             break;
           }
           const before = scrolling.scrollTop;
-          scrolling.scrollTop = before + Math.max(180, scrolling.clientHeight * SCROLL_FRACTION);
+          scrolling.scrollTop = before + Math.max(120, scrolling.clientHeight * SCROLL_FRACTION);
           await settleWindow("down", DOWN_WAIT_MS);
           idle = scrolling.scrollTop === lastTop ? idle + 1 : 0;
           lastTop = scrolling.scrollTop;
