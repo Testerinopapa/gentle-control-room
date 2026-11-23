@@ -439,9 +439,11 @@
   }
   function cleanRenderedText(role, value) {
     const text = String(value ?? "").trim();
+    // The accessible speaker label is not reply content. Drop it even when
+    // no newline follows, and skip empty placeholder turns altogether.
     return role === "assistant"
-      ? text.replace(/^ChatGPT said:\s*\n+/i, "").trim()
-      : role === "user" ? text.replace(/^You said:\s*\n+/i, "").trim() : text;
+      ? text.replace(/^(?:ChatGPT said:\s*)+/i, "").trim()
+      : role === "user" ? text.replace(/^(?:You said:\s*)+/i, "").trim() : text;
   }
   function capturedTurnKey(node, role, text) {
     const wrapper = node.closest('[data-message-id], [data-content-search-unit-key], [data-turn-id], article[id]') || node;
