@@ -100,6 +100,45 @@
     if (result.length > MAX_MESSAGE_CHARS) { limited = true; result = result.slice(0, MAX_MESSAGE_CHARS); }
     return result;
   }
+  // Metadata only: retain GitHub addresses from text AND actual link targets.
+  // Do not infer commit SHAs from a generic "pushed to main" statement.
+  const REPO = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}$/i;
+  const SHA = /^[a-f0-9]{40}$/i;
+  function githubOf(node, text) {
+    const repositories = new Set(), commits = new Map();
+    const add = value => {
+      if (typeof value !== "string") return;
+      const urlPattern = /https:\/\/github\.com\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})(?:\/commit\/([a-f0-9]{40}))?(?=[\/?#\s"'<>)]|$)/gi;
+      for (const match of value.matchAll(urlPattern)) {
+        const repository = (match[1] + "/" + match[2]).toLowerCase();
+        if (!REPO.test(repository)) continue;
+        if (repositories.size < 8) repositories.add(repository);
+        if (match[3] && SHA.test(match[3]) && commits.size < 12) {
+          const sha = match[3].toLowerCase();
+          commits.set(repository + "@" + sha, { repository, sha,
+            url: "https://github.com/" + repository + "/commit/" + sha });
+        }
+      }
+      // Repository labels can be shown without a clickable URL in ChatGPT.
+      for (const match of value.matchAll(/\b(?:Repository|Repo)\s*:\s*([a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100})\b/gi)) {
+        const repository = match[1].toLowerCase();
+        if (REPO.test(repository) && repositories.size < 8) repositories.add(repository);
+      }
+    };
+    add(text);
+    if (node?.querySelectorAll) for (const link of node.querySelectorAll(
+      'a, [role="link"], [data-href], [data-url], [data-clipboard-text]')) {
+      for (const attr of ["href", "data-href", "data-url", "data-clipboard-text", "title", "aria-label"])
+        add(link.getAttribute?.(attr));
+    }
+    return { repositories: [...repositories], commits: [...commits.values()] };
+  }
+  function mergeGithub(a, b) {
+    const repositories = [...new Set([...(a?.repositories || []), ...(b?.repositories || [])])].slice(0, 8);
+    const commits = [...new Map([...(a?.commits || []), ...(b?.commits || [])]
+      .map(ref => [ref.repository + "@" + ref.sha, ref])).values()].slice(0, 12);
+    return { repositories, commits };
+  }
   function hashKey(role, value) {
     let hash = 2166136261;
     for (const char of value.slice(0, 2500)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
@@ -186,6 +225,7 @@
             user.querySelector('[data-user-message-bubble]') || user;
           const text = textOf(body, "user");
           if (text) rows.push({ role: "user", text,
+            github: githubOf(user, text),
             key: stableKey(user, "user", turnKey ? turnKey + ":user" : "") || hashKey("user", text),
             order: order === null ? null : order * 2 });
         }
@@ -194,6 +234,7 @@
           const text = fullReply.slice(0, MAX_MESSAGE_CHARS);
           if (fullReply.length > MAX_MESSAGE_CHARS) limited = true;
           rows.push({ role: "assistant", text,
+            github: githubOf(turn, text),
             key: stableKey(turn, "assistant", turnKey ? turnKey + ":assistant" : "") ||
               hashKey("assistant", text), order: order === null ? null : order * 2 + 1 });
         }
@@ -214,7 +255,7 @@
         ? node.querySelector('[data-markdown-text-style="assistant-message"]') || node
         : node.querySelector('[data-markdown-text-tone="user-message"]') || node;
       const text = textOf(body, role);
-      if (text) rows.push({ role, text,
+      if (text) rows.push({ role, text, github: githubOf(node, text),
         key: stableKey(node, role) ||
           stableKey(node.closest('[data-turn-id],article[data-turn]') || node, role) ||
           hashKey(role, text), order: null });
@@ -241,8 +282,10 @@
         const row = incoming[i];
         const match = entries.findIndex(item => item.key === row.key);
         if (match >= 0) {
+          const github = mergeGithub(entries[match].github, row.github);
           if (row.text.length >= entries[match].text.length)
-            entries[match] = row;
+            entries[match] = { ...row, github };
+          else entries[match].github = github;
           previousIndex = match;
         } else {
           const next = incoming.slice(i + 1)
@@ -334,7 +377,10 @@
               (row.text.includes(reply.text) || reply.text.includes(row.text)))));
         if (match >= 0) {
           const at = index + 1 + match;
-          if (reply.text.length > entries[at].text.length) entries[at] = reply;
+          const github = mergeGithub(entries[at].github, reply.github);
+          if (reply.text.length > entries[at].text.length)
+            entries[at] = { ...reply, github };
+          else entries[at].github = github;
         } else {
           entries.splice(end, 0, reply);
           end++;
@@ -473,7 +519,8 @@
         observedWindows, disconnectedWindows, possibleReplyGaps, tabWasHidden,
         recoveredFromUpwardPass, recoveredUserTurns, uncertainPlacements,
         unanchoredReplies, verifiedComplete: false };
-      return { ok: true, messages: entries.map(({ role, text, key }) => ({ role, text, key })),
+      return { ok: true, messages: entries.map(({ role, text, key, github }) =>
+        ({ role, text, key, github })),
         renderedCount: readRows().length, truncated: limited,
         orderUncertain: uncertain, coverage: lastCoverage };
     } finally {
