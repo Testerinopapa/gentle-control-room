@@ -611,7 +611,7 @@ test("repo-only conversation discovers recent public commits without guessing th
   assert.equal(data.analysis.tasks.length, 0);
   assert.equal(Object.values(data.commits).filter(commit => commit.status === "retrieved").length, 2);
   const refs = data.events.filter(e => e.discovery === "repository_history");
-  assert.deepEqual(refs.map(ref => ref.commitSha).sort(), [HASH, second].sort());
+  assert.deepEqual(Array.from(refs, ref => ref.commitSha).sort(), [HASH, second].sort());
   assert.ok(refs.every(ref => ref.attribution.state === "unattributed"));
   assert.equal(h.requests.filter(request =>
     request.requested.endsWith("commits?per_page=3")).length, 1);
