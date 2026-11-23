@@ -23,11 +23,26 @@
       return true;
     });
   }
+  function isVisible(node) {
+    if (!node || node.isConnected === false) return false;
+    if (typeof node.checkVisibility === "function") return node.checkVisibility();
+    return typeof node.getClientRects !== "function" ||
+      node.getClientRects().length > 0;
+  }
   function transcript() {
-    return document.querySelector('[role="region"][aria-label="Conversation"]') ||
-      document.querySelector('[data-app-action-timeline-scroll]') ||
-      document.querySelector('[data-thread-find-target="conversation"]') ||
-      document;
+    // Live Archiver checks visibility because ChatGPT can retain hidden
+    // transcripts for previously opened conversations in the same DOM.
+    for (const selector of [
+      '[role="region"][aria-label="Conversation"]',
+      '[data-app-action-timeline-scroll]',
+      '[data-thread-find-target="conversation"]'
+    ]) {
+      const found = typeof document.querySelectorAll === "function"
+        ? [...document.querySelectorAll(selector)] : [document.querySelector(selector)];
+      const visible = found.find(isVisible);
+      if (visible) return visible;
+    }
+    return document;
   }
   function scroller() {
     let el = transcript();
