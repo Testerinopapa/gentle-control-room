@@ -1648,8 +1648,10 @@ test("assistant response metadata is updated during streaming and rejects raw pa
   data = await exported(h);
   const records = data.events.filter(e => e.type === "assistant_evidence");
   assert.equal(records.length, 2, "one snapshot per assistant turn, including historical");
-  assert.equal(records[0].observedCodeBlocks, 2);
-  assert.equal(records[0].observedCommitLinks, 1);
+  const updatedResponse = records.find(record => record.responseId === responseId);
+  assert.ok(updatedResponse, "new response metadata should be retained");
+  assert.equal(updatedResponse.observedCodeBlocks, 2);
+  assert.equal(updatedResponse.observedCommitLinks, 1);
   assert.equal(data.analysis.tasks[0].responseMetadata.observedCodeBlocks, 2);
   assert.ok(!JSON.stringify(data).includes("LEAK PRIVATE CHAT"));
   assert.equal((await h.send({ type: "assistantEvidence", responseId,
