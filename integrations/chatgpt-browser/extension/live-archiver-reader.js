@@ -58,7 +58,10 @@
     ]) for (const item of clone.querySelectorAll(selector)) item.remove();
     for (const h of clone.querySelectorAll("h4,h5,h6"))
       if (/^\s*(you|chatgpt) said:?\s*$/i.test(h.textContent)) h.remove();
-    const source = String(clone.innerText ?? clone.textContent ?? "");
+    // A detached clone can have innerText="" in Chromium even when it
+    // contains actual message text. Fall back to textContent in that case.
+    const visual = typeof clone.innerText === "string" ? clone.innerText.trim() : "";
+    const source = visual || String(clone.textContent ?? "");
     let result = cleanText(role, source);
     if (result.length > MAX_MESSAGE_CHARS) { limited = true; result = result.slice(0, MAX_MESSAGE_CHARS); }
     return result;
