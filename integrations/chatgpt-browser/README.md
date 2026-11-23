@@ -110,7 +110,7 @@ reconstructed by the extension. Existing links when recording begins remain
 historical. To test multiple-link capture, start recording before requesting
 code edits and have the *new assistant reply* display complete commit URLs.
 
-The November 23 v0.9.6 capture cleanup also removes ChatGPT's accessible
+The v0.9.5 capture cleanup also removes ChatGPT's accessible
 speaker-prefix label ("ChatGPT said:") even when the label is alone or not
 followed by a newline. Empty label-only assistant placeholders are excluded
 from new captures and older stored snapshots. This does not reconstruct
