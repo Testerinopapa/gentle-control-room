@@ -13,6 +13,7 @@
   const entries = [];
   let limited = false, uncertain = false, collecting = false;
   let lastCoverage = null;
+  let lastObservedScrollTop = null;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   function outermost(items) {
@@ -216,12 +217,12 @@
     }
     return rows;
   }
-  function mergeRows(incoming, direction = "up") {
+  function mergeRows(incoming, direction = "up", trustedDirection = false) {
     const overlap = incoming.some(row => entries.some(prev => prev.key === row.key));
     if (!overlap && entries.length && incoming.length) {
       if (direction === "down") entries.push(...incoming);
       else entries.unshift(...incoming);
-      uncertain = true;
+      if (!trustedDirection) uncertain = true;
     } else {
       let previousIndex = -1;
       for (let i = 0; i < incoming.length; i++) {
@@ -243,10 +244,10 @@
         }
       }
     }
-    if (entries.length > 1 && entries.every(row => Number.isInteger(row.order))) {
-      entries.sort((a, b) => a.order - b.order);
-      uncertain = false;
-    }
+    // Do NOT globally sort by fallback-turn-N values. ChatGPT numbers those
+    // turns relative to what is loaded in the DOM, and virtualization can
+    // reassign the same number to a completely different earlier/later turn.
+    // The browser's rendered order and the direction of harvesting are safer.
     let size = entries.reduce((sum, row) => sum + row.text.length, 0);
     while (entries.length > MAX_MESSAGES || size > MAX_CHARS) {
       const dropped = entries.splice(Math.floor(entries.length / 2), 1)[0];
@@ -254,9 +255,16 @@
       limited = true;
     }
   }
-  function observe(direction = "down") {
+  function observe(direction = null, trustedDirection = false) {
+    // Passive observation follows the user's scroll direction; the old
+    // default "down" appended newly loaded *older* windows to the end.
+    const scrolling = scroller();
+    const top = Number.isFinite(scrolling?.scrollTop) ? scrolling.scrollTop : null;
+    if (!direction) direction = top !== null && lastObservedScrollTop !== null &&
+      top < lastObservedScrollTop - 5 ? "up" : "down";
+    if (top !== null) lastObservedScrollTop = top;
     const rows = readRows();
-    mergeRows(rows, direction);
+    mergeRows(rows, direction, trustedDirection);
     return rows;
   }
   async function collect(allowed = () => true, onWindow = () => {}) {
@@ -264,8 +272,12 @@
     collecting = true;
     const scrolling = scroller();
     const startedAt = Date.now();
+    // Previous explicit captures are persisted by the background worker.
+    // Begin a fresh ordered scan rather than reuse a passively observed cache
+    // whose order may already have been affected by virtualization.
+    entries.length = 0; uncertain = false; limited = false;
     const captureWindow = direction => {
-      const rows = observe(direction);
+      const rows = observe(direction, true);
       try { onWindow(); } catch { /* Supplemental reader must not interrupt capture. */ }
       return rows;
     };
@@ -292,6 +304,13 @@
           oldFirst = head;
           if (stable >= 3) { atTop = true; break; }
           if (stable === 2) { scrolling.scrollTop = Math.min(220, scrolling.scrollHeight); await delay(90); }
+        }
+        if (atTop && allowed()) {
+          // The upward pass discovers where to begin, but its partial and
+          // disconnected windows are not guaranteed to be in global order.
+          // Start a canonical pass at the top and traverse forward.
+          entries.length = 0; uncertain = false;
+          captureWindow("down");
         }
         let lastTop = -1, idle = 0;
         for (let i = 0; i < 140 && allowed(); i++) {
@@ -326,6 +345,9 @@
       collecting = false;
     }
   }
-  function reset() { entries.length = 0; limited = false; uncertain = false; lastCoverage = null; }
+  function reset() {
+    entries.length = 0; limited = false; uncertain = false;
+    lastCoverage = null; lastObservedScrollTop = null;
+  }
   globalThis.GcrLiveArchiverReader = Object.freeze({ observe, collect, reset });
 })();
