@@ -15,11 +15,13 @@
   let nextCountAt = 0;
   let countInFlight = false;
   let statusInFlight = false;
-  // Deeper analysis is a separate explicit opt-in and is never enabled by
-  // ordinary Start. Text is inspected inside the webpage process only.
+  // Start also classifies already-rendered history locally. Raw message
+  // text never leaves the content script.
   let workflowEnabled = false;
   let workflowSent = 0;
   const maxWorkflowStages = 120;
+  const maxHistoryRequests = 60;
+  let historicalRequests = 0;
   const seenCommitLinks = new Set();
   const baselineCommitLinks = new Set();
   const maxCommitLinks = 30;
@@ -176,7 +178,8 @@
       for (const { node, record } of entries) {
         if (!active()) break;
         if (record.role === "user") {
-          if (!record.sent && !record.historical && workflowSent < maxWorkflowStages) {
+          if (!record.sent && workflowSent < maxWorkflowStages &&
+              (!record.historical || historicalRequests < maxHistoryRequests)) {
             // A request appended after an already observed turn is a supported
             // boundary. Newly mounted history and identifier-free replacements
             // remain uncertain. No message text is persisted.
@@ -185,11 +188,15 @@
             record.newlySupported = supported;
             record.taskId = record.id;
             const reply = await chrome.runtime.sendMessage({ type: "requestBoundary",
-              requestId: record.id, confidence: supported ? "supported" : "uncertain" });
+              requestId: record.id, historical: record.historical,
+              confidence: supported ? "supported" : "uncertain" });
             if (!active()) break;
-            if (reply?.ok) { record.sent = true; workflowSent++; }
+            if (reply?.ok) {
+              record.sent = true; workflowSent++;
+              if (record.historical) historicalRequests++;
+            }
           }
-          if (record.sent && !record.historical) {
+          if (record.sent) {
             const text = String(node.innerText ?? node.textContent ?? "").slice(0, 2400);
             const stages = workflowCategories.flatMap(([stage, pattern]) =>
               Array.from(text.matchAll(new RegExp(pattern.source, "gi")), match => ({ stage, index: match.index })))
@@ -205,8 +212,8 @@
         } else {
           if (!record.sent) {
             const request = lastRequest;
-            record.taskId = !record.historical && record.stable && request?.role === "user" &&
-              !request.historical && request.sent ? request.taskId : null;
+            record.taskId = record.stable && request?.role === "user" &&
+              request.historical === record.historical && request.sent ? request.taskId : null;
             const reply = await chrome.runtime.sendMessage({ type: "assistantBoundary",
               responseId: record.id, requestId: record.taskId,
               historical: record.historical });
@@ -253,7 +260,7 @@
               // later links or accidentally marking an unacknowledged link seen.
             }
           }
-          if (!record.historical && record.sent) {
+          if (record.sent) {
             const metadata = assistantMetadata(node, record.observedCommitKeys.size);
             const signature = Object.values(metadata).join(":");
             const now = Date.now();
