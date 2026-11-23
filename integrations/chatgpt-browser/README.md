@@ -106,6 +106,28 @@ reconstructed by the extension. Existing links when recording begins remain
 historical. To test multiple-link capture, start recording before requesting
 code edits and have the *new assistant reply* display complete commit URLs.
 
+## Conversation summary
+
+The **Conversation summary** section in the Edge side panel automatically shows
+a readable overview of the current recording (or the most recently recorded one).
+After **Start for this conversation**, it includes already-rendered historical
+requests and new coding activity, dominant workflow themes, referenced GitHub
+repositories, patch availability, and recurring evidence patterns. It refreshes
+as new events are recorded. Click **Download summary** to save a local text copy.
+
+The summary is generated deterministically from the existing structured
+`gcrEvidenceV1` evidence in Edge's `chrome.storage.local`; it is recomputed
+when the panel opens. Exports include
+`analysis.conversationSummaries` with one bounded summary per recorded session.
+No separate transcript store, remote server, AI call, or permission is needed.
+**Delete stored evidence** removes the source records, and therefore the summaries.
+
+This is a **coding activity summary, not a semantic recap of everything said**.
+The extension does not save the full conversation text, so it cannot reliably
+report exact problems, decisions, fixes, or task outcomes without supporting
+structured evidence. Messages ChatGPT has unloaded and unrelated conversations
+are not included. Old commit references are not fetched automatically.
+
 ## Coding tasks and repeated-workflow analysis (v0.8)
 
 **Export evidence JSON** now includes a new top-level `analysis` object:
