@@ -74,9 +74,44 @@ test("Codex review excludes cached patches that have no task attribution", () =>
 test("Codex review refuses absent tasks and oversized payloads rather than silently truncating", () => {
   const empty = example();
   empty.analysis.tasks = [];
-  assert.throws(() => build(empty), /Record a coding task/);
+  assert.throws(() => build(empty), /No captured coding tasks or GitHub patches/);
   const oversized = example();
   oversized.commits["example/repo@" + "a".repeat(40)].files[0].patch = "x".repeat(151000);
   assert.throws(() => build(oversized), /too large/);
   assert.throws(() => build({}), /No valid coding analysis/);
+});
+
+test("Codex accepts retrieved public repository history even when no chat task was recorded", () => {
+  const evidence = example();
+  evidence.analysis.tasks = [];
+  evidence.analysis.patterns = [];
+  const key = "example/repo@" + "a".repeat(40);
+  evidence.events = [{
+    type: "github_commit_ref", repository: "example/repo",
+    commitSha: "a".repeat(40), discovery: "repository_history",
+    taskId: null, attribution: { state: "unattributed" }
+  }];
+  const reviewed = build(evidence);
+  assert.equal(reviewed.taskCount, 0);
+  assert.equal(reviewed.commitCount, 1);
+  assert.equal(JSON.parse(reviewed.json).commits[key].provenance, "public_repository_history");
+  assert.equal(JSON.parse(reviewed.json).commits[key].attribution, "unattributed");
+  assert.equal(JSON.parse(reviewed.json).events, undefined);
+  // No authorization to forward unrelated cached patches.
+  evidence.events = [];
+  assert.throws(() => build(evidence), /No captured coding tasks or GitHub patches/);
+});
+
+test("Codex includes captured conversation commits with an explicit unverified provenance", () => {
+  const evidence = example();
+  evidence.analysis.tasks = [];
+  evidence.events = [{
+    type: "github_commit_ref", repository: "example/repo",
+    commitSha: "a".repeat(40), discovery: "conversation_scan",
+    taskId: null, attribution: { state: "unattributed" }
+  }];
+  const result = build(evidence);
+  assert.equal(result.commitCount, 1);
+  assert.equal(JSON.parse(result.json).commits["example/repo@" + "a".repeat(40)]
+    .provenance, "conversation_link");
 });
