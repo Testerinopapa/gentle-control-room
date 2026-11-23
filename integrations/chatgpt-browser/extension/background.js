@@ -162,7 +162,8 @@ function browserChatMeta(chat) {
   return chat ? { sessionId: chat.sessionId, capturedAt: chat.capturedAt,
     messageCount: chat.messages.length, truncated: chat.truncated,
     orderUncertain: chat.orderUncertain === true,
-    renderedCount: chat.renderedCount } : null;
+    renderedCount: chat.renderedCount,
+    coverage: chat.coverage || null } : null;
 }
 
 async function readEvidence() {
@@ -658,7 +659,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         renderedCount: Number.isInteger(rendered.renderedCount) ?
           Math.min(240, Math.max(0, rendered.renderedCount)) : messages.length,
         truncated: truncated || limited.limited,
-        orderUncertain
+        orderUncertain,
+        coverage: rendered.coverage && typeof rendered.coverage === "object" ? {
+          scanMethod: "live_archiver_dom_two_pass",
+          atTop: rendered.coverage.atTop === true,
+          atBottom: rendered.coverage.atBottom === true,
+          initiallyRendered: Number.isInteger(rendered.coverage.initiallyRendered)
+            ? Math.max(0, Math.min(240, rendered.coverage.initiallyRendered)) : null,
+          stoppedEarly: rendered.coverage.stoppedEarly === true
+        } : previous?.coverage || null
       };
       const linked = new Set(matches);
       chats.snapshots = chats.snapshots.filter(item => !linked.has(item));
