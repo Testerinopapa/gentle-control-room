@@ -68,10 +68,24 @@ function boundedBrowserChats(store) {
     store.snapshots.shift();
   return store;
 }
-function browserChatForTab(store, session) {
-  // Do not show another conversation's saved transcript while a different
-  // conversation is actively being recorded.
-  if (session) return store.snapshots.find(item => item.sessionId === session.id) || null;
+// Stable local pseudonym of the conversation path. We don't save URLs or
+// raw ChatGPT conversation IDs. High-entropy chat IDs make collisions unlikely.
+function chatIdentity(pathname) {
+  if (typeof pathname !== "string" || pathname.length > 1024) return null;
+  let h = 0xcbf29ce484222325n;
+  for (let i = 0; i < pathname.length; i++) {
+    h ^= BigInt(pathname.charCodeAt(i));
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return h.toString(16).padStart(16, "0");
+}
+function browserChatForTab(store, session, path = null) {
+  // Prefer the same active recording, then earlier recordings of the same
+  // conversation. Never fall back to a different chat while one is active.
+  const key = session?.page ? chatIdentity(session.page) : chatIdentity(path);
+  if (session) return store.snapshots.find(item => item.sessionId === session.id) ||
+    (key && store.snapshots.filter(item => item.conversationKey === key).at(-1)) || null;
+  if (key) return store.snapshots.filter(item => item.conversationKey === key).at(-1) || null;
   return store.snapshots.at(-1) || null;
 }
 function cleanChatText(role, text) {
@@ -118,6 +132,20 @@ function mergeChatWindows(previous, incoming) {
   }
   return { messages: saved, uncertain: false };
 }
+// Legacy v0.9.3–0.9.5 captures have no conversation identity. An overlap of
+// substantial user+assistant messages is sufficient to migrate them safely;
+// avoid merging different conversations on common replies like "Done".
+function confirmsSameChat(previous, incoming) {
+  let user = 0, assistant = 0;
+  for (const entry of incoming) {
+    if (entry.text.length < 26) continue;
+    if (!previous.some(other => sameChatTurn(other, entry))) continue;
+    if (entry.role === "user") user++;
+    if (entry.role === "assistant" && entry.text.length >= 80) assistant++;
+  }
+  return (user >= 1 && assistant >= 1) || user >= 3 || assistant >= 3;
+}
+
 function boundChatMessages(messages) {
   let total = messages.reduce((sum, message) => sum + message.text.length, 0);
   let limited = false;
@@ -604,20 +632,35 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           current.page !== session.page || !current.workflowEnabled)
         return { ok: false, error: "Recording ended before capture completed." };
       const chats = await readBrowserChats();
-      const previous = chats.snapshots.find(item => item.sessionId === session.id);
-      const merged = mergeChatWindows(previous?.messages || [], messages);
+      const conversationKey = chatIdentity(session.page);
+      // Match new-version captures by stable conversation identity. For older
+      // snapshots without a key, migrate only with strong message overlap.
+      const matches = chats.snapshots.filter(item =>
+        item.sessionId === session.id || item.conversationKey === conversationKey ||
+        (!item.conversationKey && confirmsSameChat(item.messages, messages)))
+        .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
+      let combined = [];
+      let orderUncertain = rendered.orderUncertain === true;
+      let truncated = rendered.truncated === true;
+      for (const item of matches) {
+        const merge = mergeChatWindows(combined, item.messages);
+        combined = merge.messages;
+        orderUncertain ||= merge.uncertain || item.orderUncertain === true;
+        truncated ||= item.truncated === true;
+      }
+      const merged = mergeChatWindows(combined, messages);
+      orderUncertain ||= merged.uncertain;
       const limited = boundChatMessages(merged.messages);
       const snapshot = {
-        sessionId: session.id, capturedAt: new Date().toISOString(),
+        sessionId: session.id, conversationKey, capturedAt: new Date().toISOString(),
         messages: limited.messages,
         renderedCount: Number.isInteger(rendered.renderedCount) ?
           Math.min(240, Math.max(0, rendered.renderedCount)) : messages.length,
-        truncated: rendered.truncated === true || previous?.truncated === true ||
-          limited.limited,
-        orderUncertain: rendered.orderUncertain === true ||
-          previous?.orderUncertain === true || merged.uncertain
+        truncated: truncated || limited.limited,
+        orderUncertain
       };
-      chats.snapshots = chats.snapshots.filter(item => item.sessionId !== session.id);
+      const linked = new Set(matches);
+      chats.snapshots = chats.snapshots.filter(item => !linked.has(item));
       chats.snapshots.push(snapshot);
       await chrome.storage.local.set({ [BROWSER_CHAT_KEY]: boundedBrowserChats(chats) });
       return { ok: true, meta: browserChatMeta(snapshot) };
@@ -630,7 +673,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const local = await readEvidence();
       const analysis = globalThis.GentleCodingAnalysis.analyze(local);
       const savedChat = browserChatForTab(boundedBrowserChats(await readBrowserChats()),
-        samePage ? session : null);
+        samePage ? session : null, allowed ? new URL(tab.url).pathname : null);
       return {
         ok: true, allowed, reason: allowed ? null : "Open ChatGPT in the active tab.",
         active: Boolean(session && samePage),
