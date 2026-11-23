@@ -1,7 +1,8 @@
 "use strict";
 // Injected only after the user starts recording this ChatGPT conversation.
 // Local classification and complete rendered-response scanning run under this
-// one opt-in. Raw message text and code never leave the content script.
+// one opt-in. Raw chat text is exposed only through an additional explicit
+// "Capture conversation" action; ordinary recording never exports the transcript.
 (() => {
   if (globalThis.__gcrChatGPTObserver) globalThis.__gcrChatGPTObserver.stop();
 
@@ -430,7 +431,36 @@
       delete globalThis.__gcrChatGPTObserver;
     }
   }
-  function onCommand(message) {
+  // A separate, user-triggered read of the actual rendered ChatGPT turns.
+  // This is NOT an API/history fetch. Unmounted messages are inaccessible.
+  function capturedConversation() {
+    if (!validPage()) return { ok: false, error: "Start recording this conversation first." };
+    const rendered = units().slice(-160);
+    const messages = [];
+    let remaining = 350000;
+    let truncated = false;
+    for (const node of rendered) {
+      const role = node.matches(roleSelectors("user")) ? "user" : "assistant";
+      const body = String(node.innerText ?? node.textContent ?? "").trim();
+      if (!body) continue;
+      const limit = Math.min(8000, remaining);
+      if (!limit) { truncated = true; break; }
+      const text = body.slice(0, limit);
+      if (body.length > text.length) truncated = true;
+      messages.push({ role, text });
+      remaining -= text.length;
+    }
+    return {
+      ok: true, messages, renderedCount: rendered.length,
+      truncated: truncated || rendered.length >= 160
+    };
+  }
+
+  function onCommand(message, _sender, respond) {
+    if (message?.type === "gcrCaptureConversation") {
+      respond(capturedConversation());
+      return;
+    }
     if (message?.type === "gcrStop") stop();
     if (message?.type === "gcrWorkflowMode" && typeof message.enabled === "boolean") {
       if (message.enabled === workflowEnabled) return;
