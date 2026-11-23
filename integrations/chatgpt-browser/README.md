@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.6)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.7)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.6**. Reload the ChatGPT tab itself as well.
+   **0.9.7**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -59,7 +59,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.6).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.7).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -146,14 +146,34 @@ Use the same existing unpacked Edge extension folder. No build, npm install,
 additional API key, new permissions, or separate Live Archiver installation
 is required.
 
+### v0.9.7 response recovery
+
+A regression in v0.9.6 could lose assistant replies even while user prompts
+were present. The revised reader checks alternate assistant message units
+rather than trusting an accessibility-label-only wrapper. At each history
+window, the older observer also records compatible user/assistant nodes. When
+the primary parser misses a reply, the two sources are merged by matching user
+prompts; incomplete replies are replaced by longer, compatible ones without
+duplicating them. The reader preserves paragraph breaks instead of flattening
+the DOM's `textContent`.
+
+The sidebar reports a **possible reply gap** when user messages appear
+consecutively without a recorded assistant reply. This is a diagnostic, not
+proof that an answer ever existed. The raw transcript and any recovered replies
+remain solely in the local `gcrBrowserConversationV1` store, separately from
+Codex evidence. Automated test fixtures cover sibling units and out-of-turn
+assistant messages; a real Edge export is still necessary to verify coverage
+against the live ChatGPT interface.
+
 ## Read the real conversation directly from the browser
 
 The extension can now capture the **actual text of rendered ChatGPT messages**,
 including user requests, assistant replies and visible code blocks.
 
 1. Open the ChatGPT conversation and select **Start & read this conversation**.
-   The extension tries scrolling upward through the page to load older turns
-   (up to 36 bounded steps) and returns near the original position.
+   The extension uses a bounded Live Archiver-derived two-pass scan: first
+   reach the earliest available browser-rendered turn, then walk forward
+   collecting available replies, and restore your scroll position.
 2. Read **Conversation from browser** or select **Download conversation (.txt)**.
 3. To load more history, scroll upward in ChatGPT and select **Capture
    conversation from browser** again. The extension retains previously captured
