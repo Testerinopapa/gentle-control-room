@@ -84,6 +84,20 @@
       <p class="hint">Counts reflect messages currently rendered by ChatGPT, not a complete conversation history. Older messages may be unloaded when you scroll.</p>
     </section>
 
+    <section aria-label="Browser conversation">
+      <h2 class="section-heading">Conversation from browser</h2>
+      <p class="hint">Read the actual user and assistant messages currently loaded in this ChatGPT tab. The capture is stored only in Edge and may include sensitive conversation text. Nothing is sent to an AI service.</p>
+      <button id="capture-browser-conversation" type="button" disabled>Capture conversation from browser</button>
+      <p id="browser-conversation-status" class="hint" role="status">Start recording, then capture the browser conversation.</p>
+      <textarea id="browser-conversation-preview" readonly spellcheck="false" rows="9" hidden
+        aria-label="Captured browser conversation" style="width:100%;margin-top:10px;resize:vertical;white-space:pre-wrap;overflow:auto;font:14px/1.5 monospace;border:1px solid #cbd5e1;border-radius:8px;padding:12px;"></textarea>
+      <div class="buttons">
+        <button id="download-browser-conversation" type="button" disabled>Download conversation (.txt)</button>
+        <button id="delete-browser-conversation" type="button" disabled>Delete captured conversation</button>
+      </div>
+      <p class="hint">Only messages currently rendered by ChatGPT are available. Scroll to load older messages and capture again to replace the snapshot.</p>
+    </section>
+
     <section aria-label="Conversation summary">
       <h2 class="section-heading">Conversation summary</h2>
       <p id="history-summary" class="hint" role="status" aria-live="polite">Start recording to summarize the coding activity already visible in this conversation.</p>
