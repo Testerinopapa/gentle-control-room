@@ -1,4 +1,4 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.3)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.4)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
@@ -12,7 +12,7 @@ browsers with side-panel support). It keeps activity evidence in
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.3**. Reload the ChatGPT tab itself as well.
+   **0.9.4**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -59,7 +59,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.3).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.4).
 4. Open the Gentle Control Room side panel. In **Codex insights**, select
    **Review evidence for Codex**, inspect the exact JSON, tick the explicit
    approval checkbox, and click **Analyze with Codex**.
@@ -116,28 +116,33 @@ The extension can now capture the **actual text of rendered ChatGPT messages**,
 including user requests, assistant replies and visible code blocks.
 
 1. Open the ChatGPT conversation and select **Start & read this conversation**.
-   The extension automatically captures messages currently loaded in the tab.
-2. Read the text in **Conversation from browser**, or select
-   **Download conversation (.txt)**.
-3. To refresh the snapshot after loading older messages, select **Capture
-   conversation from browser** again.
+   The extension tries scrolling upward through the page to load older turns
+   (up to 36 bounded steps) and returns near the original position.
+2. Read **Conversation from browser** or select **Download conversation (.txt)**.
+3. To load more history, scroll upward in ChatGPT and select **Capture
+   conversation from browser** again. The extension retains previously captured
+   turns and merges newly seen messages rather than replacing the record.
 4. To erase it, select **Delete captured conversation**. The global
    **Delete stored evidence** action also erases captured conversations.
 
 The explicitly labeled **Start & read this conversation** button authorizes
 reading rendered messages alongside coding metadata. Later **Capture
-conversation from browser** clicks replace that snapshot. Only these actions
+conversation from browser** clicks extend that snapshot with newly seen turns
+and deduplicate repeated messages. Only these actions
 transfer raw message text into the extension's **local Edge storage**,
 under `gcrBrowserConversationV1`. Conversation snapshots are kept separate
 from `gcrEvidenceV1` and **never included in the Codex evidence payload**.
 No provider API, Codex, remote server or external storage is involved.
 
-Only messages currently loaded in the page DOM are available. A capture is
-bounded to at most 160 messages / 350,000 characters (8,000 characters per
-message), with older snapshots overwritten for the same recording. If messages
-are unloaded, scrolling them into view and capturing again will **replace**
-the prior snapshot; it does not claim to recover all history. Up to six
-snapshots are retained for up to 30 days, subject to a storage-size limit.
+The extension cannot fetch hidden conversation history through an API. It
+remembers turns seen while scrolling and merges later captures using stable
+message identifiers or normalized text. Newly captured windows with no shared
+messages have **uncertain chronological order** and are flagged accordingly.
+There is still no guarantee of a full history (ChatGPT can virtualize or unload
+older turns). Each retained conversation is limited to 160 messages /
+350,000 characters (8,000 per message); the middle is trimmed if necessary,
+and truncation is reported. Up to six session snapshots are retained for
+up to 30 days, subject to a storage-size limit.
 The exported text may include secrets and other sensitive content; handle
 downloaded files accordingly.
 
