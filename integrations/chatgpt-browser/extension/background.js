@@ -824,6 +824,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
             ? Math.max(0, Math.min(1500, rendered.coverage.observedWindows)) : 0,
           disconnectedWindows: Number.isInteger(rendered.coverage.disconnectedWindows)
             ? Math.max(0, Math.min(1500, rendered.coverage.disconnectedWindows)) : 0,
+          // A backgrounded ChatGPT tab may have delayed UI rendering.
+          tabWasHidden: rendered.coverage.tabWasHidden === true,
           // Reaching the DOM scroll boundaries is not proof that every
           // historical assistant response ever mounted in those windows.
           verifiedComplete: false
