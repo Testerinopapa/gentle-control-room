@@ -45,8 +45,17 @@ async function getSession(tabId) {
 // explicitly labeled Start/capture action. It never enters Codex exports.
 async function readBrowserChats() {
   const stored = (await chrome.storage.local.get(BROWSER_CHAT_KEY))[BROWSER_CHAT_KEY];
-  return stored?.version === 1 && Array.isArray(stored.snapshots)
-    ? stored : { version: 1, snapshots: [] };
+  if (stored?.version !== 1 || !Array.isArray(stored.snapshots))
+    return { version: 1, snapshots: [] };
+  // Existing browser captures from older versions may contain only an
+  // accessible speaker label. Clean them when reading, without losing
+  // legitimate text or touching the separate coding evidence store.
+  return { ...stored, snapshots: stored.snapshots.map(snapshot => ({
+    ...snapshot,
+    messages: Array.isArray(snapshot.messages)
+      ? snapshot.messages.map(normalizeChatTurn).filter(item => item.text)
+      : []
+  })) };
 }
 function boundedBrowserChats(store) {
   const cutoff = Date.now() - RETENTION_MS;
@@ -68,8 +77,8 @@ function browserChatForTab(store, session) {
 function cleanChatText(role, text) {
   const value = String(text).trim();
   return role === "assistant"
-    ? value.replace(/^ChatGPT said:\s*\n+/i, "").trim()
-    : role === "user" ? value.replace(/^You said:\s*\n+/i, "").trim() : value;
+    ? value.replace(/^(?:ChatGPT said:\s*)+/i, "").trim()
+    : role === "user" ? value.replace(/^(?:You said:\s*)+/i, "").trim() : value;
 }
 function normalizeChatTurn(message) {
   const text = cleanChatText(message.role, message.text);
