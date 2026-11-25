@@ -129,7 +129,7 @@ function unionChatGithub(a, b) {
 function githubFromText(text) {
   const repositories = [], commits = [];
   const raw = String(text || "");
-  for (const match of raw.matchAll(/(?:https?:\/\/)?github\.com\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})(?:\/commit\/([a-f0-9]{40}))?(?=[\s/?#"'<>)]|$)/gi)) {
+  for (const match of raw.matchAll(/(?<![a-z0-9_.-])(?:https?:\/\/)?github\.com\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})(?:\/commit\/([a-f0-9]{40}))?(?=[\s/?#"'<>)]|$)/gi)) {
     const repository = (match[1] + "/" + match[2]).toLowerCase();
     repositories.push(repository);
     if (match[3]) commits.push({ repository, sha: match[3].toLowerCase() });
