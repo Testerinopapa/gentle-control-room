@@ -1,10 +1,48 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.18)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.19)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Evidence recovery and chat-first reports (v0.9.19)
+
+A GitHub patch is not guaranteed merely because ChatGPT talks about coding.
+This version makes the reason for missing patch evidence visible and improves
+recovery from previously captured conversations:
+
+- Recovers explicit GitHub commit URLs (including URLs without an https scheme)
+  and labeled `Repo: owner/name` / `Repository: owner/name` references from
+  locally saved conversation text even when the original capture had no
+  structured GitHub metadata.
+- Retries failed public commit retrievals on the next consented conversation
+  rescan without adding duplicate evidence events. Successful and binary-only
+  results remain cached. A repo-history rescan can retry previously failed
+  patches without repeating a cached repository-history lookup.
+- Shows distinct diagnostics for no GitHub repository in saved chat, failed
+  API retrieval, metadata without safe source patches, or no recorded reference.
+- Supports **conversation-only Codex analysis** even without a recorded
+  coding task or retrieved GitHub patch. The Codex report must distinguish
+  requests and assistant-reported actions from verifiable GitHub diffs and
+  explicitly explain missing evidence.
+- Prevents the panel from accidentally loading the most recently captured
+  transcript when the active browser tab is a different conversation.
+
+**To test:** Pull `main`, reload the extension at `edge://extensions`,
+reload the ChatGPT conversation, and click **Start & read this conversation**
+or **Advanced options → Re-scan conversation** if recording is active.
+Check the GitHub evidence count and the **Analyze coding activity** preview.
+No GitHub URL/repository identity means no API evidence can be fetched;
+a plain statement like "pushed to main" is not enough.
+
+Because the Codex report instructions in the Windows native host were
+also updated, run `.\\integrations\\chatgpt-browser\\install-host.ps1` from
+the repository root and restart Edge if you want the new chat-first report
+format. The extension's capture/retry improvements work without this reinstall.
+Public GitHub API access is unauthenticated; private repositories and some
+rate-limited requests cannot yield patches, and GitHub success does not
+verify test execution, authorship, or deployment.
 
 ## Conversation-to-commit suggestions (v0.9.18)
 
@@ -89,7 +127,7 @@ separate workflow evidence establishes a connection.
 The existing **Analyze coding activity** action can now send retrieved patches to
 Codex for review and explicit user approval even if no structured coding task was
 recorded. No new buttons, ChatGPT internal endpoints or remote backend were added.
-Browser conversation text is still excluded from the Codex payload.
+Saved conversation text is included only as bounded excerpts in the explicit Codex review; sending requires approval.
 
 ## Codex bridge failure diagnostics (v0.9.15)
 
@@ -136,7 +174,7 @@ button and a second confirmation button together.
 Manual commit import, evidence JSON download and evidence deletion remain
 available in a nested, collapsed **Advanced options → Coding evidence tools**
 section. No coding pipeline was removed, and raw browser conversations are
-still excluded from the Codex evidence package.
+still excluded from automatic evidence export, but bounded chat excerpts can be included in the approved Codex review.
 
 ## Capture completeness diagnostics and first-pass preservation (v0.9.13)
 
@@ -253,7 +291,7 @@ initial interface is simplified.
 2. Open `edge://extensions`, switch on **Developer mode**, and use **Load unpacked**
    to select `integrations/chatgpt-browser/extension` (only if not already loaded).
 3. For an existing unpacked extension, click **Reload**. Version must read
-   **0.9.17**. Reload the ChatGPT tab itself as well.
+   **0.9.19**. Reload the ChatGPT tab itself as well.
 4. Open a ChatGPT conversation, open the extension side panel, and select
    **Start for this conversation**. This one explicit action automatically
    tags the session as coding-related and enables local workflow classification,
@@ -300,7 +338,7 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    and registers it for that Edge extension ID only. **Do not** launch the
    Windows desktop application. Restart Edge if you installed Codex CLI after
    opening the browser, so its PATH is refreshed.
-3. Reload the unpacked extension from `edge://extensions` (v0.9.17).
+3. Reload the unpacked extension from `edge://extensions` (v0.9.19).
 4. Open Gentle Control Room, select **Analyze coding activity** and inspect the
    exact JSON. Tick the explicit approval checkbox and press the same button,
    now labeled **Run approved Codex analysis**.
@@ -310,9 +348,9 @@ DeepSeek key, Windows dashboard, backend, or auto-analysis timer.
    Deleting stored evidence also removes this result.
 
 The reviewed package contains task/pattern analysis plus *retrieved public
-GitHub file patches*. Raw browser event chronology and conversation text are
-excluded; inspect the review anyway because public patches may contain sensitive
-source. The approved evidence is sent by the local Codex CLI to OpenAI for model
+GitHub file patches* and bounded request/reply excerpts from this tab.
+Raw browser event chronology is excluded. Inspect the review carefully because
+chat excerpts and even public patches can contain sensitive information. The approved evidence is sent by the local Codex CLI to OpenAI for model
 analysis. Neither Start recording nor loading the side panel sends anything to
 Codex automatically. The host never accepts user-supplied shell commands or
 updates the repository. If Codex is missing, the bridge is not installed, or
@@ -428,8 +466,10 @@ conversation from browser** clicks extend that snapshot with newly seen turns
 and deduplicate repeated messages. Only these actions
 transfer raw message text into the extension's **local Edge storage**,
 under `gcrBrowserConversationV1`. Conversation snapshots are kept separate
-from `gcrEvidenceV1` and **never included in the Codex evidence payload**.
-No provider API, Codex, remote server or external storage is involved.
+from `gcrEvidenceV1`. It is not transmitted during capture or ordinary
+evidence export. Limited excerpts may appear in the optional reviewed Codex
+payload and are sent to the model only after explicit approval. Capture itself
+does not contact any model or remote service.
 
 The extension cannot fetch hidden conversation history through an API. It
 remembers turns seen while scrolling and merges later captures using stable
@@ -460,9 +500,9 @@ No separate transcript store, remote server, AI call, or permission is needed.
 **Delete stored evidence** removes the source records, and therefore the summaries.
 
 This is a **coding activity summary, not a semantic recap of everything said**.
-The extension does not save the full conversation text, so it cannot reliably
-report exact problems, decisions, fixes, or task outcomes without supporting
-structured evidence. Messages ChatGPT has unloaded and unrelated conversations
+The separate opt-in browser capture saves a bounded subset of rendered
+conversation text. It can describe requests and reported actions, but cannot
+verify edits or outcomes without actual source or execution evidence. Messages ChatGPT has unloaded and unrelated conversations
 are not included. Old links remain passive-only until an explicit conversation
 capture, which can now collect their public GitHub patches.
 
