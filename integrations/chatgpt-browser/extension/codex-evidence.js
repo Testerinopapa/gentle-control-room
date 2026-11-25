@@ -66,10 +66,12 @@ function correlateConversation(snapshot, commits) {
   const requests = [];
   for (const [index, turn] of turns.entries()) {
     const userText = String(turn.user.text || "").trim();
-    if (!userText || !CODING_INTENT.test(userText) &&
-        !conversationCommitRefs(turn.user).size) continue;
     const directUser = conversationCommitRefs(turn.user);
     const directReplies = new Set(turn.replies.flatMap(reply => [...conversationCommitRefs(reply)]));
+    // A user may simply say "proceed"; an explicit commit in the assistant
+    // response still belongs in the reviewed conversation linkage.
+    if (!userText || (!CODING_INTENT.test(userText) &&
+        !directUser.size && !directReplies.size)) continue;
     const requestedWords = correlateWords(userText.slice(0, 1600));
     const matches = [];
     for (const candidate of descriptors) {
