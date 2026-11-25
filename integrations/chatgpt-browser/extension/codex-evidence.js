@@ -217,6 +217,7 @@ globalThis.GcrCodexEvidence = Object.freeze({
       patternCount: review.analysis.patterns.length,
       commitCount: Object.keys(commits).length,
       matchedRequests: review.conversationCorrelation.matchedRequests,
+      retrievalStatus,
       bytes
     };
   }
