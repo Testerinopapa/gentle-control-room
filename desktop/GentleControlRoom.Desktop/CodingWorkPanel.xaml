@@ -13,6 +13,7 @@
   <TextBlock x:Name="WorkStatus" Foreground="#475569" AutomationProperties.LiveSetting="Polite"/>
   <WrapPanel>
    <Button Content="Refresh evidence" Click="Refresh_Click"/>
+   <Button Content="Test GitHub code analysis" Click="TestGitHubAnalysis_Click" ToolTip="Retrieve the controlled README commit and prepare the normal analysis preview."/>
    <Button Content="Analyze task" Click="Analyze_Click"/>
    <Button Content="Analyze available tasks" Click="AnalyzeAll_Click"/>
   </WrapPanel>
