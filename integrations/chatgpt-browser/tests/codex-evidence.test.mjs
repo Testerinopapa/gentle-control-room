@@ -74,7 +74,7 @@ test("Codex review excludes cached patches that have no task attribution", () =>
 test("Codex review refuses absent tasks and oversized payloads rather than silently truncating", () => {
   const empty = example();
   empty.analysis.tasks = [];
-  assert.throws(() => build(empty), /No captured coding tasks or GitHub patches/);
+  assert.throws(() => build(empty), /No captured coding tasks.*GitHub patches/);
   const oversized = example();
   oversized.commits["example/repo@" + "a".repeat(40)].files[0].patch = "x".repeat(151000);
   assert.throws(() => build(oversized), /too large/);
@@ -99,7 +99,7 @@ test("Codex accepts retrieved public repository history even when no chat task w
   assert.equal(JSON.parse(reviewed.json).events, undefined);
   // No authorization to forward unrelated cached patches.
   evidence.events = [];
-  assert.throws(() => build(evidence), /No captured coding tasks or GitHub patches/);
+  assert.throws(() => build(evidence), /No captured coding tasks.*GitHub patches/);
 });
 
 test("Codex includes captured conversation commits with an explicit unverified provenance", () => {
@@ -235,6 +235,7 @@ test("failed GitHub lookups remain explicitly unverified in the review", () => {
   evidence.analysis.tasks = [];
   evidence.analysis.patterns = [];
   evidence.commits[key].status = "unavailable";
+  evidence.commits = { [key]: evidence.commits[key] };
   evidence.events = [{ type: "github_commit_ref", discovery: "conversation_scan",
     repository: "example/repo", commitSha: "a".repeat(40) }];
   const snapshot = { messages: [
