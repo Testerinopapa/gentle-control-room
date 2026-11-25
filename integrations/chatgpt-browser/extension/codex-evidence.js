@@ -163,8 +163,29 @@ globalThis.GcrCodexEvidence = Object.freeze({
         }))
       };
     }
-    if (!exported.analysis.tasks.length && !Object.keys(commits).length)
-      throw new Error("No captured coding tasks or GitHub patches yet. Scan a conversation with commit or repository links first.");
+    const conversationCorrelation = correlateConversation(snapshot, commits);
+    // Context-only reviews are useful when no task boundary/commit event was
+    // captured; they must never claim verified source edits.
+    if (!exported.analysis.tasks.length && !Object.keys(commits).length &&
+        !conversationCorrelation.requests.length)
+      throw new Error("No captured coding tasks, saved coding requests, or GitHub patches yet. Scan this conversation first.");
+    const capturedRepos = new Set((snapshot?.messages || [])
+      .flatMap(message => message.github?.repositories || [])
+      .filter(repo => /^[a-z0-9-]{1,39}\\/[a-z0-9_.-]{1,100}$/i.test(repo)));
+    const capturedLinks = new Set((snapshot?.messages || [])
+      .flatMap(message => message.github?.commits || [])
+      .map(ref => String(ref?.repository || "").toLowerCase() + "@" + String(ref?.sha || "").toLowerCase())
+      .filter(ref => CORRELATION_KEY.test(ref)));
+    const refs = (exported.events || []).filter(event => event?.type === "github_commit_ref");
+    const records = Object.values(exported.commits);
+    const unavailable = records.filter(record => record?.status === "unavailable").length;
+    const metadataOnly = records.filter(record => record?.status === "metadata_only").length;
+    const retrievalStatus = Object.keys(commits).length ? "retrieved_patches" :
+      unavailable ? "github_fetch_failed" :
+      metadataOnly ? "metadata_only_no_safe_patch" :
+      !snapshot ? "conversation_not_captured_for_tab" :
+      !capturedRepos.size && !capturedLinks.size ? "no_repository_or_commit_link_in_captured_chat" :
+      !refs.length ? "github_references_not_recorded" : "no_retrieved_patches";
     const review = {
       source: "Gentle Control Room opt-in Edge evidence",
       analysis: {
@@ -174,7 +195,17 @@ globalThis.GcrCodexEvidence = Object.freeze({
         limitations: exported.analysis.limitations
       },
       commits,
-      conversationCorrelation: correlateConversation(snapshot, commits)
+      conversationCorrelation,
+      evidenceCoverage: {
+        retrievedPatchCommits: Object.keys(commits).length,
+        capturedRepositoryIdentities: capturedRepos.size,
+        capturedCommitLinks: capturedLinks.size,
+        recordedGitHubReferences: refs.length,
+        failedPublicGitHubFetches: unavailable,
+        metadataOnlyCommits: metadataOnly,
+        retrievalStatus,
+        limitation: "Conversation reports and stage labels do not verify edits, command execution, test results, or authorship. Public GitHub patches require a detectable repository or full commit URL and a successful accessible API response."
+      }
     };
     const json = JSON.stringify(review, null, 2);
     const bytes = new TextEncoder().encode(json).length;
