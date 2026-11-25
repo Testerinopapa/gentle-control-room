@@ -208,7 +208,7 @@ async function refresh() {
       ? (result.reason || "Open a ChatGPT conversation to enable collection.")
       : active
         ? "Recording metadata, including rendered history captured at Start. Stop whenever you like."
-        : "Start reads the messages currently loaded in this ChatGPT tab and saves a local text snapshot. Coding activity is recorded separately. No chat text is sent to Codex.";
+        : "Start reads currently rendered ChatGPT messages and saves them locally. Limited chat excerpts are sent to Codex only after you review and approve the exact payload.";
     // A single recording control is visible at a time. Starting also
     // captures the transcript, so manual capture stays in Advanced options.
     startButton.hidden = active;
@@ -228,6 +228,18 @@ async function refresh() {
       ? String(result.visibleAssistant) : "—";
     evidenceCount.textContent = (result.recordedEvents || 0) + " recorded events · " +
       (result.recordedCommits || 0) + " retrieved GitHub commits.";
+    if (result.githubEvidence && !result.recordedCommits) {
+      const evidence = result.githubEvidence;
+      evidenceCount.textContent += evidence.unavailable
+        ? " " + evidence.unavailable + " public GitHub fetches failed; re-scan to retry."
+        : evidence.metadataOnly
+          ? " GitHub returned commit metadata but no safe source diffs."
+          : !evidence.capturedRepositories && !evidence.capturedCommitLinks
+            ? " No GitHub repository or full commit URL found in the saved chat."
+            : evidence.referenceEvents
+              ? " Commit references were found, but no source patch was retrieved."
+              : " A repository was detected, but no commit was captured yet.";
+    }
 
     if (!active) {
       observerNode.textContent = "Start recording to check the page observer.";
@@ -489,6 +501,9 @@ async function reviewCodexEvidence() {
       reviewedEvidence.commitCount + " retrieved commits · " +
       reviewedEvidence.patternCount + " patterns · " +
       reviewedEvidence.matchedRequests + " conversation requests with candidate commit links. " +
+      (reviewedEvidence.commitCount === 0
+        ? "No verified source patches: Codex can discuss saved requests, not confirm code changes. "
+        : "") +
       "Review the excerpts and confidence labels before approving.";
   } catch (error) {
     codexStatus.textContent = error?.message || "Unable to prepare evidence.";

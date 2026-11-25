@@ -2470,3 +2470,88 @@ test("assistant DOM replacement retains previously seen commit links in the same
     e.attribution?.state === "automatic").length, 2,
     "a repeated scan must not duplicate the commits");
 });
+
+test("a failed GitHub commit fetch retries on the same approved reference", async () => {
+  let attempt = 0;
+  const h = harness(undefined, null, async () => {
+    attempt++;
+    if (attempt === 1) return { ok: false, status: 403 };
+    return { ok: true, status: 200, headers: { get: () => null },
+      text: async () => JSON.stringify({ sha: HASH, files: [
+        { filename: "src/retry.ts", status: "modified", additions: 1, deletions: 0,
+          patch: "@@ -1 +1 @@\\n-old\\n+new" }
+      ] }) };
+  });
+  await enable(h);
+  const request = { type: "importCommitUrl", tabId: 9, url: COMMIT };
+  assert.equal((await h.send(request)).ok, true);
+  const key = "testerinopapa/gentle-control-room@" + HASH;
+  assert.equal((await exported(h)).commits[key].status, "unavailable");
+  const retried = await h.send(request);
+  assert.equal(retried.ok, true);
+  assert.equal(retried.duplicate, true);
+  assert.equal((await exported(h)).commits[key].status, "retrieved");
+  assert.equal(h.requests.length, 2);
+  assert.equal((await exported(h)).events.filter(e => e.type === "github_commit_ref").length, 1);
+});
+
+test("cached repo history can re-fetch a failed patch without repeating discovery", async () => {
+  let patchCount = 0;
+  const h = harness(undefined, null, async url => {
+    if (url.endsWith("commits?per_page=3"))
+      return { ok: true, headers: { get: () => null },
+        text: async () => JSON.stringify([{ sha: HASH }]) };
+    patchCount++;
+    if (patchCount === 1) return { ok: false, status: 403 };
+    return { ok: true, headers: { get: () => null },
+      text: async () => JSON.stringify({ sha: HASH, files: [
+        { filename: "src/cached.ts", status: "modified", additions: 1, deletions: 0,
+          patch: "@@ -1 +1 @@\\n-before\\n+after" }
+      ] }) };
+  }, { ok: true, renderedCount: 1, messages: [
+    { role: "assistant", text: "Repository: example/repo" }
+  ] });
+  await enable(h);
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  const key = "example/repo@" + HASH;
+  assert.equal((await exported(h)).commits[key].status, "unavailable");
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  assert.equal((await exported(h)).commits[key].status, "retrieved");
+  assert.equal(h.requests.filter(r => r.requested.endsWith("commits?per_page=3")).length, 1);
+  assert.equal(h.requests.filter(r => r.requested.includes("/commits/" + HASH)).length, 2);
+});
+
+test("old saved chat text recovers repository and commit identity without fresh DOM data", async () => {
+  const h = harness();
+  await enable(h);
+  const session = [...h.sessions.values()].find(value => value?.id);
+  h.local.set("gcrBrowserConversationV1", { version: 1, snapshots: [{
+    sessionId: session.id, capturedAt: new Date().toISOString(),
+    messages: [
+      { role: "user", text: "Please inspect repo: Testerinopapa/gentle-control-room" },
+      { role: "assistant", text: "Commit github.com/Testerinopapa/gentle-control-room/commit/" + HASH },
+      { role: "user", text: "Do not trust https://evilgithub.com/fake/repo/commit/" + HASH }
+    ]
+  }] });
+  const result = await h.send({ type: "getBrowserConversation", tabId: 9 });
+  assert.equal(result.ok, true);
+  assert.ok(result.snapshot.messages[0].github.repositories.includes(
+    "testerinopapa/gentle-control-room"));
+  assert.equal(result.snapshot.messages[1].github.commits[0].sha, HASH);
+  assert.equal(result.snapshot.messages[2].github, undefined,
+    "a lookalike hostname must not produce an inferred public GitHub commit");
+});
+
+test("saved conversations are never returned for unrelated browser tabs", async () => {
+  const h = harness(undefined, null, null, { ok: true, renderedCount: 1,
+    messages: [{ role: "user", text: "Fix code on the first tab" }] });
+  await enable(h);
+  await h.send({ type: "captureBrowserConversation", tabId: 9 });
+  assert.ok((await h.send({ type: "getBrowserConversation", tabId: 9 })).snapshot);
+  h.navigate("https://example.com/");
+  const result = await h.send({ type: "getBrowserConversation", tabId: 9 });
+  assert.equal(result.ok, true);
+  assert.equal(result.snapshot, null);
+  const state = await h.send({ type: "getState", tabId: 9 });
+  assert.equal(state.browserConversation, null);
+});
