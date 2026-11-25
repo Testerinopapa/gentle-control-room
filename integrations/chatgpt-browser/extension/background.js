@@ -1006,7 +1006,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const tab = await chrome.tabs.get(tabId);
     if (message.type === "prepareConversationCodeReview") {
       if (sender.tab) return { ok: false };
-      return prepareConversationCodeReview(tabId, tab);
+      try { return await prepareConversationCodeReview(tabId, tab); }
+      catch (error) { return { ok: false, error: String(error?.message || "Unable to prepare conversation review.").slice(0, 250) }; }
     }
     if (message.type === "getBrowserConversation") {
       if (sender.tab) return { ok: false };
