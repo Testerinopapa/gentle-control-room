@@ -208,3 +208,42 @@ test("A short 'proceed' reply still captures an explicit assistant commit link",
   assert.equal(parsed.conversationCorrelation.requests[0].candidateCommits[0].evidence,
     "commit_link_in_assistant_reply");
 });
+
+test("saved conversation alone can be reviewed without invented commit evidence", () => {
+  const evidence = example();
+  evidence.analysis.tasks = [];
+  evidence.analysis.patterns = [];
+  evidence.commits = {};
+  evidence.events = [];
+  const snapshot = { messages: [
+    { role: "user", text: "Please fix the missing browser capture result" },
+    { role: "assistant", text: "I said I repaired the capture flow." }
+  ] };
+  const result = build(evidence, snapshot);
+  const payload = JSON.parse(result.json);
+  assert.equal(payload.evidenceCoverage.retrievalStatus,
+    "no_repository_or_commit_link_in_captured_chat");
+  assert.equal(payload.evidenceCoverage.retrievedPatchCommits, 0);
+  assert.equal(payload.conversationCorrelation.requests.length, 1);
+  assert.equal(payload.conversationCorrelation.requests[0].candidateCommits.length, 0);
+  assert.ok(payload.conversationCorrelation.requests[0].assistantReported.includes("said I repaired"));
+});
+
+test("failed GitHub lookups remain explicitly unverified in the review", () => {
+  const evidence = example();
+  const key = "example/repo@" + "a".repeat(40);
+  evidence.analysis.tasks = [];
+  evidence.analysis.patterns = [];
+  evidence.commits[key].status = "unavailable";
+  evidence.events = [{ type: "github_commit_ref", discovery: "conversation_scan",
+    repository: "example/repo", commitSha: "a".repeat(40) }];
+  const snapshot = { messages: [
+    { role: "user", text: "Fix the GitHub parser" },
+    { role: "assistant", text: "Repository: example/repo" }
+  ] };
+  const payload = JSON.parse(build(evidence, snapshot).json);
+  assert.equal(payload.evidenceCoverage.retrievalStatus, "github_fetch_failed");
+  assert.equal(payload.evidenceCoverage.failedPublicGitHubFetches, 1);
+  assert.equal(payload.evidenceCoverage.retrievedPatchCommits, 0);
+  assert.equal(payload.conversationCorrelation.matchedRequests, 0);
+});
