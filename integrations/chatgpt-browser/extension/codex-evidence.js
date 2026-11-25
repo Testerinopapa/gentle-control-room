@@ -171,7 +171,7 @@ globalThis.GcrCodexEvidence = Object.freeze({
       throw new Error("No captured coding tasks, saved coding requests, or GitHub patches yet. Scan this conversation first.");
     const capturedRepos = new Set((snapshot?.messages || [])
       .flatMap(message => message.github?.repositories || [])
-      .filter(repo => /^[a-z0-9-]{1,39}\\/[a-z0-9_.-]{1,100}$/i.test(repo)));
+      .filter(repo => /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}$/i.test(repo)));
     const capturedLinks = new Set((snapshot?.messages || [])
       .flatMap(message => message.github?.commits || [])
       .map(ref => String(ref?.repository || "").toLowerCase() + "@" + String(ref?.sha || "").toLowerCase())
