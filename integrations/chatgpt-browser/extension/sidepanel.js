@@ -29,6 +29,7 @@ const browserConversationPreview = document.getElementById("browser-conversation
 const downloadBrowserButton = document.getElementById("download-browser-conversation");
 const deleteBrowserButton = document.getElementById("delete-browser-conversation");
 const codexPrepare = document.getElementById("prepare-codex");
+const codexTest = document.getElementById("test-codex");
 const codexReview = document.getElementById("codex-review");
 const codexPreview = document.getElementById("codex-preview");
 const codexApproval = document.getElementById("codex-approval");
@@ -514,6 +515,37 @@ async function reviewCodexEvidence() {
   }
 }
 
+async function reviewTestCodexEvidence() {
+  if (busy) return;
+  busy = true;
+  codexTest.disabled = true;
+  codexPrepare.disabled = true;
+  reviewedEvidence = null;
+  codexReview.hidden = true;
+  codexApproval.checked = false;
+  codexPreview.value = "";
+  codexPrepare.textContent = "Analyze coding activity";
+  codexOutput.hidden = true;
+  codexStatus.textContent = "TEST: retrieving the real GitHub commit…";
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "testCodexGitHub" });
+    if (!response?.ok || !response.data) throw new Error(response?.error || "Test retrieval failed.");
+    const evidence = GcrCodexEvidence.build(response.data);
+    if (evidence.commitCount !== 1) throw new Error("Test failed: exact patch did not enter the Codex payload.");
+    reviewedEvidence = { ...evidence, isTest: true };
+    codexPreview.value = evidence.json;
+    codexReview.hidden = false;
+    codexPrepare.textContent = "Cancel review";
+    codexStatus.textContent = "TEST retrieval passed: README.md and its actual diff are in the payload. Review, approve, then run Codex analysis.";
+  } catch (error) {
+    codexStatus.textContent = error?.message || "Test failed.";
+  } finally {
+    busy = false;
+    codexTest.disabled = false;
+    codexPrepare.disabled = false;
+  }
+}
+
 function runNativeCodex(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendNativeMessage(CODEX_HOST, message, result => {
@@ -585,10 +617,14 @@ async function analyzeWithCodex() {
     if (problem) throw new Error(problem);
     codexOutput.textContent = result.output;
     codexOutput.hidden = false;
-    await chrome.storage.local.set({
-      [CODEX_INSIGHTS_KEY]: { output: result.output, analyzedAt: new Date().toISOString() }
-    });
-    codexStatus.textContent = "Codex analysis complete. Saved locally in Edge.";
+    if (reviewedEvidence.isTest) {
+      codexStatus.textContent = "TEST: Codex returned an analysis. Check that it identifies README.md, the marker and the lack of runtime changes. Test output is not saved to normal history.";
+    } else {
+      await chrome.storage.local.set({
+        [CODEX_INSIGHTS_KEY]: { output: result.output, analyzedAt: new Date().toISOString() }
+      });
+      codexStatus.textContent = "Codex analysis complete. Saved locally in Edge.";
+    }
     reviewedEvidence = null;
     codexReview.hidden = true;
     codexApproval.checked = false;
@@ -626,6 +662,7 @@ function closeCodexReview() {
 }
 // One action for coding analysis: open review -> approve -> run.
 // When not approved, clicking again closes the review, never sends data.
+codexTest.addEventListener("click", () => void reviewTestCodexEvidence());
 codexPrepare.addEventListener("click", () => {
   if (busy) return;
   if (!reviewedEvidence) void reviewCodexEvidence();

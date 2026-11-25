@@ -863,6 +863,32 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (!commit) return { ok: false, error: "Provide a full GitHub commit URL containing a 40-character SHA." };
       return recordCommit(tabId, session, commit.repository, commit.sha, "manual", { taskId: message.taskId });
     }
+    if (message.type === "testCodexGitHub") {
+      // Explicit side-panel diagnostic; fixed public commit, no chat or history read/write.
+      if (sender.tab || sender.url !== chrome.runtime.getURL("sidepanel.html"))
+        return { ok: false, error: "Open the extension side panel." };
+      const repository = "testerinopapa/gentle-control-room";
+      const sha = "9002ee853b7dfa14c6ec7c7ccc0baebe81e5a6c2";
+      const key = repository + "@" + sha;
+      let commit;
+      try { commit = await fetchCommit(repository, sha); }
+      catch (error) { return { ok: false, error: "Test GitHub retrieval failed: " + String(error?.message || "unavailable").slice(0, 200) }; }
+      if (commit.status !== "retrieved" || !commit.files.some(file =>
+          file.path === "README.md" && file.patch.split("\n").some(line =>
+            line === "+<!-- GCR_CAPTURE_PROBE_20261125 -->")))
+        return { ok: false, error: "Test failed: expected README.md patch marker missing." };
+      const timestamp = new Date().toISOString();
+      const data = { version: 1, events: [{ timestamp, source: "chatgpt_browser",
+        sessionId: "controlled-test", type: "github_commit_ref", repository,
+        commitSha: sha, discovery: "manual" }],
+        commits: { [key]: { ...commit, repository, sha, savedAt: timestamp } } };
+      // No synthetic task or historical activity is claimed. Use the normal
+      // evidence builder and its existing manual-link provenance.
+      return { ok: true, data: { ...data, analysis: {
+        tasks: [], patterns: [], coverage: {},
+        limitations: ["Controlled GitHub retrieval test. No browser capture, authorship, test execution or deployment verified."]
+      } } };
+    }
     if (message.type === "exportEvidence") {
       const data = bounded(await readEvidence());
       return { ok: true, data: {
