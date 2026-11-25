@@ -526,8 +526,8 @@ function codexCapabilityProblem(result) {
   if (result?.ok === true && result.codexAnalyze === true &&
       result.protocolVersion === 1) return null;
   if (result?.ok === false || result?.ok === true)
-    return "The installed Windows native host is outdated or does not support Codex analysis. Updating the Edge extension does not update the native host. Run install-host.ps1 with your Edge extension ID, restart Edge, and try again.";
-  return "The Windows native host did not confirm Codex analysis support. Reinstall it using install-host.ps1, restart Edge, and try again.";
+    return "The installed Windows native host is outdated or does not support Codex analysis. Updating the Edge extension does not update the native host. From the repository folder, run .\\integrations\\chatgpt-browser\\install-host.ps1 and restart Edge.";
+  return "The Windows native host did not confirm Codex analysis support. From the repository folder, run .\\integrations\\chatgpt-browser\\install-host.ps1 and restart Edge.";
 }
 
 async function analyzeWithCodex() {
@@ -541,7 +541,7 @@ async function analyzeWithCodex() {
     try {
       capabilities = await runNativeCodex({ type: "codex_capabilities", version: 1 });
     } catch {
-      throw new Error("Cannot verify the installed Windows Codex bridge. Reinstall it with install-host.ps1 using your Edge extension ID and restart Edge.");
+      throw new Error("Cannot verify the installed Windows Codex bridge. From the repository folder, run .\\integrations\\chatgpt-browser\\install-host.ps1 and restart Edge.");
     }
     const mismatch = codexCapabilityProblem(capabilities);
     if (mismatch) throw new Error(mismatch);
