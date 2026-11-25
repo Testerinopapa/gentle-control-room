@@ -519,13 +519,35 @@ function codexResponseProblem(result) {
   return null;
 }
 
+// A native host installed before Codex support responds with a generic
+// {ok:false} to unknown message types. Probe without sending any evidence,
+// so the user sees a version-specific error instead of a misleading CLI error.
+function codexCapabilityProblem(result) {
+  if (result?.ok === true && result.codexAnalyze === true &&
+      result.protocolVersion === 1) return null;
+  if (result?.ok === false || result?.ok === true)
+    return "The installed Windows native host is outdated or does not support Codex analysis. Updating the Edge extension does not update the native host. Run install-host.ps1 with your Edge extension ID, restart Edge, and try again.";
+  return "The Windows native host did not confirm Codex analysis support. Reinstall it using install-host.ps1, restart Edge, and try again.";
+}
+
 async function analyzeWithCodex() {
   if (busy || !reviewedEvidence || !codexApproval.checked) return;
   busy = true;
   codexPrepare.disabled = true;
   codexPrepare.textContent = "Analyzing…";
-  codexStatus.textContent = "Codex is analyzing the approved evidence…";
+  codexStatus.textContent = "Checking the installed Codex bridge…";
   try {
+    let capabilities;
+    try {
+      capabilities = await runNativeCodex({ type: "codex_capabilities", version: 1 });
+    } catch {
+      throw new Error("Cannot verify the installed Windows Codex bridge. Reinstall it with install-host.ps1 using your Edge extension ID and restart Edge.");
+    }
+    const mismatch = codexCapabilityProblem(capabilities);
+    if (mismatch) throw new Error(mismatch);
+    // Only submit the reviewed evidence after capability confirmation AND
+    // the existing explicit approval checkbox.
+    codexStatus.textContent = "Codex is analyzing the approved evidence…";
     const result = await runNativeCodex({
       type: "codex_analyze",
       version: 1,
