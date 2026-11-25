@@ -57,6 +57,8 @@ jobs:
             $parseErrors | ForEach-Object { Write-Error $_ }
             exit 1
           }
+      - name: Stage 2 live GitHub regression
+        run: node --test integrations/chatgpt-browser/tests/stage2-live-github.test.mjs
       - name: Browser extension tests
         run: node --test integrations/chatgpt-browser/tests/extension.test.mjs
       - name: Codex evidence review tests

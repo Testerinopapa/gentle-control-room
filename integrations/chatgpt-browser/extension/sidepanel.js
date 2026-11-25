@@ -29,15 +29,10 @@ const browserConversationPreview = document.getElementById("browser-conversation
 const downloadBrowserButton = document.getElementById("download-browser-conversation");
 const deleteBrowserButton = document.getElementById("delete-browser-conversation");
 const codexPrepare = document.getElementById("prepare-codex");
-const codexTest = document.getElementById("test-codex");
-const codexReview = document.getElementById("codex-review");
-const codexPreview = document.getElementById("codex-preview");
-const codexApproval = document.getElementById("codex-approval");
 const codexStatus = document.getElementById("codex-status");
 const codexOutput = document.getElementById("codex-output");
 const CODEX_HOST = "org.gentlecontrolroom.chatgpt";
 const CODEX_INSIGHTS_KEY = "gcrCodexInsightsV1";
-let reviewedEvidence = null;
 let workflowEnabled = false;
 
 let selectedTab = null;
@@ -459,11 +454,7 @@ async function clearEvidence() {
     if (!response?.ok) throw Error("Unable to delete local evidence.");
     await chrome.storage.local.remove(CODEX_INSIGHTS_KEY);
     renderBrowserConversation(null);
-    reviewedEvidence = null;
-    codexReview.hidden = true;
-    codexApproval.checked = false;
-    codexPreview.value = "";
-    codexPrepare.textContent = "Analyze coding activity";
+    codexPrepare.textContent = "Analyze coding activity with Codex";
     codexOutput.hidden = true;
     codexOutput.textContent = "";
     codexStatus.textContent = "No Codex insights yet.";
@@ -471,93 +462,6 @@ async function clearEvidence() {
   finally { busy = false; clearButton.disabled = false; await refresh(); }
 }
 
-
-async function reviewCodexEvidence() {
-  if (busy) return;
-  busy = true;
-  codexPrepare.disabled = true;
-  codexPrepare.textContent = "Reviewing coding evidence…";
-  codexStatus.textContent = "Preparing evidence review…";
-  reviewedEvidence = null;
-  codexReview.hidden = true;
-  codexApproval.checked = false;
-  try {
-    const tab = await activeTab();
-    if (!Number.isInteger(tab?.id)) throw new Error("Select the ChatGPT conversation.");
-    // Refresh the current recording before review. A saved transcript is a
-    // fallback if a long/virtualized conversation cannot be scanned again.
-    const state = await chrome.runtime.sendMessage({ type: "getState", tabId: tab.id });
-    let scanWarning = "";
-    if (state?.active && state.workflowEnabled) {
-      codexStatus.textContent = "Scanning the conversation for GitHub commit links…";
-      try {
-        const captured = await chrome.runtime.sendMessage({ type: "captureBrowserConversation", tabId: tab.id });
-        if (!captured?.ok) scanWarning = "Fresh scan unavailable; using saved evidence. ";
-      } catch { scanWarning = "Fresh scan unavailable; using saved evidence. "; }
-    }
-    codexStatus.textContent = scanWarning + "Resolving actual GitHub patches for this conversation…";
-    const response = await chrome.runtime.sendMessage({ type: "prepareConversationCodeReview", tabId: tab.id });
-    if (!response?.ok || !response.data) throw new Error(response?.error || "Unable to prepare current conversation evidence.");
-    reviewedEvidence = GcrCodexEvidence.build(response.data, response.snapshot || null);
-    const d = response.diagnostics || {};
-    codexPreview.value = reviewedEvidence.json;
-    codexReview.hidden = false;
-    codexPrepare.textContent = "Cancel review";
-    codexStatus.textContent = scanWarning + (d.discovered || 0) + " commit references found · " +
-      (d.unavailable || 0) + " unavailable · " + (d.metadataOnly || 0) + " metadata only · " +
-      (d.omitted || 0) + " omitted by limits · " + reviewedEvidence.taskCount + " tasks · " +
-      reviewedEvidence.commitCount + " retrieved commits · " +
-      reviewedEvidence.patternCount + " patterns · " +
-      reviewedEvidence.matchedRequests + " conversation requests with candidate commit links. " +
-      (reviewedEvidence.commitCount === 0
-        ? "No verified source patches: Codex can discuss saved requests, not confirm code changes. "
-        : "") +
-      "Review the excerpts and confidence labels before approving.";
-  } catch (error) {
-    codexStatus.textContent = error?.message || "Unable to prepare evidence.";
-  } finally {
-    busy = false;
-    codexPrepare.disabled = false;
-    if (!reviewedEvidence) codexPrepare.textContent = "Analyze coding activity";
-  }
-}
-
-async function reviewTestCodexEvidence() {
-  if (busy) return;
-  busy = true;
-  codexTest.disabled = true;
-  codexPrepare.disabled = true;
-  reviewedEvidence = null;
-  codexReview.hidden = true;
-  codexApproval.checked = false;
-  codexPreview.value = "";
-  codexPrepare.textContent = "Analyze coding activity";
-  codexOutput.hidden = true;
-  codexStatus.textContent = "TEST stage 2: scanning this ChatGPT conversation for real commit links…";
-  try {
-    const tab = await activeTab();
-    if (!Number.isInteger(tab?.id)) throw new Error("TEST: select the ChatGPT conversation.");
-    const response = await chrome.runtime.sendMessage({ type: "testCodexGitHub", tabId: tab.id });
-    if (!response?.ok || !response.data) throw new Error(response?.error || "Test retrieval failed.");
-    const d = response.diagnostics;
-    if (!d?.retrieved) throw new Error("TEST failed: " + (d?.discovered || 0) + " links found, no patches retrieved. " + (d?.failures || []).map(f => f.error).join("; "));
-    const evidence = GcrCodexEvidence.build(response.data, response.snapshot);
-    if (!evidence.commitCount) throw new Error("TEST failed: retrieved patches did not enter the Codex payload.");
-    if (!d.sourceFiles?.length) throw new Error("TEST stage 2 incomplete: " + d.discovered + " links found, " + d.retrieved + " patches retrieved, but no source-code files. Scroll to the implementation commit links and retry.");
-    if (!evidence.matchedRequests) throw new Error("TEST stage 2 incomplete: actual source patches retrieved, but no conversation request could be linked. Scroll to a request and its commit reply and retry.");
-    reviewedEvidence = { ...evidence, isTest: true };
-    codexPreview.value = evidence.json;
-    codexReview.hidden = false;
-    codexPrepare.textContent = "Cancel review";
-    codexStatus.textContent = "TEST stage 2 retrieval passed: " + d.discovered + " links found · " + evidence.commitCount + " retrieved commits · " + d.sourceFiles.length + " source files · " + evidence.matchedRequests + " matched requests · " + d.unavailable + " unavailable · " + d.omitted + " omitted. Review and approve to test Codex.";
-  } catch (error) {
-    codexStatus.textContent = error?.message || "Test failed.";
-  } finally {
-    busy = false;
-    codexTest.disabled = false;
-    codexPrepare.disabled = false;
-  }
-}
 
 function runNativeCodex(message) {
   return new Promise((resolve, reject) => {
@@ -602,91 +506,60 @@ function codexCapabilityProblem(result) {
   return "The Windows native host did not confirm Codex analysis support. From the repository folder, run .\\integrations\\chatgpt-browser\\install-host.ps1 and restart Edge.";
 }
 
+// The explicitly labeled click authorizes this one bounded submission.
+// Never send metadata-only or unlinked patches as a successful Stage 2 run.
 async function analyzeWithCodex() {
-  if (busy || !reviewedEvidence || !codexApproval.checked) return;
+  if (busy) return;
   busy = true;
   codexPrepare.disabled = true;
-  codexPrepare.textContent = "Analyzing…";
-  codexStatus.textContent = "Checking the installed Codex bridge…";
+  codexPrepare.textContent = "Scanning conversation…";
+  codexOutput.hidden = true;
+  codexOutput.textContent = "";
+  codexStatus.textContent = "Checking real GitHub patches in this conversation…";
   try {
+    const tab = await activeTab();
+    if (!Number.isInteger(tab?.id)) throw Error("Select the ChatGPT conversation.");
+    const response = await chrome.runtime.sendMessage({ type: "testCodexGitHub", tabId: tab.id });
+    if (!response?.ok || !response.data) throw Error(response?.error || "Conversation scan failed.");
+    const d = response.diagnostics || {};
+    if (!d.retrieved) throw Error("No real patches retrieved (" + (d.discovered || 0) + " links found). " +
+      (d.failures || []).map(f => f.error).join("; "));
+    const evidence = GcrCodexEvidence.build(response.data, response.snapshot);
+    const payload = JSON.parse(evidence.json);
+    const explicitSourceLink = payload.conversationCorrelation.requests.some(request =>
+      request.candidateCommits.some(ref => ref.evidence === "commit_link_in_assistant_reply" &&
+        payload.commits[ref.commit]?.files.some(file => (d.sourceFiles || []).includes(file.path))));
+    if (!evidence.commitCount || !d.sourceFiles?.length || !explicitSourceLink)
+      throw Error("Stage 2 check failed: no real source patch explicitly linked to a conversation request. Scroll to the request and implementation reply, then retry. Nothing sent to Codex.");
+    const counts = evidence.commitCount + " commits · " + d.sourceFiles.length + " source files · " +
+      evidence.matchedRequests + " candidate request matches · " + (d.unavailable || 0) + " unavailable · " +
+      (d.metadataOnly || 0) + " metadata only · " + (d.omitted || 0) + " omitted";
+    codexStatus.textContent = "Retrieval checks passed: " + counts + ". Checking Codex bridge…";
     let capabilities;
-    try {
-      capabilities = await runNativeCodex({ type: "codex_capabilities", version: 1 });
-    } catch {
-      throw new Error("Cannot verify the installed Windows Codex bridge. From the repository folder, run .\\integrations\\chatgpt-browser\\install-host.ps1 and restart Edge.");
-    }
+    try { capabilities = await runNativeCodex({ type: "codex_capabilities", version: 1 }); }
+    catch { throw Error("Cannot verify the Windows Codex bridge. Reinstall the native host if needed and restart Edge."); }
     const mismatch = codexCapabilityProblem(capabilities);
-    if (mismatch) throw new Error(mismatch);
-    // Only submit the reviewed evidence after capability confirmation AND
-    // the existing explicit approval checkbox.
-    codexStatus.textContent = "Codex is analyzing the approved evidence…";
-    const result = await runNativeCodex({
-      type: "codex_analyze",
-      version: 1,
-      approved: true,
-      evidence: reviewedEvidence.json
-    });
+    if (mismatch) throw Error(mismatch);
+    const current = await activeTab();
+    if (current?.id !== tab.id || current?.url !== tab.url)
+      throw Error("Active conversation changed before submission. Nothing sent to Codex.");
+    codexPrepare.textContent = "Analyzing…";
+    codexStatus.textContent = counts + ". Codex is analyzing the retrieved evidence…";
+    const result = await runNativeCodex({ type: "codex_analyze", version: 1, approved: true, evidence: evidence.json });
     const problem = codexResponseProblem(result);
-    if (problem) throw new Error(problem);
+    if (problem) throw Error(problem);
     codexOutput.textContent = result.output;
     codexOutput.hidden = false;
-    if (reviewedEvidence.isTest) {
-      codexStatus.textContent = "TEST stage 2: Codex returned an analysis of conversation-linked patches. Check the actual files, edits and request associations. Test output is not saved to normal history.";
-    } else {
-      await chrome.storage.local.set({
-        [CODEX_INSIGHTS_KEY]: { output: result.output, analyzedAt: new Date().toISOString() }
-      });
-      codexStatus.textContent = "Codex analysis complete. Saved locally in Edge.";
-    }
-    reviewedEvidence = null;
-    codexReview.hidden = true;
-    codexApproval.checked = false;
-    codexPrepare.textContent = "Analyze coding activity";
+    codexStatus.textContent = "Codex analysis complete: " + counts + ". Isolated output; normal history unchanged.";
   } catch (error) {
     codexStatus.textContent = error?.message || "Codex analysis failed.";
   } finally {
     busy = false;
     codexPrepare.disabled = false;
-    if (reviewedEvidence)
-      codexPrepare.textContent = codexApproval.checked ? "Retry Codex analysis" : "Cancel review";
+    codexPrepare.textContent = "Analyze coding activity with Codex";
   }
 }
-
-async function restoreCodexInsights() {
-  try {
-    const saved = (await chrome.storage.local.get(CODEX_INSIGHTS_KEY))[CODEX_INSIGHTS_KEY];
-    if (!saved || typeof saved.output !== "string") return;
-    codexOutput.textContent = saved.output;
-    codexOutput.hidden = false;
-    codexStatus.textContent = "Last Codex analysis saved " +
-      new Date(saved.analyzedAt).toLocaleString() + ". Review new evidence to analyze again.";
-  } catch {
-    // Recording works normally even if insight storage is unavailable.
-  }
-}
-
-function closeCodexReview() {
-  reviewedEvidence = null;
-  codexReview.hidden = true;
-  codexApproval.checked = false;
-  codexPreview.value = "";
-  codexPrepare.textContent = "Analyze coding activity";
-  codexStatus.textContent = "Review closed. No evidence was sent.";
-}
-// One action for coding analysis: open review -> approve -> run.
-// When not approved, clicking again closes the review, never sends data.
-codexTest.addEventListener("click", () => void reviewTestCodexEvidence());
-codexPrepare.addEventListener("click", () => {
-  if (busy) return;
-  if (!reviewedEvidence) void reviewCodexEvidence();
-  else if (codexApproval.checked) void analyzeWithCodex();
-  else closeCodexReview();
-});
-codexApproval.addEventListener("change", () => {
-  if (!reviewedEvidence || busy) return;
-  codexPrepare.textContent = codexApproval.checked
-    ? "Run approved Codex analysis" : "Cancel review";
-});
+codexPrepare.addEventListener("click", () => void analyzeWithCodex());
 
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));
@@ -706,4 +579,3 @@ chrome.tabs.onUpdated.addListener((_tabId, info) => {
 });
 setInterval(() => void refresh(), 2500);
 void refresh();
-void restoreCodexInsights();
