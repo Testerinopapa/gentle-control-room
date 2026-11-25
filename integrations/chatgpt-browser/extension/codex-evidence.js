@@ -204,6 +204,7 @@ globalThis.GcrCodexEvidence = Object.freeze({
         failedPublicGitHubFetches: unavailable,
         metadataOnlyCommits: metadataOnly,
         retrievalStatus,
+        ...(exported.reviewDiagnostics ? { reviewDiagnostics: exported.reviewDiagnostics } : {}),
         limitation: "Conversation reports and stage labels do not verify edits, command execution, test results, or authorship. Public GitHub patches require a detectable repository or full commit URL and a successful accessible API response."
       }
     };

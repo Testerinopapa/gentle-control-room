@@ -482,23 +482,30 @@ async function reviewCodexEvidence() {
   codexReview.hidden = true;
   codexApproval.checked = false;
   try {
-    const response = await chrome.runtime.sendMessage({ type: "exportEvidence" });
-    if (!response?.ok || !response.data) throw new Error("Unable to read recorded evidence.");
-    // The background returns only the conversation for this active ChatGPT
-    // tab. It remains local until the user reviews and approves the payload.
     const tab = await activeTab();
-    let snapshot = null;
-    if (Number.isInteger(tab?.id)) {
-      const captured = await chrome.runtime.sendMessage({
-        type: "getBrowserConversation", tabId: tab.id
-      });
-      if (captured?.ok) snapshot = captured.snapshot || null;
+    if (!Number.isInteger(tab?.id)) throw new Error("Select the ChatGPT conversation.");
+    // Refresh the current recording before review. A saved transcript is a
+    // fallback if a long/virtualized conversation cannot be scanned again.
+    const state = await chrome.runtime.sendMessage({ type: "getState", tabId: tab.id });
+    let scanWarning = "";
+    if (state?.active && state.workflowEnabled) {
+      codexStatus.textContent = "Scanning the conversation for GitHub commit links…";
+      try {
+        const captured = await chrome.runtime.sendMessage({ type: "captureBrowserConversation", tabId: tab.id });
+        if (!captured?.ok) scanWarning = "Fresh scan unavailable; using saved evidence. ";
+      } catch { scanWarning = "Fresh scan unavailable; using saved evidence. "; }
     }
-    reviewedEvidence = GcrCodexEvidence.build(response.data, snapshot);
+    codexStatus.textContent = scanWarning + "Resolving actual GitHub patches for this conversation…";
+    const response = await chrome.runtime.sendMessage({ type: "prepareConversationCodeReview", tabId: tab.id });
+    if (!response?.ok || !response.data) throw new Error(response?.error || "Unable to prepare current conversation evidence.");
+    reviewedEvidence = GcrCodexEvidence.build(response.data, response.snapshot || null);
+    const d = response.diagnostics || {};
     codexPreview.value = reviewedEvidence.json;
     codexReview.hidden = false;
     codexPrepare.textContent = "Cancel review";
-    codexStatus.textContent = reviewedEvidence.taskCount + " tasks · " +
+    codexStatus.textContent = scanWarning + (d.discovered || 0) + " commit references found · " +
+      (d.unavailable || 0) + " unavailable · " + (d.metadataOnly || 0) + " metadata only · " +
+      (d.omitted || 0) + " omitted by limits · " + reviewedEvidence.taskCount + " tasks · " +
       reviewedEvidence.commitCount + " retrieved commits · " +
       reviewedEvidence.patternCount + " patterns · " +
       reviewedEvidence.matchedRequests + " conversation requests with candidate commit links. " +

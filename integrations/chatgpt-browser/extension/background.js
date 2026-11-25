@@ -634,7 +634,7 @@ async function collectConversationGithub(tabId, session, messages) {
   // Explicit commit links take precedence, including older messages already
   // present when recording began. Do not infer authorship or task association.
   const pendingPatches = [];
-  for (const ref of [...explicit.values()].slice(0, 12)) {
+  for (const ref of [...explicit.values()].reverse().slice(0, 12)) {
     const active = await getSession(tabId);
     if (!active || active.id !== session.id || !active.workflowEnabled) return;
     const result = await recordCommit(tabId, session, ref.repository, ref.sha, "conversation_scan");
@@ -678,6 +678,90 @@ async function collectConversationGithub(tabId, session, messages) {
   }
   await Promise.allSettled(pendingPatches);
 }
+// User-invoked review: resolve the actual current chat's explicit commit
+// references independently of task classification and the automatic collector.
+// This temporary evidence never changes stored activity or invents task IDs.
+async function prepareConversationCodeReview(tabId, tab) {
+  if (!eligible(tab.url)) throw Error("Open the ChatGPT conversation to analyze.");
+  const path = new URL(tab.url).pathname;
+  const session = await getSession(tabId);
+  const matchingSession = session?.page === path ? session : null;
+  const snapshot = browserChatForTab(boundedBrowserChats(await readBrowserChats()), matchingSession, path);
+  if (!snapshot && !matchingSession)
+    throw Error("Start recording and capture this conversation before analysis.");
+  const store = bounded(await readEvidence());
+  const sessionIds = new Set([snapshot?.sessionId, matchingSession?.id].filter(Boolean));
+  const events = store.events.filter(e => sessionIds.has(e.sessionId));
+  const refs = new Map();
+  const add = (repository, sha, origin) => {
+    if (typeof repository !== "string" || typeof sha !== "string" ||
+        !REPOSITORY.test(repository) || !COMMIT_SHA.test(sha)) return;
+    repository = repository.toLowerCase(); sha = sha.toLowerCase();
+    const key = repository + "@" + sha;
+    refs.delete(key); refs.set(key, { repository, sha, origin });
+  };
+  for (const e of events) {
+    if (e.type === "github_commit_ref")
+      add(e.repository, e.commitSha, e.discovery === "repository_history" ? "repository_history" :
+        e.discovery === "manual" ? "manual" : "conversation_scan");
+  }
+  for (const message of snapshot?.messages || []) {
+    const github = unionChatGithub(message.github, githubFromText(message.text));
+    for (const ref of github.commits) add(ref.repository, ref.sha, "conversation_scan");
+  }
+  const candidates = [...refs.entries()].reverse();
+  const selected = candidates.slice(0, 12);
+  const commits = {}, reviewEvents = [...events];
+  let omittedForSize = 0, patchChars = 0;
+  // Reuse confirmed cached patches; retry unavailable ones. Fetch in bounded
+  // batches so a large conversation cannot start unbounded network requests.
+  for (let i = 0; i < selected.length; i += 3) {
+    const batch = await Promise.all(selected.slice(i, i + 3).map(async ([key, ref]) => {
+      let commit = store.commits[key];
+      if (!commit || commit.status === "unavailable") {
+        try { commit = await fetchCommit(ref.repository, ref.sha); }
+        catch (error) { commit = { status: "unavailable", files: [],
+          note: "GitHub retrieval failed: " + String(error?.message || "unavailable").slice(0, 160) }; }
+      }
+      return { key, ref, commit };
+    }));
+    for (const { key, ref, commit } of batch) {
+      const size = JSON.stringify(commit.files || []).length;
+      if (commit.status === "retrieved" && patchChars + size > 75000) { omittedForSize++; continue; }
+      patchChars += size;
+      commits[key] = { ...commit, repository: ref.repository, sha: ref.sha };
+      // A recorded historical reference may have no discovery field. Supply
+      // review-only provenance so the Codex builder does not discard its patch.
+      if (!reviewEvents.some(e => e.type === "github_commit_ref" &&
+          e.repository === ref.repository && e.commitSha === ref.sha &&
+          ["conversation_scan", "repository_history", "manual"].includes(e.discovery))) {
+        reviewEvents.push({ type: "github_commit_ref", source: "chatgpt_browser",
+          timestamp: new Date().toISOString(), sessionId: matchingSession?.id || snapshot?.sessionId,
+          repository: ref.repository, commitSha: ref.sha, discovery: ref.origin,
+          attribution: { state: "unattributed", method: "review_reference", confidence: "uncertain" } });
+      }
+    }
+  }
+  const latestTab = await chrome.tabs.get(tabId);
+  if (!eligible(latestTab.url) || new URL(latestTab.url).pathname !== path)
+    throw Error("Conversation changed while preparing evidence. Retry on the intended chat.");
+  if (matchingSession) {
+    const current = await getSession(tabId);
+    if (!current || current.id !== matchingSession.id || current.consentEpoch !== matchingSession.consentEpoch)
+      throw Error("Recording changed while preparing evidence. Retry after confirming recording.");
+  }
+  const data = { version: 1, events: reviewEvents, commits };
+  const analysis = globalThis.GentleCodingAnalysis.analyze(data);
+  const diagnostics = { discovered: candidates.length, selected: selected.length,
+    retrieved: Object.values(commits).filter(c => c.status === "retrieved").length,
+    unavailable: Object.values(commits).filter(c => c.status === "unavailable").length,
+    metadataOnly: Object.values(commits).filter(c => c.status === "metadata_only").length,
+    omitted: candidates.length - selected.length + omittedForSize };
+  analysis.limitations.push("Review is scoped to the selected conversation and its recorded sessions. " +
+    "Explicit links establish references, not authorship. " + diagnostics.omitted + " commit references omitted by review limits.");
+  return { ok: true, data: { ...data, analysis, reviewDiagnostics: diagnostics }, snapshot, diagnostics };
+}
+
 function parseCommitUrl(input) {
   if (typeof input !== "string" || input.length > 300) return null;
   let url;
@@ -920,6 +1004,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const tabId = message.tabId;
     if (!Number.isInteger(tabId)) throw Error("No selected tab.");
     const tab = await chrome.tabs.get(tabId);
+    if (message.type === "prepareConversationCodeReview") {
+      if (sender.tab) return { ok: false };
+      return prepareConversationCodeReview(tabId, tab);
+    }
     if (message.type === "getBrowserConversation") {
       if (sender.tab) return { ok: false };
       const session = await getSession(tabId);
