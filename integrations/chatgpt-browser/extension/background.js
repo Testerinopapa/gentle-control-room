@@ -441,6 +441,13 @@ async function fetchCommit(repository, sha) {
       status: files.length ? "retrieved" : "metadata_only",
       files,
       changedFiles: json.files.length,
+      // GitHub commit metadata supports topic comparison but is not proof
+      // of who requested, performed or verified a change.
+      message: typeof json.commit?.message === "string"
+        ? json.commit.message.split(/\r?\n/)[0].slice(0, 160) : "",
+      committedAt: typeof json.commit?.committer?.date === "string" &&
+        Number.isFinite(Date.parse(json.commit.committer.date))
+        ? json.commit.committer.date.slice(0, 40) : null,
       note: files.length
         ? "A public commit reference was recorded. Authorship, tests and outcome are unverified."
         : "Commit metadata was retrieved, but no safe textual patches were available. Authorship, tests and outcome are unverified."

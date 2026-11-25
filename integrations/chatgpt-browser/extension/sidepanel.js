@@ -471,13 +471,25 @@ async function reviewCodexEvidence() {
   try {
     const response = await chrome.runtime.sendMessage({ type: "exportEvidence" });
     if (!response?.ok || !response.data) throw new Error("Unable to read recorded evidence.");
-    reviewedEvidence = GcrCodexEvidence.build(response.data);
+    // The background returns only the conversation for this active ChatGPT
+    // tab. It remains local until the user reviews and approves the payload.
+    const tab = await activeTab();
+    let snapshot = null;
+    if (Number.isInteger(tab?.id)) {
+      const captured = await chrome.runtime.sendMessage({
+        type: "getBrowserConversation", tabId: tab.id
+      });
+      if (captured?.ok) snapshot = captured.snapshot || null;
+    }
+    reviewedEvidence = GcrCodexEvidence.build(response.data, snapshot);
     codexPreview.value = reviewedEvidence.json;
     codexReview.hidden = false;
     codexPrepare.textContent = "Cancel review";
     codexStatus.textContent = reviewedEvidence.taskCount + " tasks · " +
       reviewedEvidence.commitCount + " retrieved commits · " +
-      reviewedEvidence.patternCount + " patterns. Review the JSON before approving.";
+      reviewedEvidence.patternCount + " patterns · " +
+      reviewedEvidence.matchedRequests + " conversation requests with candidate commit links. " +
+      "Review the excerpts and confidence labels before approving.";
   } catch (error) {
     codexStatus.textContent = error?.message || "Unable to prepare evidence.";
   } finally {
