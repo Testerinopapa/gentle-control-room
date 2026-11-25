@@ -89,7 +89,7 @@ function browserChatForTab(store, session, path = null) {
   if (session) return store.snapshots.find(item => item.sessionId === session.id) ||
     (key && store.snapshots.filter(item => item.conversationKey === key).at(-1)) || null;
   if (key) return store.snapshots.filter(item => item.conversationKey === key).at(-1) || null;
-  return store.snapshots.at(-1) || null;
+  return null;
 }
 function cleanChatText(role, text) {
   const value = String(text).trim();
@@ -144,8 +144,10 @@ function normalizeChatTurn(message) {
     /^[a-z]+:[^\r\n]{1,210}$/.test(message.key) ? message.key : null;
   const recovered = githubFromText(text);
   const github = normalizeChatGithub({
-    repositories: [...(message.github?.repositories || []), ...recovered.repositories],
-    commits: [...(message.github?.commits || []), ...recovered.commits]
+    repositories: [...(Array.isArray(message.github?.repositories) ? message.github.repositories : []),
+      ...recovered.repositories],
+    commits: [...(Array.isArray(message.github?.commits) ? message.github.commits : []),
+      ...recovered.commits]
   });
   return { role: message.role, text, ...(key ? { key } : {}),
     ...((github.repositories.length || github.commits.length) ? { github } : {}) };
@@ -1021,8 +1023,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (session && !samePage) await stop(tabId);
       const local = await readEvidence();
       const analysis = globalThis.GentleCodingAnalysis.analyze(local);
-      const savedChat = browserChatForTab(boundedBrowserChats(await readBrowserChats()),
-        samePage ? session : null, allowed ? new URL(tab.url).pathname : null);
+      const savedChat = allowed
+        ? browserChatForTab(boundedBrowserChats(await readBrowserChats()),
+          samePage ? session : null, new URL(tab.url).pathname)
+        : null;
       return {
         ok: true, allowed, reason: allowed ? null : "Open ChatGPT in the active tab.",
         active: Boolean(session && samePage),
