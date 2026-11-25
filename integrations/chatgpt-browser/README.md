@@ -1,10 +1,37 @@
-# Gentle Control Room — standalone Edge coding evidence extension (v0.9.17)
+# Gentle Control Room — standalone Edge coding evidence extension (v0.9.18)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for approved Codex analysis.
 This extension works on its own in Microsoft Edge (and compatible Chromium-based
 browsers with side-panel support). It keeps activity evidence in
 `chrome.storage.local`, not on a remote server. Existing legacy Windows
 `.jsonl` files do not automatically migrate into this storage.
+
+## Conversation-to-commit suggestions (v0.9.18)
+
+The existing **Analyze coding activity** review now combines two locally retained
+sources before approval: the captured conversation for the current ChatGPT tab,
+and retrieved GitHub commit patches. No extra controls or bridge reinstall are needed.
+
+- An explicit full commit link in an assistant reply is labeled
+  **commit_link_in_assistant_reply** (a reference, **not** proof of authorship).
+- A full link supplied by the user is labeled **commit_link_in_user_request**.
+- Requests without links may receive **request_to_commit_topic_overlap**
+  suggestions only when at least two distinctive terms overlap GitHub commit
+  summary and changed-file paths. These are always **possible_only**, never
+  automatic attributions. Ambiguous and unmatched requests remain unmatched.
+- Codex receives a bounded, reviewable list of request snippets, truncated
+  assistant statements and candidate commit SHAs alongside patch evidence.
+  Test results, completion and authorship are explicitly **unverified**.
+- Captured conversation text is **not** added to the ordinary evidence export.
+  It is included only in the on-screen Codex review, and sent only after the
+  existing explicit approval. If there is no saved conversation for the tab,
+  patch-only analysis still works.
+
+GitHub commit summaries are stored for newly fetched commits. Old cached
+patches still work, but topic suggestions based on titles improve after
+fresh commit capture. History scans do not contain verified original message
+timestamps, so timing is not used to assert a request-to-commit connection.
+Only accessible public repositories and existing retention limits are supported.
 
 ## Native Codex bridge version check (v0.9.17)
 
