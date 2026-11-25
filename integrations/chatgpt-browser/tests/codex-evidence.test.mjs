@@ -115,3 +115,78 @@ test("Codex includes captured conversation commits with an explicit unverified p
   assert.equal(JSON.parse(result.json).commits["example/repo@" + "a".repeat(40)]
     .provenance, "conversation_link");
 });
+
+
+test("Codex review links saved conversation turns to explicit and topic-matched commits", () => {
+  const evidence = example();
+  const shaA = "a".repeat(40), shaB = "b".repeat(40);
+  const keyA = "example/repo@" + shaA, keyB = "example/repo@" + shaB;
+  evidence.analysis.tasks = [];
+  evidence.analysis.patterns = [];
+  evidence.events = [shaA, shaB].map(sha => ({
+    type: "github_commit_ref", repository: "example/repo",
+    commitSha: sha, discovery: "repository_history"
+  }));
+  evidence.commits[keyA].message = "Save GitHub reference metadata";
+  evidence.commits[keyB] = {
+    status: "retrieved", repository: "example/repo", sha: shaB,
+    message: "Repair native host installer validation",
+    files: [{
+      path: "integrations/chatgpt-browser/install-host.ps1",
+      status: "modified", additions: 3, deletions: 1,
+      patch: "@@ -1 +1 @@\n-old\n+new"
+    }]
+  };
+  const chat = { capturedAt: "2026-11-24T01:00:00.000Z", messages: [
+    { role: "user", text: "Get commit links from the browser scanner" },
+    { role: "assistant", text: "I found the exact GitHub commit", github: {
+      commits: [{ repository: "example/repo", sha: shaA }]
+    }},
+    { role: "user", text: "Repair native host installer validation in PowerShell" },
+    { role: "assistant", text: "The patch is reported to fix the installer" },
+    { role: "user", text: "Add an unrelated button" },
+    { role: "assistant", text: "Discussed it" }
+  ] };
+  const parsed = JSON.parse(build(evidence, chat).json);
+  const linked = parsed.conversationCorrelation;
+  assert.equal(linked.available, true);
+  assert.equal(linked.matchedRequests, 2);
+  assert.equal(linked.requests[0].candidateCommits[0].commit, keyA);
+  assert.equal(linked.requests[0].candidateCommits[0].evidence, "commit_link_in_assistant_reply");
+  assert.equal(linked.requests[1].candidateCommits[0].commit, keyB);
+  assert.equal(linked.requests[1].candidateCommits[0].confidence, "possible_only");
+  assert.equal(linked.requests[2].candidateCommits.length, 0);
+  assert.equal(parsed.commits[keyB].message, "Repair native host installer validation");
+  assert.equal(parsed.conversationCorrelation.unmatchedCommits, 0);
+  assert.equal(parsed.analysis.tasks.length, 0);
+  assert.equal(parsed.events, undefined);
+});
+
+test("No raw chat is transmitted unless a saved browser snapshot is expressly reviewed", () => {
+  const evidence = example();
+  const noChat = build(evidence);
+  assert.equal(JSON.parse(noChat.json).conversationCorrelation.available, false);
+  assert.ok(!noChat.json.includes("PRIVATE USER REQUEST"));
+  const snapshot = { messages: [
+    { role: "user", text: "Fix the PRIVATE USER REQUEST installer issue" },
+    { role: "assistant", text: "The installer was changed, reportedly." }
+  ] };
+  const reviewed = build(evidence, snapshot);
+  assert.ok(reviewed.json.includes("PRIVATE USER REQUEST"));
+  assert.ok(reviewed.json.includes("unverified"));
+  assert.ok(!reviewed.json.includes("SECRET COOKIE"));
+});
+
+test("Generic requests do not become author or completion attributions", () => {
+  const evidence = example();
+  const sha = "a".repeat(40);
+  evidence.commits["example/repo@" + sha].message = "Update parser";
+  const snapshot = { messages: [
+    { role: "user", text: "Fix my code and update the project" },
+    { role: "assistant", text: "Pushed to main." }
+  ] };
+  const parsed = JSON.parse(build(evidence, snapshot).json);
+  assert.equal(parsed.conversationCorrelation.matchedRequests, 0);
+  assert.equal(parsed.conversationCorrelation.unmatchedCommits, 1);
+  assert.ok(parsed.conversationCorrelation.limitation.includes("not authorship"));
+});
