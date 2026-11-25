@@ -124,11 +124,29 @@ function unionChatGithub(a, b) {
     commits: [...(a?.commits || []), ...(b?.commits || [])]
   });
 }
+// Older locally saved conversations predate structured link metadata.
+// Recover only explicit GitHub URLs or labeled repository identities from text.
+function githubFromText(text) {
+  const repositories = [], commits = [];
+  const raw = String(text || "");
+  for (const match of raw.matchAll(/(?:https?:\/\/)?github\.com\/([a-z0-9-]{1,39})\/([a-z0-9_.-]{1,100})(?:\/commit\/([a-f0-9]{40}))?(?=[\s/?#"'<>)]|$)/gi)) {
+    const repository = (match[1] + "/" + match[2]).toLowerCase();
+    repositories.push(repository);
+    if (match[3]) commits.push({ repository, sha: match[3].toLowerCase() });
+  }
+  for (const match of raw.matchAll(/\b(?:repository|repo)\s*[:=]\s*[`"']?([a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100})\b/gi))
+    repositories.push(match[1].toLowerCase());
+  return normalizeChatGithub({ repositories, commits });
+}
 function normalizeChatTurn(message) {
   const text = cleanChatText(message.role, message.text);
   const key = typeof message.key === "string" && message.key.length <= 220 &&
     /^[a-z]+:[^\r\n]{1,210}$/.test(message.key) ? message.key : null;
-  const github = normalizeChatGithub(message.github);
+  const recovered = githubFromText(text);
+  const github = normalizeChatGithub({
+    repositories: [...(message.github?.repositories || []), ...recovered.repositories],
+    commits: [...(message.github?.commits || []), ...recovered.commits]
+  });
   return { role: message.role, text, ...(key ? { key } : {}),
     ...((github.repositories.length || github.commits.length) ? { github } : {}) };
 }
@@ -472,7 +490,9 @@ async function collectCommit(repository, sha, sessionId, clearGeneration, consen
   pendingCommits.add(key);
   try {
     const existing = await readEvidence();
-    if (existing.commits[key]) return;
+    // An earlier failed public lookup must not permanently block a later
+    // explicit user-initiated rescan. Successful/metadata-only records are cached.
+    if (existing.commits[key] && existing.commits[key].status !== "unavailable") return;
     let result;
     try { result = await fetchCommit(repository, sha); }
     catch { result = { status: "unavailable", files: [],
@@ -564,12 +584,17 @@ async function recordCommit(tabId, session, repository, sha, discovery, details 
       taskId, attribution: association });
     return true;
   });
-  if (!inserted) return { ok: true, duplicate: true };
+  // A duplicate link may have been recorded before a GitHub API failure.
+  // Keep its single evidence event, but allow a subsequent consented retry.
+  const existingCommit = (await readEvidence()).commits[key];
+  if (!inserted && (state === "historical" ||
+      (existingCommit && existingCommit.status !== "unavailable")))
+    return { ok: true, duplicate: true };
   const next = await getSession(tabId);
   if (!next || next.id !== session.id || !next.workflowEnabled) return { ok: false };
   await chrome.storage.session.set({ [KEY(tabId)]: { ...next,
     commitRefs: state === "historical" ? (next.commitRefs || []) : [...new Set([...(next.commitRefs || []), key])] } });
-  return { ok: true, retrieval: state !== "historical"
+  return { ok: true, duplicate: !inserted, retrieval: state !== "historical"
     ? collectCommit(repository, sha, session.id, clearGeneration, session.consentEpoch || 0) : null };
 }
 // Import real commit references retained by the two-pass transcript reader.
@@ -622,7 +647,20 @@ async function collectConversationGithub(tabId, session, messages) {
     if (!active || active.id !== session.id || !active.workflowEnabled) return;
     const existing = await readEvidence();
     const lastLookup = existing.publicHistoryLookups?.[repository] || 0;
-    if (Date.now() - lastLookup < PUBLIC_HISTORY_COOLDOWN_MS) continue;
+    if (Date.now() - lastLookup < PUBLIC_HISTORY_COOLDOWN_MS) {
+      // Reuse already identified SHAs when a previous public patch request
+      // failed, without re-querying the repository history or duplicating events.
+      const failed = [...new Set(existing.events.filter(e =>
+        e.type === "github_commit_ref" && e.discovery === "repository_history" &&
+        e.repository === repository && e.sessionId === session.id &&
+        existing.commits[repository + "@" + e.commitSha]?.status === "unavailable")
+        .map(e => e.commitSha))].slice(0, 3);
+      for (const sha of failed) {
+        const result = await recordCommit(tabId, session, repository, sha, "repository_history");
+        if (result?.retrieval) pendingPatches.push(result.retrieval);
+      }
+      continue;
+    }
     const shas = await recentPublicCommits(repository);
     if (!shas) continue; // Network/API errors must not block later retry.
     await mutateEvidence(data => {
@@ -843,6 +881,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       await mutateEvidence(data => {
         data.events = [];
         data.commits = {};
+        data.publicHistoryLookups = {};
         data.clearGeneration = (data.clearGeneration || 0) + 1;
       });
       await chrome.storage.local.set({
@@ -857,7 +896,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (sender.tab) return { ok: false };
       const session = await getSession(tabId);
       const chats = boundedBrowserChats(await readBrowserChats());
-      return { ok: true, snapshot: browserChatForTab(chats, session) };
+      const path = eligible(tab.url) ? new URL(tab.url).pathname : null;
+      // A tab with no matching ChatGPT conversation must never receive the
+      // most recently saved transcript from an unrelated tab.
+      return { ok: true, snapshot: path
+        ? browserChatForTab(chats, session?.page === path ? session : null, path)
+        : null };
     }
     if (message.type === "captureBrowserConversation") {
       if (sender.tab) return { ok: false };
@@ -1000,7 +1044,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           ? analysis.conversationSummaries.find(item => item.sessionId === session.id)
           : null) || analysis.conversationSummaries.at(-1) || null,
         recordedEvents: local.events.length,
-        recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length
+        recordedCommits: Object.values(local.commits).filter(c => c.status === "retrieved").length,
+        githubEvidence: {
+          capturedRepositories: savedChat
+            ? [...new Set(savedChat.messages.flatMap(m => m.github?.repositories || []))].length : 0,
+          capturedCommitLinks: savedChat
+            ? [...new Set(savedChat.messages.flatMap(m => (m.github?.commits || [])
+              .map(ref => ref.repository + "@" + ref.sha)))].length : 0,
+          referenceEvents: local.events.filter(e => e.type === "github_commit_ref").length,
+          unavailable: Object.values(local.commits).filter(c => c.status === "unavailable").length,
+          metadataOnly: Object.values(local.commits).filter(c => c.status === "metadata_only").length
+        }
       };
     }
     if (message.type === "start") { await start(tabId); return { ok: true }; }
