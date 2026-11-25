@@ -30,3 +30,5 @@ Coding-work analysis (native Windows):
 ### Approved code-change tracking
 
 See [code-change tracking](docs/code-change-tracking.md) for repository consent, the local diff viewer, optional user-invoked result recording, and explicitly approved DeepSeek payloads. Tracking is off by default.
+
+<!-- GCR_CAPTURE_PROBE_20261125 -->
