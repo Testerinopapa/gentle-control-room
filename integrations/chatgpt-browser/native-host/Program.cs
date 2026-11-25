@@ -54,7 +54,10 @@ internal static class Program
         });
         var unapproved = approved.Replace("\"approved\":true", "\"approved\":false", StringComparison.Ordinal);
         if (!CodexBridge.IsRequest(approved) || !CodexBridge.TryValidate(approved, out _) ||
-            CodexBridge.TryValidate(unapproved, out _))
+            CodexBridge.TryValidate(unapproved, out _) ||
+            !CodexBridge.IsCapabilitiesRequest("""{"version":1,"type":"codex_capabilities"}""") ||
+            CodexBridge.IsCapabilitiesRequest("""{"version":2,"type":"codex_capabilities"}""") ||
+            CodexBridge.IsCapabilitiesRequest("""{"version":1,"type":"codex_analyze"}"""))
           return 1;
         return 0;
       }
@@ -97,6 +100,15 @@ internal static class Program
       if (IsHealthCheck(json))
       {
         WriteResult(stdout, true);
+        return 0;
+      }
+
+      // Report bridge capabilities before receiving approved evidence. This
+      // requires no CLI, sends no transcript, and cannot start an analysis.
+      if (CodexBridge.IsCapabilitiesRequest(json))
+      {
+        WriteJson(stdout, new { ok = true, codexAnalyze = true,
+          protocolVersion = CodexBridge.ProtocolVersion });
         return 0;
       }
 
