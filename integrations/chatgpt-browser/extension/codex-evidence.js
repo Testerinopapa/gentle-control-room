@@ -17,7 +17,7 @@ const CORRELATION_STOP = new Set(
   "fixed issue problem done analyze analysis test tests".split(/\s+/)
 );
 const CORRELATION_KEY = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}@[a-f0-9]{40}$/i;
-const CODING_INTENT = /\b(?:fix|implement|build|add|remove|replace|update|debug|install|deploy|commit|push|error|issue|broken|analy[sz]|scan|capture|test|workflow|coding|code|extension|github|repository|repo|patch)\b/i;
+const CODING_INTENT = /\b(?:fix|implement|build|add|remove|replace|update|debug|install|installer|reinstall|native|codex|bridge|deploy|commit|push|error|issue|broken|analy[sz]|scan|capture|test|workflow|coding|code|extension|github|repository|repo|patch)\b/i;
 
 function correlateWords(value) {
   const matches = String(value || "").replace(/([a-z])([A-Z])/g, "$1 $2")
