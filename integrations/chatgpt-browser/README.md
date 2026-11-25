@@ -21,13 +21,16 @@ From the repository root in PowerShell, install the rebuilt host:
 
 ```powershell
 git pull --ff-only origin main
-.\integrations\chatgpt-browser\install-host.ps1 -ExtensionId YOUR_EDGE_EXTENSION_ID
+.\integrations\chatgpt-browser\install-host.ps1
 codex --version
 codex login status
 ```
 
-Copy the 32-character extension ID from `edge://extensions` and replace
-`YOUR_EDGE_EXTENSION_ID`. Reopen Edge after reinstalling the host. The
+For an existing installation, the script securely reuses the 32-character
+Edge extension ID from the old native host's manifest. On a first install or
+when that manifest is unavailable, run
+`install-host.ps1 -ExtensionId YOUR_EDGE_EXTENSION_ID` using the ID shown at
+`edge://extensions`. Reopen Edge after reinstalling the host. The
 installer builds and self-tests the host, then registers it in the current
 Windows user's Edge native-messaging registry. This still requires the .NET 8
 SDK on Windows. No new UI buttons, background Codex calls, or additional
