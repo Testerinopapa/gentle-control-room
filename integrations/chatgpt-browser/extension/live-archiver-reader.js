@@ -535,5 +535,48 @@
     entries.length = 0; limited = false; uncertain = false;
     lastCoverage = null; lastObservedScrollTop = null;
   }
-  globalThis.GcrLiveArchiverReader = Object.freeze({ observe, collect, reset });
+  // Isolated, explicitly invoked diagnostic. Never reads the observer cache or
+  // writes its transcript to storage. Scan mounted turns and nearby history.
+  async function testRead() {
+    const path = location.pathname, scrolling = scroller(), oldTop = scrolling?.scrollTop;
+    let rows = [];
+    const merge = (incoming, earlier = false) => {
+      const previous = new Map(rows.map(row => [row.key, row]));
+      for (const row of incoming) {
+        const old = previous.get(row.key);
+        if (old) { old.github = mergeGithub(old.github, row.github); if (row.text.length > old.text.length) old.text = row.text; }
+      }
+      const fresh = incoming.filter(row => !previous.has(row.key));
+      rows = earlier ? [...fresh, ...rows] : [...rows, ...fresh];
+      rows = rows.slice(-MAX_MESSAGES);
+    };
+    const references = () => new Set(rows.flatMap(row => (row.github?.commits || []).map(ref => ref.repository + "@" + ref.sha)));
+    let windows = 0;
+    try {
+      merge(readRows()); windows++;
+      // Recent mounted messages are enough when several commit links are
+      // present. Otherwise make a short, bounded backward scan for them.
+      for (let i = 0; scrolling && i < 16 && references().size < 3 && location.pathname === path; i++) {
+        if (scrolling.scrollTop <= 1) break;
+        const before = scrolling.scrollTop;
+        scrolling.scrollTop = Math.max(0, before - Math.max(160, scrolling.clientHeight * 0.8));
+        await delay(500);
+        merge(readRows(), true); windows++;
+        if (scrolling.scrollTop === before) break;
+      }
+      if (location.pathname !== path) return { ok: false, error: "Conversation changed during test." };
+      let chars = 0;
+      const messages = [];
+      for (const row of rows.slice().reverse()) {
+        if (chars + row.text.length > MAX_CHARS) break;
+        chars += row.text.length;
+        messages.unshift({ role: row.role, text: row.text, key: row.key, github: row.github });
+      }
+      return { ok: true, messages, capturedAt: new Date().toISOString(), truncated: true,
+        coverage: { verifiedComplete: false, observedWindows: windows, scanMethod: "isolated_test_dom" } };
+    } finally {
+      if (scrolling && location.pathname === path && oldTop !== undefined) scrolling.scrollTop = oldTop;
+    }
+  }
+  globalThis.GcrLiveArchiverReader = Object.freeze({ observe, collect, reset, testRead });
 })();

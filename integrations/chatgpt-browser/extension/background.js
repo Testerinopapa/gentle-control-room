@@ -762,6 +762,66 @@ async function prepareConversationCodeReview(tabId, tab) {
   return { ok: true, data: { ...data, analysis, reviewDiagnostics: diagnostics }, snapshot, diagnostics };
 }
 
+// Isolated test path: no reads/writes to the normal activity store and no
+// inferred repo-history commits. Every fetched SHA must occur in this scan.
+async function testConversationGitHub(tabId) {
+  if (!Number.isInteger(tabId)) throw Error("TEST: select a ChatGPT tab.");
+  const tab = await chrome.tabs.get(tabId);
+  if (!eligible(tab.url)) throw Error("TEST: open the ChatGPT conversation first.");
+  const path = new URL(tab.url).pathname;
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["live-archiver-reader.js"] });
+  const results = await chrome.scripting.executeScript({ target: { tabId },
+    func: async () => globalThis.GcrLiveArchiverReader?.testRead() });
+  const rendered = results?.[0]?.result;
+  if (!rendered?.ok || !Array.isArray(rendered.messages) || rendered.messages.length > 160)
+    throw Error(rendered?.error || "TEST: could not scan the current ChatGPT tab. Reload it and retry.");
+  const snapshot = { messages: rendered.messages.filter(row =>
+    ["user", "assistant"].includes(row?.role) && typeof row.text === "string" && row.text.length <= 8000)
+    .map(normalizeChatTurn), capturedAt: rendered.capturedAt, truncated: true, coverage: rendered.coverage };
+  const refs = new Map();
+  for (const message of snapshot.messages) {
+    for (const ref of message.github?.commits || []) {
+      const key = ref.repository + "@" + ref.sha;
+      refs.delete(key); refs.set(key, ref);
+    }
+  }
+  if (!refs.size) throw Error("TEST stage 2 failed: no full GitHub commit URLs in the scanned chat. Scroll to a reply containing a commit link and retry.");
+  const selected = [...refs.entries()].reverse().slice(0, 8);
+  const commits = {}, events = [], failures = [];
+  let omitted = refs.size - selected.length, patchChars = 0;
+  for (let i = 0; i < selected.length; i += 3) {
+    const batch = await Promise.all(selected.slice(i, i + 3).map(async ([key, ref]) => {
+      try { return { key, ref, commit: await fetchCommit(ref.repository, ref.sha) }; }
+      catch (error) { return { key, ref, commit: { status: "unavailable", files: [] },
+        error: String(error?.message || "unavailable").slice(0, 120) }; }
+    }));
+    for (const { key, ref, commit, error } of batch) {
+      if (error) failures.push({ reference: key, error });
+      const size = JSON.stringify(commit.files || []).length;
+      if (commit.status === "retrieved" && patchChars + size > 75000) { omitted++; continue; }
+      patchChars += size;
+      commits[key] = { ...commit, repository: ref.repository, sha: ref.sha };
+      events.push({ type: "github_commit_ref", source: "chatgpt_browser", timestamp: new Date().toISOString(),
+        sessionId: "isolated-conversation-test", repository: ref.repository, commitSha: ref.sha, discovery: "conversation_scan" });
+    }
+  }
+  const latest = await chrome.tabs.get(tabId);
+  if (!eligible(latest.url) || new URL(latest.url).pathname !== path)
+    throw Error("TEST: conversation changed during retrieval.");
+  const retrieved = Object.values(commits).filter(commit => commit.status === "retrieved");
+  const sourceFiles = [...new Set(retrieved.flatMap(commit => commit.files
+    .filter(file => /\.(?:[cm]?[jt]sx?|py|cs|rs|go|java|kt|rb|php|cpp|c|h|sql|ps1|sh|html|css|xaml)$/i.test(file.path))
+    .map(file => file.path)))];
+  const diagnostics = { discovered: refs.size, selected: selected.length, retrieved: retrieved.length,
+    unavailable: Object.values(commits).filter(commit => commit.status === "unavailable").length,
+    metadataOnly: Object.values(commits).filter(commit => commit.status === "metadata_only").length,
+    omitted, messages: snapshot.messages.length, sourceFiles, failures };
+  const data = { version: 1, events, commits, reviewDiagnostics: diagnostics,
+    analysis: { tasks: [], patterns: [], coverage: {},
+      limitations: ["Isolated test: commit links discovered in a fresh bounded DOM scan, not hardcoded. Conversation excerpts support candidate request linkage; authorship, runtime behavior and test outcomes remain unverified. No normal history was read or written."] } };
+  return { ok: true, data, snapshot, diagnostics };
+}
+
 function parseCommitUrl(input) {
   if (typeof input !== "string" || input.length > 300) return null;
   let url;
@@ -948,30 +1008,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       return recordCommit(tabId, session, commit.repository, commit.sha, "manual", { taskId: message.taskId });
     }
     if (message.type === "testCodexGitHub") {
-      // Explicit side-panel diagnostic; fixed public commit, no chat or history read/write.
+      // Stage 2: no hardcoded SHA or cached commit. The only input is the
+      // currently selected ChatGPT tab and its freshly captured visible links.
       if (sender.tab || sender.url !== chrome.runtime.getURL("sidepanel.html"))
         return { ok: false, error: "Open the extension side panel." };
-      const repository = "testerinopapa/gentle-control-room";
-      const sha = "9002ee853b7dfa14c6ec7c7ccc0baebe81e5a6c2";
-      const key = repository + "@" + sha;
-      let commit;
-      try { commit = await fetchCommit(repository, sha); }
-      catch (error) { return { ok: false, error: "Test GitHub retrieval failed: " + String(error?.message || "unavailable").slice(0, 200) }; }
-      if (commit.status !== "retrieved" || !commit.files.some(file =>
-          file.path === "README.md" && file.patch.split("\n").some(line =>
-            line === "+<!-- GCR_CAPTURE_PROBE_20261125 -->")))
-        return { ok: false, error: "Test failed: expected README.md patch marker missing." };
-      const timestamp = new Date().toISOString();
-      const data = { version: 1, events: [{ timestamp, source: "chatgpt_browser",
-        sessionId: "controlled-test", type: "github_commit_ref", repository,
-        commitSha: sha, discovery: "manual" }],
-        commits: { [key]: { ...commit, repository, sha, savedAt: timestamp } } };
-      // No synthetic task or historical activity is claimed. Use the normal
-      // evidence builder and its existing manual-link provenance.
-      return { ok: true, data: { ...data, analysis: {
-        tasks: [], patterns: [], coverage: {},
-        limitations: ["Controlled GitHub retrieval test. No browser capture, authorship, test execution or deployment verified."]
-      } } };
+      try { return await testConversationGitHub(message.tabId); }
+      catch (error) { return { ok: false, error: String(error?.message || "Test failed.").slice(0, 300) }; }
     }
     if (message.type === "exportEvidence") {
       const data = bounded(await readEvidence());

@@ -533,17 +533,23 @@ async function reviewTestCodexEvidence() {
   codexPreview.value = "";
   codexPrepare.textContent = "Analyze coding activity";
   codexOutput.hidden = true;
-  codexStatus.textContent = "TEST: retrieving the real GitHub commit…";
+  codexStatus.textContent = "TEST stage 2: scanning this ChatGPT conversation for real commit links…";
   try {
-    const response = await chrome.runtime.sendMessage({ type: "testCodexGitHub" });
+    const tab = await activeTab();
+    if (!Number.isInteger(tab?.id)) throw new Error("TEST: select the ChatGPT conversation.");
+    const response = await chrome.runtime.sendMessage({ type: "testCodexGitHub", tabId: tab.id });
     if (!response?.ok || !response.data) throw new Error(response?.error || "Test retrieval failed.");
-    const evidence = GcrCodexEvidence.build(response.data);
-    if (evidence.commitCount !== 1) throw new Error("Test failed: exact patch did not enter the Codex payload.");
+    const d = response.diagnostics;
+    if (!d?.retrieved) throw new Error("TEST failed: " + (d?.discovered || 0) + " links found, no patches retrieved. " + (d?.failures || []).map(f => f.error).join("; "));
+    const evidence = GcrCodexEvidence.build(response.data, response.snapshot);
+    if (!evidence.commitCount) throw new Error("TEST failed: retrieved patches did not enter the Codex payload.");
+    if (!d.sourceFiles?.length) throw new Error("TEST stage 2 incomplete: " + d.discovered + " links found, " + d.retrieved + " patches retrieved, but no source-code files. Scroll to the implementation commit links and retry.");
+    if (!evidence.matchedRequests) throw new Error("TEST stage 2 incomplete: actual source patches retrieved, but no conversation request could be linked. Scroll to a request and its commit reply and retry.");
     reviewedEvidence = { ...evidence, isTest: true };
     codexPreview.value = evidence.json;
     codexReview.hidden = false;
     codexPrepare.textContent = "Cancel review";
-    codexStatus.textContent = "TEST retrieval passed: README.md and its actual diff are in the payload. Review, approve, then run Codex analysis.";
+    codexStatus.textContent = "TEST stage 2 retrieval passed: " + d.discovered + " links found · " + evidence.commitCount + " retrieved commits · " + d.sourceFiles.length + " source files · " + evidence.matchedRequests + " matched requests · " + d.unavailable + " unavailable · " + d.omitted + " omitted. Review and approve to test Codex.";
   } catch (error) {
     codexStatus.textContent = error?.message || "Test failed.";
   } finally {
@@ -625,7 +631,7 @@ async function analyzeWithCodex() {
     codexOutput.textContent = result.output;
     codexOutput.hidden = false;
     if (reviewedEvidence.isTest) {
-      codexStatus.textContent = "TEST: Codex returned an analysis. Check that it identifies README.md, the marker and the lack of runtime changes. Test output is not saved to normal history.";
+      codexStatus.textContent = "TEST stage 2: Codex returned an analysis of conversation-linked patches. Check the actual files, edits and request associations. Test output is not saved to normal history.";
     } else {
       await chrome.storage.local.set({
         [CODEX_INSIGHTS_KEY]: { output: result.output, analyzedAt: new Date().toISOString() }
