@@ -9,6 +9,27 @@ namespace GentleControlRoom.ChatGPTHost;
 internal static class CodexBridge
 {
   internal const int MaxEvidenceBytes = 300_000;
+  internal const int ProtocolVersion = 1;
+
+  // Safe, read-only native messaging handshake. No evidence and no CLI run.
+  // A legacy activity recorder may return {ok:false} for this type, allowing
+  // the extension to distinguish an outdated host from an analysis error.
+  internal static bool IsCapabilitiesRequest(string raw)
+  {
+    try
+    {
+      using var doc = JsonDocument.Parse(raw);
+      var root = doc.RootElement;
+      return root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty("version", out var version) &&
+        version.ValueKind == JsonValueKind.Number &&
+        version.TryGetInt32(out var v) && v == 1 &&
+        root.TryGetProperty("type", out var type) &&
+        type.ValueKind == JsonValueKind.String &&
+        type.GetString() == "codex_capabilities";
+    }
+    catch (JsonException) { return false; }
+  }
   private const int MaxOutputCharacters = 50_000;
   private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(3);
 
