@@ -5,7 +5,7 @@
 
 // The saved browser transcript is consulted only for the on-screen Codex review.
 // No conversation text is added to automatic evidence exports or sent by scanning.
-const CORRELATION_STOP = new Set(
+const CORRELATION_STOP = new Set((
   "a an and are as at be been but by can could did do does for from had has have " +
   "how i if in into is it its me my of on or our so that the their them there these " +
   "this those to was we were what when where which who why will with would you your " +
@@ -14,8 +14,8 @@ const CORRELATION_STOP = new Set(
   "through too use used using want work working yet github git code coding chatgpt " +
   "gentle control room extension browser project repo repository commit commits changes " +
   "change update updated push pushed main file files task tasks request requests fix " +
-  "fixed issue problem done analyze analysis test tests".split(/\s+/)
-);
+  "fixed issue problem done analyze analysis test tests"
+).split(/\s+/));
 const CORRELATION_KEY = /^[a-z0-9-]{1,39}\/[a-z0-9_.-]{1,100}@[a-f0-9]{40}$/i;
 const CODING_INTENT = /\b(?:fix|implement|build|add|remove|replace|update|debug|install|installer|reinstall|native|codex|bridge|deploy|commit|push|error|issue|broken|analy[sz]|scan|capture|test|workflow|coding|code|extension|github|repository|repo|patch)\b/i;
 
