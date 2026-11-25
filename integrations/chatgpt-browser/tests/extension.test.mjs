@@ -2529,7 +2529,8 @@ test("old saved chat text recovers repository and commit identity without fresh 
     sessionId: session.id, capturedAt: new Date().toISOString(),
     messages: [
       { role: "user", text: "Please inspect repo: Testerinopapa/gentle-control-room" },
-      { role: "assistant", text: "Commit github.com/Testerinopapa/gentle-control-room/commit/" + HASH }
+      { role: "assistant", text: "Commit github.com/Testerinopapa/gentle-control-room/commit/" + HASH },
+      { role: "user", text: "Do not trust https://evilgithub.com/fake/repo/commit/" + HASH }
     ]
   }] });
   const result = await h.send({ type: "getBrowserConversation", tabId: 9 });
@@ -2537,6 +2538,8 @@ test("old saved chat text recovers repository and commit identity without fresh 
   assert.ok(result.snapshot.messages[0].github.repositories.includes(
     "testerinopapa/gentle-control-room"));
   assert.equal(result.snapshot.messages[1].github.commits[0].sha, HASH);
+  assert.equal(result.snapshot.messages[2].github, undefined,
+    "a lookalike hostname must not produce an inferred public GitHub commit");
 });
 
 test("saved conversations are never returned for unrelated browser tabs", async () => {
