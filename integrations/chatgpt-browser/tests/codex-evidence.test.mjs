@@ -190,3 +190,21 @@ test("Generic requests do not become author or completion attributions", () => {
   assert.equal(parsed.conversationCorrelation.unmatchedCommits, 1);
   assert.ok(parsed.conversationCorrelation.limitation.includes("not authorship"));
 });
+
+
+test("A short 'proceed' reply still captures an explicit assistant commit link", () => {
+  const evidence = example();
+  const sha = "a".repeat(40);
+  const parsed = JSON.parse(build(evidence, {
+    messages: [
+      { role: "user", text: "Go ahead" },
+      { role: "assistant", text: "Pushed an updated commit", github: {
+        commits: [{ repository: "example/repo", sha }]
+      }}
+    ]
+  }).json);
+  assert.equal(parsed.conversationCorrelation.matchedRequests, 1);
+  assert.equal(parsed.conversationCorrelation.requests[0].request, "Go ahead");
+  assert.equal(parsed.conversationCorrelation.requests[0].candidateCommits[0].evidence,
+    "commit_link_in_assistant_reply");
+});
