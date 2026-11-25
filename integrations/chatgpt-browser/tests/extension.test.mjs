@@ -2075,6 +2075,15 @@ test("Codex bridge errors identify old host responses rather than generic failur
   assert.equal(responseProblem({ ok: false, error: "Codex analysis timed out after 3 minutes." }),
     "Codex analysis timed out after 3 minutes.");
   assert.equal(responseProblem({ ok: true, output: "Observed 2 changed files." }), null);
+  const capabilityProblem = new Function(
+    panel.slice(start, end) + "\nreturn codexCapabilityProblem;"
+  )();
+  assert.equal(capabilityProblem({ ok: true, codexAnalyze: true, protocolVersion: 1 }), null);
+  assert.match(capabilityProblem({ ok: false }), /native host is outdated/);
+  assert.match(capabilityProblem({ ok: true }), /native host is outdated/);
+  assert.match(capabilityProblem(null), /did not confirm Codex analysis support/);
+  assert.match(capabilityProblem({ ok: true, codexAnalyze: true, protocolVersion: 2 }),
+    /native host is outdated/);
 });
 
 test("single coding action requires explicit review and approval without duplicate buttons", async () => {
@@ -2084,7 +2093,7 @@ test("single coding action requires explicit review and approval without duplica
   const dom = new JSDOM(markup);
   const doc = dom.window.document;
   const local = new Map();
-  let remoteCalls = 0;
+  let remoteCalls = 0, capabilityCalls = 0;
   vm.runInNewContext(codexEvidence + "\n" + panel, {
     document: doc, Option: dom.window.Option, Date, TextEncoder,
     setInterval() {},
@@ -2093,8 +2102,16 @@ test("single coding action requires explicit review and approval without duplica
         sendMessage: h.send,
         lastError: null,
         sendNativeMessage(host, payload, respond) {
-          remoteCalls++;
           assert.equal(host, "org.gentlecontrolroom.chatgpt");
+          if (payload.type === "codex_capabilities") {
+            capabilityCalls++;
+            assert.deepEqual(JSON.parse(JSON.stringify(payload)),
+              { type: "codex_capabilities", version: 1 });
+            respond({ ok: true, codexAnalyze: true, protocolVersion: 1 });
+            return;
+          }
+          remoteCalls++;
+          assert.equal(payload.type, "codex_analyze");
           assert.equal(payload.approved, true);
           respond({ ok: true, output: "Checked patch-backed evidence." });
         }
@@ -2128,12 +2145,57 @@ test("single coding action requires explicit review and approval without duplica
   assert.equal(main.textContent, "Run approved Codex analysis");
   main.click();
   for (let i = 0; i < 8; i++) await tick();
+  assert.equal(capabilityCalls, 1, "the extension must verify Codex capability before sending evidence");
   assert.equal(remoteCalls, 1);
   assert.equal(review.hidden, true);
   assert.equal(main.textContent, "Analyze coding activity");
   assert.equal(doc.getElementById("codex-output").textContent,
     "Checked patch-backed evidence.");
   assert.equal(local.get("gcrCodexInsightsV1").output, "Checked patch-backed evidence.");
+  dom.window.close();
+});
+
+test("legacy native host rejection never receives approved evidence", async () => {
+  const h = harness();
+  await enable(h);
+  await h.send({ type: "requestBoundary", requestId: "m-review-2", confidence: "supported" }, origin);
+  const dom = new JSDOM(markup);
+  const doc = dom.window.document;
+  const nativeMessages = [];
+  vm.runInNewContext(codexEvidence + "\n" + panel, {
+    document: doc, Option: dom.window.Option, Date, TextEncoder,
+    setInterval() {},
+    chrome: {
+      runtime: {
+        sendMessage: h.send,
+        lastError: null,
+        sendNativeMessage(host, payload, respond) {
+          nativeMessages.push(JSON.parse(JSON.stringify(payload)));
+          respond({ ok: false }); // older metadata-only host
+        }
+      },
+      storage: { local: {
+        async get() { return {}; },
+        async set() { throw new Error("Should not save Codex result"); }
+      } },
+      tabs: { query: async () => [{ id: 9 }], onActivated: { addListener() {} },
+        onUpdated: { addListener() {} } }
+    }
+  });
+  for (let i = 0; i < 8; i++) await tick();
+  const main = doc.getElementById("prepare-codex");
+  main.click();
+  for (let i = 0; i < 8; i++) await tick();
+  const approval = doc.getElementById("codex-approval");
+  approval.checked = true;
+  approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  main.click();
+  for (let i = 0; i < 8; i++) await tick();
+  assert.deepEqual(nativeMessages, [{ type: "codex_capabilities", version: 1 }],
+    "never send approved coding evidence to an incompatible native host");
+  assert.match(doc.getElementById("codex-status").textContent,
+    /Updating the Edge extension does not update the native host/);
+  assert.equal(doc.getElementById("codex-review").hidden, false);
   dom.window.close();
 });
 
