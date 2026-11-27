@@ -543,6 +543,26 @@ function formatActionableReport(raw, payload) {
         !["high", "medium", "low"].includes(a.priority) ||
         ![a.title, a.destination, a.validation].every(v => str(v)) || !str(a.content, 12000)) fail();
   }
+  // Legacy v1 reports have no task array; never manufacture tasks from findings.
+  if (report.tasks !== undefined) {
+    if (!Array.isArray(report.tasks) || report.tasks.length > 12) fail();
+    const taskIds = new Set();
+    for (const task of report.tasks) {
+      if (!task || !str(task.id,30) || taskIds.has(task.id) ||
+          ![task.title,task.objective,task.implementation,task.verification,task.blocker].every(v=>str(v,1500)) ||
+          !["reported-delivered","in-progress","blocked","unknown"].includes(task.status) ||
+          !Array.isArray(task.practices) || task.practices.length>10 || !task.practices.every(v=>str(v,150)) ||
+          !Array.isArray(task.evidence) || !task.evidence.length || task.evidence.length>12) fail();
+      for (const ref of task.evidence) {
+        if (!ref || typeof ref!=="object") fail();
+        const hasTurn=Object.hasOwn(ref,"turn"),hasCommit=Object.hasOwn(ref,"commit");
+        if(hasTurn===hasCommit || (hasTurn&&!turnIds.has(ref.turn)) ||
+          (hasCommit&&(!str(ref.commit,200)||!str(ref.path,300)||!Object.hasOwn(payload.commits||{},ref.commit)||
+          !payload.commits[ref.commit].files?.some(file=>file.path===ref.path)))) fail();
+      }
+      taskIds.add(task.id);
+    }
+  }
   const blocks = ["DEVELOPMENT IMPROVEMENTS", report.summary, "FINDINGS"];
   if (!report.findings.length) blocks.push("Not enough evidence for a reliable finding.");
   for (const f of report.findings) {
@@ -677,6 +697,61 @@ function renderImprovementAssets(container, formatted, io = {}) {
   container.append(limits);
 }
 
+// Export a minimized, reviewable interchange document, not the original evidence.
+function buildCodeAnalyzerReport(report, now = new Date()) {
+  const refs = list => list.map(ref => Object.hasOwn(ref,"turn") ? {turn:ref.turn} : {commit:ref.commit,path:ref.path});
+  const data = {
+    schema:"codeanalyzer.work-report.v1", source:"gentle-control-room", createdAt:now.toISOString(),
+    summary:report.summary,
+    tasks:(report.tasks||[]).map(t=>({id:t.id,title:t.title,objective:t.objective,implementation:t.implementation,status:t.status,verification:t.verification,practices:[...t.practices],blocker:t.blocker,evidence:refs(t.evidence)})),
+    findings:report.findings.map(f=>({id:f.id,kind:f.kind,title:f.title,observation:f.observation,hypothesis:f.hypothesis,impact:f.impact,evidence:refs(f.evidence)})),
+    recommendations:report.actions.map(a=>({findingId:a.findingId,kind:a.kind,priority:a.priority,title:a.title,destination:a.destination,validation:a.validation})),
+    limitations:[...report.limitations,"This is a model-generated summary, not independent proof of authorship, delivery or test execution.","Raw conversation, patches and draft code are excluded.",...(report.tasks===undefined?["Older native host returned no structured tasks; update the host."]:[])]
+  };
+  const raw=JSON.stringify(data,null,2);
+  if(new TextEncoder().encode(raw).length>250000)throw Error("Report too large to share.");
+  return raw;
+}
+function offerCodeAnalyzerReport(container, report) {
+  const doc=container.ownerDocument;
+  const section=doc.createElement("section");
+  const title=doc.createElement("h3");title.textContent="CodeAnalyzer work report";
+  const hint=doc.createElement("p");hint.className="hint";hint.textContent="Review this work-only summary before transferring it. Raw chats, diffs and draft code are excluded. Remove sensitive details by rerunning a narrower analysis; this report has no verified employee identity.";
+  const preview=doc.createElement("details"),label=doc.createElement("summary"),body=doc.createElement("pre");
+  label.textContent="Review exact report";body.className="asset-code";
+  let raw;try{raw=buildCodeAnalyzerReport(report);}catch(e){hint.textContent=e.message;section.append(title,hint);container.prepend(section);return;}
+  body.textContent=raw;preview.append(label,body);
+  const checkbox=doc.createElement("input");checkbox.type="checkbox";
+  const consent=doc.createElement("label");consent.append(checkbox,doc.createTextNode(" I reviewed this summary and choose to transfer it."));
+  const send=doc.createElement("button"),download=doc.createElement("button"),status=doc.createElement("p");
+  send.type=download.type="button";send.textContent="Send to open CodeAnalyzer tab";download.textContent="Download CodeAnalyzer report (.json)";send.disabled=download.disabled=true;
+  status.setAttribute("role","status");status.className="hint";
+  checkbox.addEventListener("change",()=>{send.disabled=download.disabled=!checkbox.checked;});
+  send.addEventListener("click",async()=>{
+    if(!checkbox.checked)return;
+    try{
+      const tab=await activeTab();
+      if(!Number.isInteger(tab?.id)||!tab.url)throw Error("Open CodeAnalyzer in this Edge window and click the extension toolbar icon there.");
+      const origin=new URL(tab.url).origin;
+      if(!/^https?:\/\//.test(origin))throw Error("Select a CodeAnalyzer web tab.");
+      if(!confirm("Offer the reviewed report to "+origin+"? Check that this is your CodeAnalyzer site."))return;
+      const result=await chrome.scripting.executeScript({target:{tabId:tab.id},func:(raw,expected)=>{
+        if(location.origin!==expected||!document.querySelector('[data-codeanalyzer-import="v1"]'))return false;
+        window.postMessage({type:"CODEANALYZER_REPORT_V1",raw},expected);return true;
+      },args:[raw,origin]});
+      if(!result?.[0]?.result)throw Error("The selected page is not a compatible CodeAnalyzer dashboard.");
+      status.textContent="Report offered to "+origin+". Accept the import in CodeAnalyzer to display it.";
+    }catch(e){status.textContent=(e?.message||"Transfer unavailable.")+" Download the JSON and import it in CodeAnalyzer instead.";}
+  });
+  download.addEventListener("click",()=>{
+    if(!checkbox.checked)return;
+    const url=URL.createObjectURL(new Blob([raw],{type:"application/json;charset=utf-8"}));
+    const a=doc.createElement("a");a.href=url;a.download="codeanalyzer-work-report.json";doc.body.append(a);
+    try{a.click();status.textContent="Download requested.";}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  });
+  section.append(title,hint,preview,consent,send,download,status);container.prepend(section);
+}
+
 async function analyzeWithCodex() {
   if (busy) return;
   busy = true;
@@ -721,6 +796,7 @@ async function analyzeWithCodex() {
     if (problem) throw Error(problem);
     const report = formatActionableReport(result.output, payload);
     renderImprovementAssets(codexOutput, report);
+    offerCodeAnalyzerReport(codexOutput, report.report);
     codexOutput.hidden = false;
     codexStatus.textContent = "Codex analysis complete: " + counts + " · " + report.count + " reusable drafts. No changes applied; normal history unchanged.";
   } catch (error) {

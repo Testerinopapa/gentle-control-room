@@ -114,12 +114,31 @@ internal static class CodexBridge
     an artifact, omit it. Do not produce generic advice or broad global rules.
     Never include credentials or sensitive text in drafts.
 
+    Step 3: reconstruct up to 12 distinct work items from the request turns.
+    Give each task a concise objective, reported implementation or "Unknown",
+    workflow practices, blocker or "None recorded", and verification evidence
+    description. Use "reported-delivered" only for an explicit completion report;
+    never equate a retrieved diff with delivery or a test file with a passed test.
+    Other statuses are "in-progress", "blocked" and "unknown".
+    Describe only work-related facts and omit secrets, personal data, raw prompts
+    and source code. Cite real request turns and retrieved file references.
+    Do not infer the employee's identity, effort, elapsed time or performance.
+    Return an empty tasks array if the evidence is insufficient.
+
     Return ONLY one JSON object (no Markdown wrappers, comments or preamble).
     Schema:
     {
       "version": 1,
       "summary": "brief practical takeaway",
       "limitations": ["specific gaps including incomplete scan, omitted or failed commits and unverified execution"],
+      "tasks": [
+        {"id":"T1","title":"short work item","objective":"work objective",
+         "implementation":"observed change or reported implementation, or unknown",
+         "status":"reported-delivered|in-progress|blocked|unknown",
+         "verification":"recorded evidence or unknown; not independent verification",
+         "practices":["observed or reported practice"],"blocker":"work blocker or none recorded",
+         "evidence":[{"turn":2},{"commit":"owner/repo@fullsha","path":"actual/file"}]}
+      ],
       "findings": [
         {"id":"F1","kind":"friction|win","title":"short title",
          "observation":"what the evidence actually shows",

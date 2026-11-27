@@ -1,3 +1,7 @@
+## CodeAnalyzer handoff (0.9.26)
+
+The native prompt now reconstructs bounded work items in addition to improvement drafts. After analysis, review the exact minimized JSON report, confirm sharing, then open the CodeAnalyzer dashboard in the same Edge window, click the extension toolbar icon to grant activeTab access, and select Send to open CodeAnalyzer tab. Accept the offered import on the dashboard. The transfer checks the destination origin and compatible page marker. No new host permissions or background upload are used. If Edge prevents scripting, download the JSON and import it manually. The dashboard's public import is in memory only; no identity or independent delivery verification is claimed. Reinstall the native host for the new task prompt.
+
 ## Portable improvement assets (v0.9.25)
 
 The existing single analysis button produces categorized cards for automations,

@@ -2140,6 +2140,7 @@ test("single click validates real linked patches and calls Codex without separat
     assert.equal(p.doc.querySelectorAll("#codex-output .asset-card").length, 1);
     assert.equal(p.doc.querySelector("#codex-output .asset-card details").open, false);
     assert.match(p.doc.getElementById("codex-status").textContent, /analysis complete/);
+    assert.equal([...p.doc.querySelectorAll("button")].find(b=>b.textContent==="Send to open CodeAnalyzer tab").disabled,true);
   } finally { p.dom.window.close(); }
 });
 test("actionable report rejects fabricated evidence and malformed drafts", () => {
@@ -2595,4 +2596,15 @@ test("saved conversations are never returned for unrelated browser tabs", async 
   assert.equal(result.snapshot, null);
   const state = await h.send({ type: "getState", tabId: 9 });
   assert.equal(state.browserConversation, null);
+});
+
+test("CodeAnalyzer export excludes raw evidence and draft code and validates task refs",()=>{
+ const start=panel.indexOf("function formatActionableReport(raw, payload)");
+ const end=panel.indexOf("async function analyzeWithCodex()",start);
+ const {format,build}=new Function(panel.slice(start,end)+"\nreturn {format:formatActionableReport,build:buildCodeAnalyzerReport};")();
+ const payload={conversationCorrelation:{requests:[{turn:1}]},commits:{}};
+ const report={version:1,summary:"Review",limitations:[],tasks:[{id:"T1",title:"Fix",objective:"Resolve issue",implementation:"Reported patch",status:"reported-delivered",verification:"Unknown",practices:["Testing"],blocker:"None recorded",evidence:[{turn:1}]}],findings:[{id:"F1",kind:"friction",title:"Gap",observation:"Unknown test",hypothesis:"Unknown",impact:"Uncertain",evidence:[{turn:1}]}],actions:[{findingId:"F1",kind:"test",priority:"high",title:"Check",destination:"test.js",content:"SECRET_DRAFT_CODE",validation:"Run test"}]};
+ const raw=build(format(JSON.stringify(report),payload).report,new Date("2026-11-27T00:00:00Z"));
+ assert.equal(JSON.parse(raw).tasks[0].status,"reported-delivered");assert.ok(!raw.includes("SECRET_DRAFT_CODE"));
+ report.tasks[0].evidence=[{turn:999}];assert.throws(()=>format(JSON.stringify(report),payload),/failed validation/);
 });
