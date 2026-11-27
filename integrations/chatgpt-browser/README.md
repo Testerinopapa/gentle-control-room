@@ -1,3 +1,29 @@
+## Actionable development retrospective (v0.9.24)
+
+One-click **Analyze coding activity with Codex** now requests evidence-grounded
+findings and prioritized, copyable improvement drafts, rather than a generic
+history summary. It uses the existing Stage 2 retrieval checks and the signed-in
+local Codex bridge; no additional LLM provider, server, database or API key.
+
+This is a lightweight original adapter informed by:
+- [Code Insights](https://github.com/melagiri/code-insights), especially
+  [friction/wins and artifact synthesis](https://github.com/melagiri/code-insights/blob/main/server/src/llm/reflect-prompts.ts)
+  (MIT, Srikanth Rao M). Separate observations from likely causes; turn
+  supported findings into specific reusable instructions or automation.
+- [Retro Skill](https://github.com/netresearch/retro-skill), particularly its
+  [friction catalog](https://github.com/netresearch/retro-skill/blob/main/skills/retro/references/friction-catalog.md)
+  and [destination taxonomy](https://github.com/netresearch/retro-skill/blob/main/skills/retro/references/destination-taxonomy.md)
+  (Netresearch DTT GmbH, CC BY-SA 4.0 reference documents). Route lessons
+  to the appropriate reusable project rule, skill, test, script, prompt,
+  CI check or documentation. No upstream code or documents are bundled.
+
+The browser validates the returned report structure and reference membership
+before displaying it as plain text; this does not prove the model's semantic
+claims are correct. Drafts are never applied, executed or saved automatically.
+The native bridge must advertise actionableReportVersion 1, so reinstall it
+with install-host.ps1 after pulling this release. UTF-8 is explicitly configured
+for the Codex subprocess. Historical notes below describe prior versions.
+
 # Gentle Control Room — standalone Edge coding evidence extension (v0.9.23)
 
 **The Windows application is not required.** A native messaging host is optional and is used only for explicitly initiated Codex analysis.

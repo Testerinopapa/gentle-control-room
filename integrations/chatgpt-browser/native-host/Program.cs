@@ -108,7 +108,7 @@ internal static class Program
       if (CodexBridge.IsCapabilitiesRequest(json))
       {
         WriteJson(stdout, new { ok = true, codexAnalyze = true,
-          protocolVersion = CodexBridge.ProtocolVersion });
+          protocolVersion = CodexBridge.ProtocolVersion, actionableReportVersion = CodexBridge.ActionableReportVersion });
         return 0;
       }
 

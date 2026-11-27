@@ -508,6 +508,62 @@ function codexCapabilityProblem(result) {
 
 // The explicitly labeled click authorizes this one bounded submission.
 // Never send metadata-only or unlinked patches as a successful Stage 2 run.
+// Strictly validate model-produced suggestions against the actual outbound evidence.
+// Rendering is plain text; suggestions are never executed or written to project files.
+function formatActionableReport(raw, payload) {
+  let report;
+  try { report = JSON.parse(raw.trim().replace(/^\x60\x60\x60(?:json)?\s*([\s\S]*?)\s*\x60\x60\x60$/i, "$1")); }
+  catch { throw Error("Codex did not return a structured improvement report. Retry analysis."); }
+  const fail = () => { throw Error("Codex improvement report failed validation. No drafts were applied; retry analysis."); };
+  const str = (v, max = 3000) => typeof v === "string" && !!v.trim() && v.length <= max;
+  const kinds = new Set(["project-rule", "prompt", "skill", "test", "script", "ci-check", "documentation"]);
+  const turnIds = new Set((payload.conversationCorrelation?.requests || []).map(request => request.turn));
+  const ids = new Set();
+  if (report?.version !== 1 || !str(report.summary) || !Array.isArray(report.limitations) ||
+      report.limitations.length > 12 || !report.limitations.every(v => str(v)) ||
+      !Array.isArray(report.findings) || report.findings.length > 5 ||
+      !Array.isArray(report.actions) || report.actions.length > 5) fail();
+  for (const f of report.findings) {
+    if (!f || !str(f.id, 30) || ids.has(f.id) || !["friction", "win"].includes(f.kind) ||
+        ![f.title, f.observation, f.hypothesis, f.impact].every(v => str(v)) ||
+        !Array.isArray(f.evidence) || !f.evidence.length || f.evidence.length > 12) fail();
+    for (const ref of f.evidence) {
+      if (!ref || typeof ref !== "object") fail();
+      const hasTurn = Object.hasOwn(ref, "turn"), hasCommit = Object.hasOwn(ref, "commit");
+      if (hasTurn === hasCommit) fail();
+      if (hasTurn && !turnIds.has(ref.turn)) fail();
+      if (hasCommit && (!str(ref.commit, 200) || !str(ref.path, 300) ||
+          !Object.hasOwn(payload.commits || {}, ref.commit) ||
+          !payload.commits[ref.commit].files?.some(file => file.path === ref.path))) fail();
+    }
+    ids.add(f.id);
+  }
+  for (const a of report.actions) {
+    if (!a || !ids.has(a.findingId) || !kinds.has(a.kind) ||
+        !["high", "medium", "low"].includes(a.priority) ||
+        ![a.title, a.destination, a.validation].every(v => str(v)) || !str(a.content, 12000)) fail();
+  }
+  const blocks = ["DEVELOPMENT IMPROVEMENTS", report.summary, "FINDINGS"];
+  if (!report.findings.length) blocks.push("Not enough evidence for a reliable finding.");
+  for (const f of report.findings) {
+    const refs = f.evidence.map(ref => Object.hasOwn(ref, "turn") ? "Conversation turn " + ref.turn : ref.commit + " / " + ref.path);
+    blocks.push(f.id + " | " + f.kind.toUpperCase() + " | " + f.title +
+      "\nObserved: " + f.observation + "\nPossible cause: " + f.hypothesis + "\nImpact: " + f.impact +
+      "\nEvidence: " + refs.join("; "));
+  }
+  blocks.push("READY-TO-COPY PROPOSALS (not applied or tested)");
+  if (!report.actions.length) blocks.push("No justified improvement draft from this evidence.");
+  const rank = { high: 0, medium: 1, low: 2 };
+  for (const a of [...report.actions].sort((a, b) => rank[a.priority] - rank[b.priority])) {
+    blocks.push(a.priority.toUpperCase() + " | " + a.kind + " | " + a.title +
+      "\nAddresses: " + a.findingId + "\nSuggested destination: " + a.destination +
+      "\n\n" + a.content + "\n\nValidate: " + a.validation);
+  }
+  blocks.push("EVIDENCE LIMITS", ...(report.limitations.length ? report.limitations : ["No additional limits reported."]),
+    "Captured changes do not verify execution, authorship or outcomes. Conversation coverage may be incomplete.");
+  return { text: blocks.join("\n\n"), count: report.actions.length };
+}
+
 async function analyzeWithCodex() {
   if (busy) return;
   busy = true;
@@ -540,6 +596,8 @@ async function analyzeWithCodex() {
     catch { throw Error("Cannot verify the Windows Codex bridge. Reinstall the native host if needed and restart Edge."); }
     const mismatch = codexCapabilityProblem(capabilities);
     if (mismatch) throw Error(mismatch);
+    if (capabilities.actionableReportVersion !== 1)
+      throw Error("Update the Windows native host using install-host.ps1 to enable actionable improvement reports. No evidence sent.");
     const current = await activeTab();
     if (current?.id !== tab.id || current?.url !== tab.url)
       throw Error("Active conversation changed before submission. Nothing sent to Codex.");
@@ -548,9 +606,10 @@ async function analyzeWithCodex() {
     const result = await runNativeCodex({ type: "codex_analyze", version: 1, approved: true, evidence: evidence.json });
     const problem = codexResponseProblem(result);
     if (problem) throw Error(problem);
-    codexOutput.textContent = result.output;
+    const report = formatActionableReport(result.output, payload);
+    codexOutput.textContent = report.text;
     codexOutput.hidden = false;
-    codexStatus.textContent = "Codex analysis complete: " + counts + ". Isolated output; normal history unchanged.";
+    codexStatus.textContent = "Codex analysis complete: " + counts + " · " + report.count + " reusable drafts. No changes applied; normal history unchanged.";
   } catch (error) {
     codexStatus.textContent = error?.message || "Codex analysis failed.";
   } finally {

@@ -2096,7 +2096,7 @@ function oneClickFixture() {
       { role: "assistant", text: "Implemented " + COMMIT }] },
     diagnostics: { discovered: 1, retrieved: 1, sourceFiles: ["src/feature.ts"], unavailable: 0, metadataOnly: 0, omitted: 0 } };
 }
-async function oneClickPanel({ response = oneClickFixture(), capability = { ok: true, codexAnalyze: true, protocolVersion: 1 } } = {}) {
+async function oneClickPanel({ response = oneClickFixture(), capability = { ok: true, codexAnalyze: true, protocolVersion: 1, actionableReportVersion: 1 } } = {}) {
   const h = harness(), dom = new JSDOM(markup), doc = dom.window.document, messages = [];
   vm.runInNewContext(codexEvidence + "\n" + panel, {
     document: doc, Option: dom.window.Option, Date, TextEncoder, setInterval() {},
@@ -2104,7 +2104,15 @@ async function oneClickPanel({ response = oneClickFixture(), capability = { ok: 
       lastError: null, sendNativeMessage(host, payload, respond) {
         assert.equal(host, "org.gentlecontrolroom.chatgpt");
         messages.push(JSON.parse(JSON.stringify(payload)));
-        respond(payload.type === "codex_capabilities" ? capability : { ok: true, output: "Checked src/feature.ts patch." });
+        respond(payload.type === "codex_capabilities" ? capability : { ok: true, output: JSON.stringify({
+          version: 1, summary: "Reduce rework", limitations: ["Runtime unverified"],
+          findings: [{ id: "F1", kind: "friction", title: "Verification gap", observation: "Patch changed src/feature.ts",
+            hypothesis: "Unknown", impact: "Outcome not established", evidence: [{ turn: 1 },
+              { commit: "testerinopapa/gentle-control-room@" + HASH, path: "src/feature.ts" }] }],
+          actions: [{ findingId: "F1", kind: "project-rule", priority: "high", title: "Verify edits",
+            destination: "AGENTS.md", content: "Run the relevant test before reporting success.",
+            validation: "Check that the report includes actual test results." }]
+        }) });
       } }, storage: { local: { async get() { return {}; }, async set() { throw Error("Isolated output must not write history"); } } },
       tabs: { query: async () => [{ id: 9, url: "https://chatgpt.com/c/test-conversation" }],
         onActivated: { addListener() {} }, onUpdated: { addListener() {} } } }
@@ -2127,8 +2135,35 @@ test("single click validates real linked patches and calls Codex without separat
     assert.equal(p.messages[1].type, "codex_analyze");
     assert.equal(p.messages[1].approved, true);
     assert.ok(p.messages[1].evidence.includes("src/feature.ts"));
-    assert.equal(p.doc.getElementById("codex-output").textContent, "Checked src/feature.ts patch.");
+    assert.match(p.doc.getElementById("codex-output").textContent, /Run the relevant test before reporting success/);
+    assert.match(p.doc.getElementById("codex-output").textContent, /READY-TO-COPY PROPOSALS/);
     assert.match(p.doc.getElementById("codex-status").textContent, /analysis complete/);
+  } finally { p.dom.window.close(); }
+});
+test("actionable report rejects fabricated evidence and malformed drafts", () => {
+  const start = panel.indexOf("function formatActionableReport(raw, payload) {");
+  const end = panel.indexOf("async function analyzeWithCodex() {", start);
+  const format = new Function(panel.slice(start, end) + "\nreturn formatActionableReport;")();
+  const payload = { conversationCorrelation: { requests: [{ turn: 1 }] }, commits: {} };
+  const good = { version: 1, summary: "Review", limitations: ["Limited evidence"],
+    findings: [{ id: "F1", kind: "friction", title: "Gap", observation: "Request repeated",
+      hypothesis: "Unknown", impact: "Rework", evidence: [{ turn: 1 }] }],
+    actions: [{ findingId: "F1", kind: "prompt", priority: "high", title: "Clarify",
+      destination: "Next prompt", content: "Specify the intended test.", validation: "Check the result." }] };
+  assert.match(format(JSON.stringify(good), payload).text, /Specify the intended test/);
+  assert.throws(() => format("not JSON", payload), /structured improvement report/);
+  good.findings[0].evidence = [{ turn: 999 }];
+  assert.throws(() => format(JSON.stringify(good), payload), /failed validation/);
+  good.findings[0].evidence = [{ turn: 1 }];
+  good.actions[0].findingId = "missing";
+  assert.throws(() => format(JSON.stringify(good), payload), /failed validation/);
+});
+test("old compatible host without actionable output support is not sent evidence", async () => {
+  const p = await oneClickPanel({ capability: { ok: true, codexAnalyze: true, protocolVersion: 1 } });
+  try {
+    await p.click();
+    assert.deepEqual(p.messages, [{ type: "codex_capabilities", version: 1 }]);
+    assert.match(p.doc.getElementById("codex-status").textContent, /enable actionable improvement reports/);
   } finally { p.dom.window.close(); }
 });
 test("single click does not submit when stage 2 has no explicit source link", async () => {
