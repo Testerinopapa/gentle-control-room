@@ -31,10 +31,7 @@ const deleteBrowserButton = document.getElementById("delete-browser-conversation
 const codexPrepare = document.getElementById("prepare-codex");
 const codexStatus = document.getElementById("codex-status");
 const codexOutput = document.getElementById("codex-output");
-const liveConnect = document.getElementById("connect-codeanalyzer");
-const liveDisconnect = document.getElementById("disconnect-codeanalyzer");
 const liveStatus = document.getElementById("codeanalyzer-live-status");
-const CODEANALYZER_PAIR_KEY = "gcrCodeAnalyzerTabV1";
 const CODEX_HOST = "org.gentlecontrolroom.chatgpt";
 const CODEX_INSIGHTS_KEY = "gcrCodexInsightsV1";
 let workflowEnabled = false;
@@ -457,6 +454,7 @@ async function clearEvidence() {
     const response = await chrome.runtime.sendMessage({ type: "clearEvidence" });
     if (!response?.ok) throw Error("Unable to delete local evidence.");
     await chrome.storage.local.remove(CODEX_INSIGHTS_KEY);
+    await chrome.runtime.sendMessage({type:"codeAnalyzerClearLatest"});
     renderBrowserConversation(null);
     codexPrepare.textContent = "Analyze coding activity with Codex";
     codexOutput.hidden = true;
@@ -756,60 +754,14 @@ function offerCodeAnalyzerReport(container, report) {
   section.append(title,hint,preview,consent,send,download,status);container.prepend(section);
 }
 
-// Pair only the explicitly selected tab, with its current page-generated token.
-async function readCodeAnalyzerPair() {
-  if (!chrome.storage.session) return null;
-  const stored = await chrome.storage.session.get(CODEANALYZER_PAIR_KEY);
-  return stored[CODEANALYZER_PAIR_KEY] || null;
-}
-async function connectCodeAnalyzer() {
-  try {
-    const tab = await activeTab();
-    if (!Number.isInteger(tab?.id) || !tab.url) throw Error("Open CodeAnalyzer and click the extension toolbar icon there.");
-    const origin = new URL(tab.url).origin;
-    if (!/^https?:\/\//.test(origin)) throw Error("Select the CodeAnalyzer web dashboard.");
-    const result = await chrome.scripting.executeScript({target:{tabId:tab.id},func:expected=>{
-      if(location.origin!==expected)return null;
-      return document.querySelector('[data-codeanalyzer-import="v1"]')?.getAttribute("data-codeanalyzer-live")||null;
-    },args:[origin]});
-    const token = result?.[0]?.result;
-    if (typeof token!=="string" || !/^[a-f0-9-]{36}$/i.test(token)) throw Error("On CodeAnalyzer, select Enable live updates first. Click the extension toolbar icon on that tab and retry.");
-    if (!confirm("Connect this tab at "+origin+"? Each coding analysis you initiate will automatically transfer its minimized AI-generated work summary to this tab. Raw chats, patches and draft code are excluded. Disconnect whenever you want.")) return;
-    await chrome.storage.session.set({[CODEANALYZER_PAIR_KEY]:{tabId:tab.id,origin,token}});
-    liveStatus.textContent="Connected to "+origin+". Analyze a coding conversation to update the dashboard automatically.";
-    liveDisconnect.disabled=false;
-  } catch(e) { liveStatus.textContent=e?.message||"Could not connect CodeAnalyzer."; }
-}
-async function disconnectCodeAnalyzer() {
-  try { await chrome.storage.session.remove(CODEANALYZER_PAIR_KEY);liveStatus.textContent="Disconnected. Reports will not transfer automatically.";liveDisconnect.disabled=true; }
-  catch(e){liveStatus.textContent=e?.message||"Could not disconnect.";}
-}
-// A successful injection is not a successful import. Wait for the app's
-// schema-validation acknowledgement, without persisting the report.
-async function sendCodeAnalyzerLive(pair, raw, requestId, scripting=chrome.scripting) {
-  const result=await scripting.executeScript({target:{tabId:pair.tabId},func:async (origin,token,raw,requestId)=>{
-    if(location.origin!==origin)return false;
-    const bridge=document.querySelector('[data-codeanalyzer-import="v1"]');
-    if(!bridge||bridge.getAttribute("data-codeanalyzer-live")!==token)return false;
-    return await new Promise(resolve=>{
-      let done=false;
-      const finish=ok=>{if(done)return;done=true;clearTimeout(timer);observer.disconnect();resolve(ok);};
-      const observer=new MutationObserver(()=>{if(bridge.getAttribute("data-codeanalyzer-ack")===requestId)finish(true);});
-      const timer=setTimeout(()=>finish(false),4000);
-      observer.observe(bridge,{attributes:true,attributeFilter:["data-codeanalyzer-ack"]});
-      window.postMessage({type:"CODEANALYZER_REPORT_V1",mode:"live",token,requestId,raw},origin);
-    });
-  },args:[pair.origin,pair.token,raw,requestId]});
-  if(result?.[0]?.result!==true)throw Error("CodeAnalyzer did not acknowledge the report. Reconnect the dashboard tab or import JSON manually.");
-}
+// Save only the minimized report from the explicitly initiated analysis.
+// The fixed-origin dashboard reads the current browser-session report.
 async function updateConnectedCodeAnalyzer(report) {
   try {
-    const pair=await readCodeAnalyzerPair();
-    if(!pair){liveStatus.textContent="Analysis finished locally. Connect CodeAnalyzer or use the report transfer controls below.";return;}
-    liveStatus.textContent="Updating connected CodeAnalyzer…";
-    await sendCodeAnalyzerLive(pair,buildCodeAnalyzerReport(report),crypto.randomUUID());
-    liveStatus.textContent="CodeAnalyzer confirmed receipt of the latest report.";
-  }catch(e){liveStatus.textContent="Report generated, but dashboard update failed: "+(e?.message||"Unknown error")+". Use the transfer or JSON download below.";}
+    const result=await chrome.runtime.sendMessage({type:"codeAnalyzerStoreLatest",raw:buildCodeAnalyzerReport(report)});
+    if(!result?.ok)throw Error(result?.error||"Local report storage unavailable");
+    liveStatus.textContent="Report ready. CodeAnalyzer displays it automatically when opened or refreshed.";
+  }catch(e){liveStatus.textContent="Analysis finished, but automatic report update failed: "+(e?.message||"Unknown error")+". JSON download remains available.";}
 }
 async function analyzeWithCodex() {
   if (busy) return;
@@ -868,9 +820,9 @@ async function analyzeWithCodex() {
   }
 }
 codexPrepare.addEventListener("click", () => void analyzeWithCodex());
-liveConnect.addEventListener("click", () => void connectCodeAnalyzer());
-liveDisconnect.addEventListener("click", () => void disconnectCodeAnalyzer());
-void readCodeAnalyzerPair().then(pair=>{if(pair){liveStatus.textContent="Connected to "+pair.origin+". Analyze to update the dashboard.";liveDisconnect.disabled=false;}}).catch(()=>{});
+document.getElementById("clear-codeanalyzer-report").addEventListener("click",async()=>{
+  try{const r=await chrome.runtime.sendMessage({type:"codeAnalyzerClearLatest"});if(!r?.ok)throw Error("Clear failed");liveStatus.textContent="Latest CodeAnalyzer report cleared.";}catch(e){liveStatus.textContent=e.message;}
+});
 
 startButton.addEventListener("click", () => void command("start"));
 stopButton.addEventListener("click", () => void command("stop"));

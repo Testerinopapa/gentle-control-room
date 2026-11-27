@@ -2609,13 +2609,20 @@ test("CodeAnalyzer export excludes raw evidence and draft code and validates tas
  report.tasks[0].evidence=[{turn:999}];assert.throws(()=>format(JSON.stringify(report),payload),/failed validation/);
 });
 
-test("live transfer reports success only after dashboard acknowledgement",async()=>{
- const start=panel.indexOf("async function sendCodeAnalyzerLive(");
- const end=panel.indexOf("async function updateConnectedCodeAnalyzer(",start);
- const send=new Function(panel.slice(start,end)+"\nreturn sendCodeAnalyzerLive;")();
- const pair={tabId:123,origin:"https://dashboard.example",token:"token"};
- let call;
- await send(pair,"minimized-report","request-id",{executeScript:async args=>{call=args;return [{result:true}];}});
- assert.equal(call.target.tabId,123);assert.deepEqual(call.args,[pair.origin,pair.token,"minimized-report","request-id"]);
- await assert.rejects(()=>send(pair,"report","request-id",{executeScript:async()=>[{result:false}]}),/did not acknowledge/);
+
+test("fixed-origin report storage rejects other origins and exposes latest session report",async()=>{
+ const start=background.indexOf("const CODEANALYZER_ORIGIN =");
+ const end=background.indexOf("chrome.runtime.onMessage.addListener",start);
+ const storage=new Map(),origin="https://id-preview--61bac7b4-3733-42bd-b6db-4b02173d15f2.lovable.app";
+ const chrome={runtime:{getURL:p=>"chrome-extension://test/"+p},storage:{session:{get:async k=>({[k]:storage.get(k)}),set:async obj=>{for(const [k,v] of Object.entries(obj))storage.set(k,v)},remove:async k=>storage.delete(k)}}};
+ const sync=new Function("chrome","crypto","TextEncoder",background.slice(start,end)+"\nreturn codeAnalyzerSync;")(chrome,{randomUUID},TextEncoder);
+ const raw=JSON.stringify({schema:"codeanalyzer.work-report.v1",source:"gentle-control-room",tasks:[],findings:[],recommendations:[]});
+ const panel={url:"chrome-extension://test/sidepanel.html"};
+ assert.equal((await sync({type:"codeAnalyzerStoreLatest",raw},panel)).ok,true);
+ assert.equal((await sync({type:"codeAnalyzerReadLatest"},{tab:{},frameId:0,url:"https://unrelated.example"})).ok,false);
+ assert.equal((await sync({type:"codeAnalyzerReadLatest"},{tab:{},frameId:1,url:origin})).ok,false);
+ const read=await sync({type:"codeAnalyzerReadLatest"},{tab:{},frameId:0,url:origin+"/dashboard"});
+ assert.equal(read.report.raw,raw);
+ await sync({type:"codeAnalyzerClearLatest"},panel);
+ assert.equal((await sync({type:"codeAnalyzerReadLatest"},{tab:{},frameId:0,url:origin})).report,null);
 });

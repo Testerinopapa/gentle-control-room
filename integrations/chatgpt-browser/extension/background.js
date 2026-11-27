@@ -988,7 +988,37 @@ async function fromPage(message, sender) {
   }
   return { ok: false };
 }
+// The only web origin authorized to read the latest work summary is the
+// verified CodeAnalyzer Lovable project. No general website access.
+const CODEANALYZER_ORIGIN = "https://id-preview--61bac7b4-3733-42bd-b6db-4b02173d15f2.lovable.app";
+const CODEANALYZER_LATEST = "gcrCodeAnalyzerLatestV1";
+function codeAnalyzerSender(sender) {
+  try { return Boolean(sender.tab) && sender.frameId === 0 &&
+    new URL(sender.url).origin === CODEANALYZER_ORIGIN; } catch { return false; }
+}
+async function codeAnalyzerSync(message,sender) {
+  if (message.type==="codeAnalyzerReadLatest") {
+    if (!codeAnalyzerSender(sender)) return {ok:false};
+    const data=await chrome.storage.session.get(CODEANALYZER_LATEST);
+    return {ok:true,report:data[CODEANALYZER_LATEST]||null};
+  }
+  if (sender.tab || sender.url!==chrome.runtime.getURL("sidepanel.html")) return {ok:false};
+  if (message.type==="codeAnalyzerClearLatest") {
+    await chrome.storage.session.remove(CODEANALYZER_LATEST);
+    return {ok:true};
+  }
+  if (typeof message.raw!=="string"||new TextEncoder().encode(message.raw).length>250000) return {ok:false,error:"Invalid report size"};
+  let report;try{report=JSON.parse(message.raw);}catch{return {ok:false,error:"Invalid report JSON"};}
+  if(report.schema!=="codeanalyzer.work-report.v1"||report.source!=="gentle-control-room"||!Array.isArray(report.tasks)||!Array.isArray(report.findings)||!Array.isArray(report.recommendations))return {ok:false,error:"Invalid report format"};
+  await chrome.storage.session.set({[CODEANALYZER_LATEST]:{id:crypto.randomUUID(),raw:message.raw}});
+  return {ok:true};
+}
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (["codeAnalyzerReadLatest","codeAnalyzerStoreLatest","codeAnalyzerClearLatest"].includes(message?.type)) {
+    codeAnalyzerSync(message,sender).then(respond).catch(()=>respond({ok:false,error:"Local report sync failed"}));
+    return true;
+  }
   const operation = operationQueue.then(async () => {
     if (!message || typeof message.type !== "string") throw Error("Invalid request");
     if (["visibleCounts", "conversationChanged", "observerStatus",

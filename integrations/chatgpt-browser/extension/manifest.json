@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gentle Control Room — ChatGPT Activity",
-  "version": "0.9.27",
+  "version": "0.9.28",
   "description": "Opt-in browser conversation capture, local coding patterns, and approved Codex analysis.",
   "permissions": [
     "activeTab",
@@ -22,6 +22,18 @@
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
-    "https://api.github.com/*"
+    "https://api.github.com/*",
+    "https://id-preview--61bac7b4-3733-42bd-b6db-4b02173d15f2.lovable.app/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://id-preview--61bac7b4-3733-42bd-b6db-4b02173d15f2.lovable.app/*"
+      ],
+      "js": [
+        "codeanalyzer-sync.js"
+      ],
+      "run_at": "document_idle"
+    }
   ]
 }
