@@ -2140,7 +2140,9 @@ test("single click validates real linked patches and calls Codex without separat
     assert.equal(p.doc.querySelectorAll("#codex-output .asset-card").length, 1);
     assert.equal(p.doc.querySelector("#codex-output .asset-card details").open, false);
     assert.match(p.doc.getElementById("codex-status").textContent, /analysis complete/);
-    assert.equal([...p.doc.querySelectorAll("button")].find(b=>b.textContent==="Send to open CodeAnalyzer tab").disabled,true);
+    assert.equal([...p.doc.querySelectorAll("button")].some(b=>b.textContent==="Send to open CodeAnalyzer tab"),false);
+    assert.equal([...p.doc.querySelectorAll("button")].find(b=>b.textContent==="Download CodeAnalyzer report (.json)").disabled,false);
+    assert.equal(p.doc.querySelector("#codex-output input[type=checkbox]"),null);
   } finally { p.dom.window.close(); }
 });
 test("actionable report rejects fabricated evidence and malformed drafts", () => {

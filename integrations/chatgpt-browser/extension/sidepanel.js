@@ -718,40 +718,20 @@ function offerCodeAnalyzerReport(container, report) {
   const doc=container.ownerDocument;
   const section=doc.createElement("section");
   const title=doc.createElement("h3");title.textContent="CodeAnalyzer work report";
-  const hint=doc.createElement("p");hint.className="hint";hint.textContent="Review this work-only summary before transferring it. Raw chats, diffs and draft code are excluded. Remove sensitive details by rerunning a narrower analysis; this report has no verified employee identity.";
+  const hint=doc.createElement("p");hint.className="hint";hint.textContent="The minimized work summary updates CodeAnalyzer automatically. Raw chats, diffs and draft code are excluded. Review the summary below or download it for your own use. Employee identity is not independently verified.";
   const preview=doc.createElement("details"),label=doc.createElement("summary"),body=doc.createElement("pre");
   label.textContent="Review exact report";body.className="asset-code";
   let raw;try{raw=buildCodeAnalyzerReport(report);}catch(e){hint.textContent=e.message;section.append(title,hint);container.prepend(section);return;}
   body.textContent=raw;preview.append(label,body);
-  const checkbox=doc.createElement("input");checkbox.type="checkbox";
-  const consent=doc.createElement("label");consent.append(checkbox,doc.createTextNode(" I reviewed this summary and choose to transfer it."));
-  const send=doc.createElement("button"),download=doc.createElement("button"),status=doc.createElement("p");
-  send.type=download.type="button";send.textContent="Send to open CodeAnalyzer tab";download.textContent="Download CodeAnalyzer report (.json)";send.disabled=download.disabled=true;
+  const download=doc.createElement("button"),status=doc.createElement("p");
+  download.type="button";download.textContent="Download CodeAnalyzer report (.json)";
   status.setAttribute("role","status");status.className="hint";
-  checkbox.addEventListener("change",()=>{send.disabled=download.disabled=!checkbox.checked;});
-  send.addEventListener("click",async()=>{
-    if(!checkbox.checked)return;
-    try{
-      const tab=await activeTab();
-      if(!Number.isInteger(tab?.id)||!tab.url)throw Error("Open CodeAnalyzer in this Edge window and click the extension toolbar icon there.");
-      const origin=new URL(tab.url).origin;
-      if(!/^https?:\/\//.test(origin))throw Error("Select a CodeAnalyzer web tab.");
-      if(!confirm("Offer the reviewed report to "+origin+"? Check that this is your CodeAnalyzer site."))return;
-      const result=await chrome.scripting.executeScript({target:{tabId:tab.id},func:(raw,expected)=>{
-        if(location.origin!==expected||!document.querySelector('[data-codeanalyzer-import="v1"]'))return false;
-        window.postMessage({type:"CODEANALYZER_REPORT_V1",raw},expected);return true;
-      },args:[raw,origin]});
-      if(!result?.[0]?.result)throw Error("The selected page is not a compatible CodeAnalyzer dashboard.");
-      status.textContent="Report offered to "+origin+". Accept the import in CodeAnalyzer to display it.";
-    }catch(e){status.textContent=(e?.message||"Transfer unavailable.")+" Download the JSON and import it in CodeAnalyzer instead.";}
-  });
   download.addEventListener("click",()=>{
-    if(!checkbox.checked)return;
     const url=URL.createObjectURL(new Blob([raw],{type:"application/json;charset=utf-8"}));
     const a=doc.createElement("a");a.href=url;a.download="codeanalyzer-work-report.json";doc.body.append(a);
     try{a.click();status.textContent="Download requested.";}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   });
-  section.append(title,hint,preview,consent,send,download,status);container.prepend(section);
+  section.append(title,hint,preview,download,status);container.prepend(section);
 }
 
 // Save only the minimized report from the explicitly initiated analysis.
