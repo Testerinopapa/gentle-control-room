@@ -52,6 +52,28 @@
     .advanced-content { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 12px; }
     .advanced-content section { padding: 14px; }
     button[hidden] { display: none; }
+    .asset-heading { margin: 18px 0 6px; font-size: 19px; line-height: 1.3; }
+    .asset-summary { margin: 0; overflow-wrap: anywhere; }
+    .asset-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+    .asset-count { padding: 8px; background: #f1f5f9; border-radius: 8px; overflow-wrap: anywhere; }
+    .asset-group { margin-top: 20px; }
+    .asset-group-title { margin: 0 0 9px; font-size: 17px; }
+    .asset-card { border: 1px solid #dce4ee; border-radius: 10px; padding: 12px; margin: 0 0 10px; min-width: 0; }
+    .asset-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: #475569; align-items: center; }
+    .asset-priority { text-transform: capitalize; font-weight: 650; }
+    .asset-priority[data-priority="high"] { color: #9f1239; }
+    .asset-title { font-size: 17px; margin: 6px 0 2px; line-height: 1.3; overflow-wrap: anywhere; }
+    .asset-destination { color: #475569; overflow-wrap: anywhere; margin: 4px 0 10px; }
+    .asset-controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+    .asset-controls button { padding: 8px 4px; }
+    .asset-feedback { margin: 3px 0 0; color: #475569; overflow-wrap: anywhere; }
+    .asset-feedback:empty { display: none; }
+    .asset-details { margin-top: 10px; color: #334155; overflow-wrap: anywhere; }
+    .asset-details summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+    .asset-details p { margin: 8px 0; }
+    .asset-details ul { padding-left: 20px; }
+    .asset-code { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 420px; padding: 10px; border-radius: 8px; background: #f1f5f9; font: 16px/1.5 monospace; user-select: text; }
+    @media (max-width: 300px) { .asset-overview { grid-template-columns: 1fr; } }
     footer { padding: 18px 20px 24px; color: #475569; border-top: 1px solid #e2e8f0; }
     footer p { margin: 0 0 8px; }
   </style>
@@ -97,7 +119,7 @@
       <p class="hint">Clicking below scans this ChatGPT conversation, checks real GitHub diffs, and sends bounded request excerpts and patches to your signed-in Codex if the checks pass. Get evidence-backed findings and copyable improvement drafts. Nothing is applied automatically.</p>
       <button id="prepare-codex" type="button" class="primary">Analyze coding activity with Codex</button>
       <p id="codex-status" class="hint" role="status" aria-live="polite">Requires the optional local Codex bridge.</p>
-      <pre id="codex-output" hidden style="white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 system-ui,'Segoe UI',sans-serif;"></pre>
+      <div id="codex-output" hidden aria-label="Development improvement drafts"></div>
     </section>
 
     <details class="advanced" id="advanced-options">
@@ -149,7 +171,7 @@
     </details>
 
     <p class="notice">
-      Conversation text is saved locally in Edge. The Codex review can include limited excerpts from the saved conversation to suggest request-to-commit links. Nothing is sent until you review the exact evidence and approve it.
+      Conversation text is saved locally in Edge. The analysis button authorizes sending bounded conversation excerpts and GitHub patches to your signed-in Codex after validation. Drafts remain local unless you copy or download them.
     </p>
   </main>
 

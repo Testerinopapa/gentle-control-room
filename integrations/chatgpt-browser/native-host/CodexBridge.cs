@@ -98,7 +98,17 @@ internal static class CodexBridge
     skill (SKILL.md) for multi-step work; regression test or CI check for
     mechanically detectable failures; script for a reproducible repetitive task;
     documentation for a missing canonical fact or runbook. Prefer one small
-    intervention per problem. Include the exact proposed text or code, not just
+    intervention per problem. Prefer complete reusable scripts or skills when
+    repeated work or a reproducible workflow is actually supported by evidence;
+    prefer regression tests or CI checks when the failure is mechanically
+    detectable. Use prompts only when clearer wording is the actual remedy.
+    Do not fill categories just to reach a quota. Keep observations and the
+    executive summary short; spend the output budget on complete portable drafts.
+    For a script, supply a standalone file with usage and prerequisites; for a
+    skill, include SKILL.md frontmatter (name and description), steps and checks;
+    for a test, specify whether it is a standalone file or an insertion into
+    an existing suite. Never claim a proposed draft has already been validated.
+    Include the exact proposed text or code, not just
     a suggestion to write it. Scripts and tests are unexecuted proposals; include
     what to run or check and the expected outcome. If evidence does not support
     an artifact, omit it. Do not produce generic advice or broad global rules.

@@ -1,3 +1,15 @@
+## Portable improvement assets (v0.9.25)
+
+The existing single analysis button produces categorized cards for automations,
+reusable skills, preventative measures and better prompts. Each draft has its
+own Copy and Download controls; evidence, draft preview and validation are
+expandable. Downloads are inert UTF-8 text with sanitized, draft-suffixed
+filenames and never overwrite or apply project files automatically. Review
+generated code before running it. The revised native-host prompt prioritizes
+complete reusable assets when supported by evidence; it does not manufacture
+scripts or skills to fill empty categories. Reinstall the native host to use
+the revised prompt. Existing version-1 reports remain compatible with the UI.
+
 ## Actionable development retrospective (v0.9.24)
 
 One-click **Analyze coding activity with Codex** now requests evidence-grounded

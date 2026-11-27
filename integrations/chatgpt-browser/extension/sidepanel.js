@@ -561,7 +561,120 @@ function formatActionableReport(raw, payload) {
   }
   blocks.push("EVIDENCE LIMITS", ...(report.limitations.length ? report.limitations : ["No additional limits reported."]),
     "Captured changes do not verify execution, authorship or outcomes. Conversation coverage may be incomplete.");
-  return { text: blocks.join("\n\n"), count: report.actions.length };
+  return { text: blocks.join("\n\n"), count: report.actions.length, report };
+}
+
+// Every draft is rendered and exported as inert text. No agent-generated
+// path is resolved on disk; downloads use a sanitized standalone draft name.
+function assetDownloadName(action) {
+  const slug = String(action.title).toLowerCase().replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 64) || "improvement";
+  if (action.kind === "prompt") return slug + "-draft.txt";
+  const basename = String(action.destination).trim().split(/[\\/]/).at(-1) || "";
+  const match = /^([a-z0-9][a-z0-9_.-]{0,95})\.(md|txt|js|mjs|cjs|jsx|ts|tsx|py|ps1|sh|bash|yml|yaml|json|toml|sql|cs|go|rs|java|rb|php|css|html|xml|ini|cfg|bat|cmd)$/i.exec(basename);
+  if (!match) return slug + "-draft." + (["project-rule", "skill", "documentation"].includes(action.kind) ? "md" : "txt");
+  const stem = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(match[1]) ? "improvement" : match[1];
+  // HTML and batch files may execute when opened: retain them as text drafts.
+  const extension = /^(html|bat|cmd)$/i.test(match[2]) ? match[2] + ".txt" : match[2];
+  return stem + "-draft." + extension;
+}
+
+function renderImprovementAssets(container, formatted, io = {}) {
+  const report = formatted.report;
+  const doc = container.ownerDocument;
+  const make = (tag, text, className) => {
+    const node = doc.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  };
+  const categories = [
+    { title: "Automations", kinds: ["script"] },
+    { title: "Reusable skills", kinds: ["skill"] },
+    { title: "Preventative measures", kinds: ["test", "ci-check", "project-rule", "documentation"] },
+    { title: "Better prompts", kinds: ["prompt"] }
+  ];
+  const rank = { high: 0, medium: 1, low: 2 };
+  const byId = new Map(report.findings.map(f => [f.id, f]));
+  const copy = io.copy || (text => navigator.clipboard.writeText(text));
+  const download = io.download || ((filename, content) => {
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+    const link = make("a");
+    link.href = url;
+    link.download = filename;
+    doc.body.append(link);
+    try { link.click(); }
+    finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  });
+  container.replaceChildren();
+  container.append(make("h3", "Development improvements", "asset-heading"),
+    make("p", report.summary, "asset-summary"),
+    make("p", formatted.count + " reusable drafts · Review before applying. None have been executed or installed.", "hint"));
+  const overview = make("div", undefined, "asset-overview");
+  for (const group of categories) {
+    const count = report.actions.filter(a => group.kinds.includes(a.kind)).length;
+    overview.append(make("span", group.title + " · " + count, "asset-count"));
+  }
+  container.append(overview);
+  for (const group of categories) {
+    const actions = report.actions.filter(a => group.kinds.includes(a.kind)).sort((a,b) => rank[a.priority] - rank[b.priority]);
+    if (!actions.length) continue;
+    const groupNode = make("div", undefined, "asset-group");
+    groupNode.append(make("h4", group.title + " (" + actions.length + ")", "asset-group-title"));
+    for (const action of actions) {
+      const finding = byId.get(action.findingId);
+      const card = make("article", undefined, "asset-card");
+      const meta = make("div", undefined, "asset-meta");
+      const priority = make("span", action.priority + " priority", "asset-priority");
+      priority.dataset.priority = action.priority;
+      meta.append(priority, make("span", action.kind));
+      card.append(meta, make("h5", action.title, "asset-title"),
+        make("p", action.destination, "asset-destination"));
+      const controls = make("div", undefined, "asset-controls");
+      const copyButton = make("button", "Copy"), downloadButton = make("button", "Download");
+      copyButton.type = downloadButton.type = "button";
+      copyButton.setAttribute("aria-label", "Copy " + action.title);
+      downloadButton.setAttribute("aria-label", "Download " + action.title);
+      const status = make("p", "", "asset-feedback");
+      status.setAttribute("role", "status");
+      copyButton.addEventListener("click", async () => {
+        try { await copy(action.content); status.textContent = "Copied draft."; }
+        catch { status.textContent = "Copy failed. Open the draft and select its text."; }
+      });
+      downloadButton.addEventListener("click", async () => {
+        try { await download(assetDownloadName(action), action.content); status.textContent = "Download requested."; }
+        catch { status.textContent = "Download failed. Copy the draft instead."; }
+      });
+      controls.append(copyButton, downloadButton);
+      card.append(controls, status);
+      const draft = make("details", undefined, "asset-details");
+      draft.append(make("summary", "View draft"), make("pre", action.content, "asset-code"),
+        make("p", "Validate: " + action.validation, "hint"));
+      card.append(draft);
+      const evidence = make("details", undefined, "asset-details");
+      evidence.append(make("summary", "Why this helps · Evidence"), make("p", finding.title),
+        make("p", "Observed: " + finding.observation), make("p", "Possible cause: " + finding.hypothesis),
+        make("p", "Impact: " + finding.impact));
+      const refs = make("ul");
+      for (const ref of finding.evidence)
+        refs.append(make("li", Object.hasOwn(ref, "turn") ? "Conversation turn " + ref.turn : ref.commit + " / " + ref.path));
+      evidence.append(refs); card.append(evidence); groupNode.append(card);
+    }
+    container.append(groupNode);
+  }
+  if (!report.actions.length) container.append(make("p", "No justified reusable drafts from the captured evidence.", "hint"));
+  const limits = make("details", undefined, "asset-details");
+  limits.append(make("summary", "Evidence coverage and limitations"));
+  for (const line of report.limitations) limits.append(make("p", line));
+  limits.append(make("p", "Captured patches do not verify authorship, execution or outcomes. The conversation scan may be incomplete."));
+  const other = report.findings.filter(f => !report.actions.some(a => a.findingId === f.id));
+  for (const f of other) {
+    limits.append(make("p", f.title + ": " + f.observation + " Possible cause: " + f.hypothesis + " Impact: " + f.impact));
+    const refs = make("ul");
+    for (const ref of f.evidence) refs.append(make("li", Object.hasOwn(ref, "turn") ? "Conversation turn " + ref.turn : ref.commit + " / " + ref.path));
+    limits.append(refs);
+  }
+  container.append(limits);
 }
 
 async function analyzeWithCodex() {
@@ -607,7 +720,7 @@ async function analyzeWithCodex() {
     const problem = codexResponseProblem(result);
     if (problem) throw Error(problem);
     const report = formatActionableReport(result.output, payload);
-    codexOutput.textContent = report.text;
+    renderImprovementAssets(codexOutput, report);
     codexOutput.hidden = false;
     codexStatus.textContent = "Codex analysis complete: " + counts + " · " + report.count + " reusable drafts. No changes applied; normal history unchanged.";
   } catch (error) {

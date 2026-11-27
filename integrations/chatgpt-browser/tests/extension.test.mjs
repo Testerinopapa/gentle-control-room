@@ -2136,7 +2136,9 @@ test("single click validates real linked patches and calls Codex without separat
     assert.equal(p.messages[1].approved, true);
     assert.ok(p.messages[1].evidence.includes("src/feature.ts"));
     assert.match(p.doc.getElementById("codex-output").textContent, /Run the relevant test before reporting success/);
-    assert.match(p.doc.getElementById("codex-output").textContent, /READY-TO-COPY PROPOSALS/);
+    assert.match(p.doc.getElementById("codex-output").textContent, /Preventative measures/);
+    assert.equal(p.doc.querySelectorAll("#codex-output .asset-card").length, 1);
+    assert.equal(p.doc.querySelector("#codex-output .asset-card details").open, false);
     assert.match(p.doc.getElementById("codex-status").textContent, /analysis complete/);
   } finally { p.dom.window.close(); }
 });
@@ -2157,6 +2159,59 @@ test("actionable report rejects fabricated evidence and malformed drafts", () =>
   good.findings[0].evidence = [{ turn: 1 }];
   good.actions[0].findingId = "missing";
   assert.throws(() => format(JSON.stringify(good), payload), /failed validation/);
+});
+test("improvement cards group assets and copy/download exact content only on click", async () => {
+  const start = panel.indexOf("function assetDownloadName(action) {");
+  const end = panel.indexOf("async function analyzeWithCodex() {", start);
+  const { render, filename } = new Function(panel.slice(start, end) +
+    "\nreturn { render: renderImprovementAssets, filename: assetDownloadName };")();
+  const dom = new JSDOM("<div id='out'></div>");
+  try {
+    const out = dom.window.document.getElementById("out");
+    const content = "<script>doNotExecute()</script>\nprint('draft')";
+    const actions = [
+      ["script", "tools/check.py"], ["skill", "skills/check/SKILL.md"],
+      ["test", "tests/check.test.mjs"], ["prompt", "Next prompt"]
+    ].map(([kind, destination]) => ({ findingId: "F1", kind, priority: "high",
+      title: kind, destination, content, validation: "Check manually" }));
+    const report = { summary: "Improve workflow", limitations: ["Limited evidence"], actions,
+      findings: [{ id: "F1", kind: "friction", title: "Gap", observation: "Repeated work",
+        hypothesis: "Unknown", impact: "Rework", evidence: [{ turn: 1 }] }] };
+    const copies = [], downloads = [];
+    render(out, { report, count: actions.length }, { copy: value => copies.push(value),
+      download: (name, value) => downloads.push({ name, value }) });
+    assert.deepEqual([...out.querySelectorAll("h4")].map(el => el.textContent),
+      ["Automations (1)", "Reusable skills (1)", "Preventative measures (1)", "Better prompts (1)"]);
+    assert.equal(out.querySelectorAll(".asset-card").length, 4);
+    assert.equal(out.querySelectorAll("script").length, 0);
+    assert.equal(out.querySelectorAll("details[open]").length, 0);
+    assert.equal(copies.length + downloads.length, 0);
+    out.querySelector('button[aria-label="Copy script"]').click();
+    out.querySelector('button[aria-label="Download script"]').click();
+    await tick();
+    assert.deepEqual(copies, [content]);
+    assert.deepEqual(downloads, [{ name: "check-draft.py", value: content }]);
+    assert.equal(filename({ kind: "skill", title: "Skill", destination: "skills/demo/SKILL.md" }), "SKILL-draft.md");
+    assert.equal(filename({ kind: "script", title: "Run", destination: "../CON.ps1" }), "improvement-draft.ps1");
+    assert.equal(filename({ kind: "script", title: "Run", destination: "page.html" }), "page-draft.html.txt");
+    assert.equal(filename({ kind: "script", title: "Run", destination: "bad.exe" }), "run-draft.txt");
+  } finally { dom.window.close(); }
+});
+test("actionable report rejects commit references and files in the wrong commit", () => {
+  const start = panel.indexOf("function formatActionableReport(raw, payload) {");
+  const end = panel.indexOf("function assetDownloadName(action) {", start);
+  const format = new Function(panel.slice(start, end) + "\nreturn formatActionableReport;")();
+  const payload = { commits: { "fixture/repo@a": { files: [{ path: "src/a.js" }] },
+    "fixture/repo@b": { files: [{ path: "src/b.js" }] } } };
+  const report = { version: 1, summary: "Fixture", limitations: [], actions: [],
+    findings: [{ id: "F1", kind: "win", title: "Fixture", observation: "Fixture", hypothesis: "Unknown",
+      impact: "Fixture", evidence: [{ commit: "fixture/repo@a", path: "src/a.js" }] }] };
+  const check = () => format(JSON.stringify(report), payload);
+  assert.doesNotThrow(check);
+  report.findings[0].evidence[0].commit = "fixture/repo@missing";
+  assert.throws(check, /failed validation/);
+  report.findings[0].evidence[0] = { commit: "fixture/repo@a", path: "src/b.js" };
+  assert.throws(check, /failed validation/);
 });
 test("old compatible host without actionable output support is not sent evidence", async () => {
   const p = await oneClickPanel({ capability: { ok: true, codexAnalyze: true, protocolVersion: 1 } });
