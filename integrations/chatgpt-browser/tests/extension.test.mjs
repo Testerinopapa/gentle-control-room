@@ -2608,3 +2608,14 @@ test("CodeAnalyzer export excludes raw evidence and draft code and validates tas
  assert.equal(JSON.parse(raw).tasks[0].status,"reported-delivered");assert.ok(!raw.includes("SECRET_DRAFT_CODE"));
  report.tasks[0].evidence=[{turn:999}];assert.throws(()=>format(JSON.stringify(report),payload),/failed validation/);
 });
+
+test("live transfer reports success only after dashboard acknowledgement",async()=>{
+ const start=panel.indexOf("async function sendCodeAnalyzerLive(");
+ const end=panel.indexOf("async function updateConnectedCodeAnalyzer(",start);
+ const send=new Function(panel.slice(start,end)+"\nreturn sendCodeAnalyzerLive;")();
+ const pair={tabId:123,origin:"https://dashboard.example",token:"token"};
+ let call;
+ await send(pair,"minimized-report","request-id",{executeScript:async args=>{call=args;return [{result:true}];}});
+ assert.equal(call.target.tabId,123);assert.deepEqual(call.args,[pair.origin,pair.token,"minimized-report","request-id"]);
+ await assert.rejects(()=>send(pair,"report","request-id",{executeScript:async()=>[{result:false}]}),/did not acknowledge/);
+});

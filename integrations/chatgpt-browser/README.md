@@ -1,3 +1,7 @@
+## Live CodeAnalyzer connection (0.9.27)
+
+On the current CodeAnalyzer dashboard click Enable live updates, open the extension toolbar icon on that tab, and click Connect CodeAnalyzer. Confirm the destination and automatic work-summary transfer. Return to ChatGPT and analyze; the extension sends the minimized report to the paired tab and waits for its acknowledgement. No new host permissions or report persistence. Refreshing the dashboard resets its token, so reconnect after reload/navigation; disconnect any time. A failed update leaves the manual transfer and JSON download available. Only the tab ID, origin and page-generated token are stored in extension session storage.
+
 ## CodeAnalyzer handoff (0.9.26)
 
 The native prompt now reconstructs bounded work items in addition to improvement drafts. After analysis, review the exact minimized JSON report, confirm sharing, then open the CodeAnalyzer dashboard in the same Edge window, click the extension toolbar icon to grant activeTab access, and select Send to open CodeAnalyzer tab. Accept the offered import on the dashboard. The transfer checks the destination origin and compatible page marker. No new host permissions or background upload are used. If Edge prevents scripting, download the JSON and import it manually. The dashboard's public import is in memory only; no identity or independent delivery verification is claimed. Reinstall the native host for the new task prompt.

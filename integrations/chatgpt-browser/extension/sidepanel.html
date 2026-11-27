@@ -119,6 +119,11 @@
       <p class="hint">Clicking below scans this ChatGPT conversation, checks real GitHub diffs, and sends bounded request excerpts and patches to your signed-in Codex if the checks pass. Get evidence-backed findings and copyable improvement drafts. Nothing is applied automatically.</p>
       <button id="prepare-codex" type="button" class="primary">Analyze coding activity with Codex</button>
       <p id="codex-status" class="hint" role="status" aria-live="polite">Requires the optional local Codex bridge.</p>
+      <div class="buttons">
+        <button id="connect-codeanalyzer" type="button">Connect CodeAnalyzer</button>
+        <button id="disconnect-codeanalyzer" type="button" disabled>Disconnect CodeAnalyzer</button>
+      </div>
+      <p id="codeanalyzer-live-status" class="hint" role="status">To update the dashboard automatically, open CodeAnalyzer, enable live updates, click the extension toolbar icon there, then connect this tab.</p>
       <div id="codex-output" hidden aria-label="Development improvement drafts"></div>
     </section>
 
